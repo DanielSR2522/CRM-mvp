@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the template, which documents the variable NAMES only and must never
+# hold a value. Everything else matching .env* stays ignored, .env.local above all.
+!.env.example
 
 # vercel
 .vercel
