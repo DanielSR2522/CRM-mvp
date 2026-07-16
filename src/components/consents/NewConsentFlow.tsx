@@ -3,19 +3,23 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type {
+  ClientConsentRow,
   ConsentTemplate,
   ConsentTemplateVersion,
+  DashboardConsentRow,
   MergeValues,
   PolicyMergeData,
   TemplateContent,
   UnresolvedVariable,
 } from '@/lib/consents/types';
 import { LANGUAGE_LABELS } from '@/lib/consents/types';
-import { getCurrentVersion } from '@/lib/consents/template-service';
+import { getCurrentVersion, getTemplate, getVersionById } from '@/lib/consents/template-service';
 import {
   createConsentDraft,
+  getPrimarySigner,
   listActiveTemplates,
   listClientPolicies,
+  updateConsentDraft,
 } from '@/lib/consents/request-service';
 import {
   buildMergeData,
@@ -67,22 +71,64 @@ interface MergedDocument {
   hash: string;
 }
 
+/** One field whose value in the client record has moved away from the snapshot. */
+interface VariableDrift {
+  token: string;
+  /** What the frozen document says. */
+  before: string;
+  /** What the client record says now. */
+  after: string;
+}
+
+/**
+ * Compares the frozen snapshot against a fresh merge.
+ *
+ * This is what makes "the data changed" visible instead of silent. Without it,
+ * an agent editing a draft would either lose the update or lose the original,
+ * and never know which.
+ */
+function findDrift(before: MergeValues, after: MergeValues): VariableDrift[] {
+  const tokens = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const drifted: VariableDrift[] = [];
+
+  for (const token of Array.from(tokens).sort()) {
+    const oldValue = before[token];
+    const newValue = after[token];
+    if (oldValue === newValue) continue;
+    drifted.push({
+      token,
+      before: oldValue ?? '(empty)',
+      after: newValue ?? '(empty)',
+    });
+  }
+  return drifted;
+}
+
 interface NewConsentFlowProps {
   clientId: string;
   clientName: string;
   onCancel: () => void;
   onCreated: (message: string) => void;
+  /** Set to edit an existing draft instead of creating a new consent. */
+  editDraft?: DashboardConsentRow | ClientConsentRow;
 }
 
 type Step = 1 | 2;
+
+/** How an edited draft's document should be treated. The agent decides; never us. */
+type DocumentChoice = 'keep' | 'regenerate';
 
 export default function NewConsentFlow({
   clientId,
   clientName,
   onCancel,
   onCreated,
+  editDraft,
 }: NewConsentFlowProps) {
-  const [step, setStep] = useState<Step>(1);
+  const isEditing = Boolean(editDraft);
+  // When editing, step 1 is skipped: the template and version are frozen into the
+  // draft already and changing them would make it a different document.
+  const [step, setStep] = useState<Step>(isEditing ? 2 : 1);
 
   // Step 1 inputs
   const [templates, setTemplates] = useState<ConsentTemplate[]>([]);
@@ -111,9 +157,18 @@ export default function NewConsentFlow({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
 
+  // ---- Editing an existing draft ---------------------------------------
+  const [editLoading, setEditLoading] = useState(isEditing);
+  const [editTemplate, setEditTemplate] = useState<ConsentTemplate | null>(null);
+  const [documentChoice, setDocumentChoice] = useState<DocumentChoice>('keep');
+  /** Fields whose stored value no longer matches the client record. */
+  const [drift, setDrift] = useState<VariableDrift[]>([]);
+  /** The document as it would look if regenerated now. */
+  const [freshMerge, setFreshMerge] = useState<MergedDocument | null>(null);
+
   const template = useMemo(
-    () => templates.find((t) => t.id === templateId) ?? null,
-    [templates, templateId]
+    () => (isEditing ? editTemplate : templates.find((t) => t.id === templateId) ?? null),
+    [isEditing, editTemplate, templates, templateId]
   );
 
   // ---- Load pickers ------------------------------------------------------
@@ -143,6 +198,115 @@ export default function NewConsentFlow({
       cancelled = true;
     };
   }, [clientId]);
+
+  // ---- Load an existing draft -------------------------------------------
+  /**
+   * Rebuilds the editing state from a stored draft, and re-merges against live
+   * data so the agent can see what has changed since it was created.
+   *
+   * The stored document is loaded as-is and shown by default. The fresh merge is
+   * computed but only applied if the agent asks for it — a draft's document is
+   * already hashed, and replacing it behind their back would silently change what
+   * they thought they were about to send.
+   */
+  useEffect(() => {
+    if (!editDraft) return;
+    let cancelled = false;
+
+    (async () => {
+      setEditLoading(true);
+      setMergeError(null);
+
+      try {
+        const [tpl, storedVersion, signer] = await Promise.all([
+          getTemplate(editDraft.template_id),
+          getVersionById(editDraft.template_version_id),
+          getPrimarySigner(editDraft.id),
+        ]);
+
+        if (!storedVersion) {
+          throw new Error('The template version this draft was built from is missing.');
+        }
+        if (cancelled) return;
+
+        setEditTemplate(tpl);
+        setVersion(storedVersion);
+        setPolicyId(editDraft.policy_id ?? '');
+        setTitle(editDraft.title);
+        setSignerName(signer?.full_name ?? '');
+        setSignerEmail(signer?.email ?? '');
+        setSignerPhone(signer?.phone ?? '');
+
+        if (editDraft.expires_at) {
+          const remaining = Math.ceil(
+            (new Date(editDraft.expires_at).getTime() - Date.now()) / 86_400_000
+          );
+          setExpiryDays(isValidExpiryDays(remaining) ? remaining : DEFAULT_EXPIRY_DAYS);
+        }
+
+        // The document exactly as frozen.
+        const snapshot = editDraft.merge_data_snapshot;
+        setMerged({
+          content: editDraft.rendered_content,
+          consentText: snapshot?.rendered_consent_text ?? storedVersion.consent_text,
+          values: snapshot?.values ?? {},
+          unresolved: [],
+          hash: editDraft.original_document_hash ?? '',
+        });
+
+        // And what it would be if rebuilt right now.
+        const client = await getClientMergeData(clientId);
+        const policy = editDraft.policy_id
+          ? await getPolicyMergeData(editDraft.policy_id, clientId)
+          : null;
+
+        const now = new Date();
+        const freshValues = buildMergeData(client, policy, now);
+        const freshContent = renderTemplateContent(storedVersion.content, freshValues);
+        const freshConsent = renderConsentText(storedVersion.consent_text, freshValues);
+        const freshUnresolved = findUnresolvedVariables(
+          storedVersion.variables_used,
+          freshValues,
+          policy !== null
+        );
+        const freshHash = await createCanonicalContentHash(freshContent, freshConsent);
+
+        if (cancelled) return;
+
+        setPolicyData(policy);
+        setFreshMerge({
+          content: freshContent,
+          consentText: freshConsent,
+          values: freshValues,
+          unresolved: freshUnresolved,
+          hash: freshHash,
+        });
+
+        // current_date moves every day, so it would report as drift on every
+        // edit and drown the fields that actually matter.
+        setDrift(
+          findDrift(snapshot?.values ?? {}, freshValues).filter(
+            (d) => d.token !== 'current_date' && d.token !== 'current_year'
+          )
+        );
+      } catch (err) {
+        if (cancelled) return;
+        setMergeError(err instanceof Error ? err.message : 'Could not load this draft.');
+      } finally {
+        if (!cancelled) setEditLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editDraft, clientId]);
+
+  /** What the preview and the save should use, following the agent's choice. */
+  const activeDocument = useMemo(() => {
+    if (!isEditing) return merged;
+    return documentChoice === 'regenerate' ? freshMerge : merged;
+  }, [isEditing, documentChoice, freshMerge, merged]);
 
   // ---- Merge -------------------------------------------------------------
 
@@ -215,7 +379,55 @@ export default function NewConsentFlow({
     setShowErrors(true);
     setSaveError(null);
 
-    if (!template || !version || !merged || !canSave) return;
+    if (!canSave) return;
+
+    // ---- Editing an existing draft --------------------------------------
+    if (isEditing && editDraft) {
+      const doc = activeDocument;
+      if (!doc) return;
+
+      setSaving(true);
+      try {
+        const expiresAt = expiryFromDays(expiryDays);
+
+        await updateConsentDraft({
+          requestId: editDraft.id,
+          title,
+          signer: { fullName: signerName, email: signerEmail || null, phone: signerPhone || null },
+          expiresAt,
+          // Omitted entirely when keeping the original: the document, its
+          // snapshot and its hash are then never touched.
+          regenerated:
+            documentChoice === 'regenerate'
+              ? {
+                  policyId: policyData?.policy_id ?? null,
+                  renderedContent: doc.content,
+                  mergeSnapshot: buildMergeSnapshot(
+                    doc.values,
+                    doc.unresolved,
+                    clientId,
+                    policyData?.policy_id ?? null,
+                    doc.consentText
+                  ),
+                  originalDocumentHash: doc.hash,
+                }
+              : undefined,
+        });
+
+        onCreated(
+          documentChoice === 'regenerate'
+            ? 'Draft updated and the document was rebuilt with current data.'
+            : 'Draft updated. The document was left exactly as it was.'
+        );
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : 'Could not update the draft.');
+        setSaving(false);
+      }
+      return;
+    }
+
+    // ---- Creating a new consent ------------------------------------------
+    if (!template || !version || !merged) return;
 
     setSaving(true);
     try {
@@ -392,25 +604,96 @@ export default function NewConsentFlow({
       )}
 
       {/* ---- Step 2 ---- */}
-      {step === 2 && merged && template && (
+      {step === 2 && editLoading && (
+        <div className="p-5 space-y-3">
+          <div className="h-10 bg-slate-50 rounded-xl animate-pulse" />
+          <div className="h-32 bg-slate-50 rounded-xl animate-pulse" />
+        </div>
+      )}
+
+      {step === 2 && !editLoading && mergeError && isEditing && (
+        <div className="p-5">
+          <ErrorBox title="Could not load this draft" message={mergeError} />
+          <button
+            type="button"
+            onClick={onCancel}
+            className="mt-3 px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold rounded-xl transition-colors"
+          >
+            Back
+          </button>
+        </div>
+      )}
+
+      {step === 2 && !editLoading && activeDocument && template && (
         <div className="p-5 space-y-5">
           {saveError && <ErrorBox title="Could not save" message={saveError} />}
 
+          {/* ---- The data changed since this draft was built ---- */}
+          {isEditing && drift.length > 0 && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+              <p className="text-sm font-bold text-blue-900">
+                {drift.length} field{drift.length === 1 ? '' : 's'} changed since this draft was
+                created
+              </p>
+              <p className="text-xs text-blue-800 mt-1">
+                The saved document still shows the old values. Choose what to keep — nothing is
+                replaced unless you say so.
+              </p>
+
+              <ul className="mt-3 space-y-1.5">
+                {drift.map((d) => (
+                  <li key={d.token} className="text-xs text-blue-900">
+                    <code className="font-mono font-bold">{`{{${d.token}}}`}</code>{' '}
+                    <span className="line-through text-blue-500">{d.before}</span>
+                    {' → '}
+                    <strong>{d.after}</strong>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="mt-4 space-y-2">
+                <ChoiceRow
+                  name="doc-choice"
+                  checked={documentChoice === 'keep'}
+                  onChange={() => setDocumentChoice('keep')}
+                  title="Keep the original document"
+                  description="The document and its hash stay exactly as they are. The old values remain."
+                />
+                <ChoiceRow
+                  name="doc-choice"
+                  checked={documentChoice === 'regenerate'}
+                  onChange={() => setDocumentChoice('regenerate')}
+                  title="Rebuild with current data"
+                  description="The document is re-merged and re-hashed. Safe here because nothing has been sent yet."
+                />
+              </div>
+            </div>
+          )}
+
+          {isEditing && drift.length === 0 && freshMerge && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs text-slate-600">
+                The client&apos;s data has not changed since this draft was created. The document is
+                still current.
+              </p>
+            </div>
+          )}
+
           {/* Warnings */}
-          {merged.unresolved.length > 0 && (
+          {activeDocument.unresolved.length > 0 && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
               <p className="text-sm font-bold text-amber-800">
-                {merged.unresolved.length} field{merged.unresolved.length === 1 ? '' : 's'} could not
+                {activeDocument.unresolved.length} field{activeDocument.unresolved.length === 1 ? '' : 's'} could not
                 be filled
               </p>
               <ul className="mt-2 space-y-1.5">
-                {merged.unresolved.map((u) => (
+                {activeDocument.unresolved.map((u) => (
                   <li key={u.token} className="text-xs text-amber-800">
                     <code className="font-mono font-bold">{`{{${u.token}}}`}</code> — {u.reason}
                   </li>
                 ))}
               </ul>
-              {merged.unresolved.some((u) => u.needsPolicy) && (
+              {activeDocument.unresolved.some((u) => u.needsPolicy) && (
                 <button
                   type="button"
                   onClick={() => setStep(1)}
@@ -549,12 +832,12 @@ export default function NewConsentFlow({
                         : 'None'
                     }
                   />
-                  <SummaryRow label="Fields filled" value={`${Object.keys(merged.values).length}`} />
+                  <SummaryRow label="Fields filled" value={`${Object.keys(activeDocument.values).length}`} />
                   <SummaryRow
                     label="Document hash"
-                    value={merged.hash.slice(0, 16) + '…'}
+                    value={activeDocument.hash.slice(0, 16) + '…'}
                     mono
-                    title={merged.hash}
+                    title={activeDocument.hash}
                   />
                 </dl>
               </div>
@@ -601,9 +884,9 @@ export default function NewConsentFlow({
               </p>
               <div className="max-h-[60vh] overflow-y-auto border border-slate-100 rounded-2xl">
                 <ConsentPreview
-                  content={merged.content}
+                  content={activeDocument.content}
                   publicTitle={title}
-                  consentText={merged.consentText}
+                  consentText={activeDocument.consentText}
                   bare
                 />
               </div>
@@ -627,6 +910,46 @@ function inputClass(hasError: unknown): string {
 
 function FieldError({ message }: { message: string }) {
   return <p className="text-xs text-rose-600 font-medium mt-1">{message}</p>;
+}
+
+/**
+ * A radio option with room to explain itself.
+ *
+ * Used for the keep-vs-rebuild decision, where the consequence of each choice is
+ * the whole point and a bare label would leave the agent guessing.
+ */
+function ChoiceRow({
+  name,
+  checked,
+  onChange,
+  title,
+  description,
+}: {
+  name: string;
+  checked: boolean;
+  onChange: () => void;
+  title: string;
+  description: string;
+}) {
+  return (
+    <label
+      className={`flex gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+        checked ? 'border-blue-400 bg-white' : 'border-blue-200/60 bg-white/50 hover:bg-white'
+      }`}
+    >
+      <input
+        type="radio"
+        name={name}
+        checked={checked}
+        onChange={onChange}
+        className="mt-0.5 accent-blue-600 flex-shrink-0"
+      />
+      <span>
+        <span className="block text-xs font-bold text-slate-800">{title}</span>
+        <span className="block text-[11px] text-slate-500 mt-0.5 leading-relaxed">{description}</span>
+      </span>
+    </label>
+  );
 }
 
 function ErrorBox({ title, message }: { title: string; message: string }) {

@@ -30,6 +30,8 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
 
   const [view, setView] = useState<View>('list');
   const [previewing, setPreviewing] = useState<ClientConsentRow | null>(null);
+  /** The draft being edited. Null when creating a new consent. */
+  const [editing, setEditing] = useState<ClientConsentRow | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -65,6 +67,23 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
     };
   }, [clientId, reloadToken]);
 
+  /**
+   * What clicking a row does, decided by status.
+   *
+   * A draft is unfinished work, so it opens for editing. Anything else has left
+   * the building and is a record — it opens read-only. Same button, honest label,
+   * no way to accidentally "edit" something already sent.
+   */
+  const openRow = (row: ClientConsentRow) => {
+    if (row.status === 'draft') {
+      setEditing(row);
+      setView('new');
+      return;
+    }
+    setPreviewing(row);
+    setView('preview');
+  };
+
   const handleDelete = async (row: ClientConsentRow) => {
     setBusyId(row.id);
     setError(null);
@@ -80,14 +99,23 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
     }
   };
 
-  // ---- New consent ------------------------------------------------------
+  // ---- New consent / edit draft -----------------------------------------
+  // The same wizard does both: editing skips straight to step 2, because a
+  // draft's template and version are already frozen into it.
   if (view === 'new') {
     return (
       <NewConsentFlow
+        // Remounts on switching drafts, so no state leaks between them.
+        key={editing?.id ?? 'new'}
         clientId={clientId}
         clientName={clientName}
-        onCancel={() => setView('list')}
+        editDraft={editing ?? undefined}
+        onCancel={() => {
+          setEditing(null);
+          setView('list');
+        }}
         onCreated={(message) => {
+          setEditing(null);
           setView('list');
           flash(message);
           reload();
@@ -264,10 +292,7 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
                           row={row}
                           busy={busyId === row.id}
                           confirming={confirmDelete === row.id}
-                          onPreview={() => {
-                            setPreviewing(row);
-                            setView('preview');
-                          }}
+                          onOpen={() => openRow(row)}
                           onAskDelete={() => setConfirmDelete(row.id)}
                           onCancelDelete={() => setConfirmDelete(null)}
                           onConfirmDelete={() => handleDelete(row)}
@@ -309,10 +334,7 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
                       row={row}
                       busy={busyId === row.id}
                       confirming={confirmDelete === row.id}
-                      onPreview={() => {
-                        setPreviewing(row);
-                        setView('preview');
-                      }}
+                      onOpen={() => openRow(row)}
                       onAskDelete={() => setConfirmDelete(row.id)}
                       onCancelDelete={() => setConfirmDelete(null)}
                       onConfirmDelete={() => handleDelete(row)}
@@ -341,7 +363,7 @@ function RowActions({
   row,
   busy,
   confirming,
-  onPreview,
+  onOpen,
   onAskDelete,
   onCancelDelete,
   onConfirmDelete,
@@ -349,7 +371,7 @@ function RowActions({
   row: ClientConsentRow;
   busy: boolean;
   confirming: boolean;
-  onPreview: () => void;
+  onOpen: () => void;
   onAskDelete: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
@@ -384,7 +406,7 @@ function RowActions({
     <div className="inline-flex items-center gap-1.5">
       <button
         type="button"
-        onClick={onPreview}
+        onClick={onOpen}
         className="px-2.5 py-1 border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 text-slate-600 hover:text-blue-700 text-[10px] font-bold rounded-lg transition-all"
       >
         {isDraft ? 'Continue Draft' : 'View'}

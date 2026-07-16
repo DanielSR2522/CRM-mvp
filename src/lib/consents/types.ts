@@ -354,6 +354,21 @@ export interface ClientConsentRow extends SignatureRequest {
   signer_email: string | null;
 }
 
+/**
+ * A request joined with everything the cross-client dashboard shows.
+ *
+ * Carries the client's name (the tab does not need it — the dashboard does) and
+ * the signer's contact details, which decide whether the WhatsApp/SMS/Email
+ * actions are offered.
+ */
+export interface DashboardConsentRow extends SignatureRequest {
+  client_name: string | null;
+  template_internal_name: string | null;
+  signer_name: string | null;
+  signer_email: string | null;
+  signer_phone: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Merge data
 // ---------------------------------------------------------------------------

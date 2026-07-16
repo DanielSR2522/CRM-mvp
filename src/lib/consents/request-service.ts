@@ -15,12 +15,17 @@ import type {
   ClientConsentRow,
   ConsentTemplate,
   ConsentTemplateVersion,
+  DashboardConsentRow,
+  DeliveryChannel,
   MergeDataSnapshot,
+  RequestStatus,
   SignatureRequest,
+  SignatureRequestSigner,
   TemplateContent,
 } from './types';
 import { describeSupabaseError } from './template-service';
 import { generateSecureToken } from './token-service';
+import { canTransition, explainTransition } from './status';
 
 class RequestServiceError extends Error {
   constructor(message: string) {
@@ -80,6 +85,153 @@ export async function listClientConsents(clientId: string): Promise<ClientConsen
       signer_email: primary?.email ?? null,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard reads
+// ---------------------------------------------------------------------------
+
+export interface ConsentFilters {
+  /** Matches the client's name. */
+  clientSearch?: string;
+  status?: RequestStatus | '';
+  templateId?: string;
+  channel?: DeliveryChannel | '';
+  /** Inclusive, on created_at. */
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export interface ConsentPage {
+  rows: DashboardConsentRow[];
+  total: number;
+}
+
+/**
+ * One page of consents across every client this agent owns.
+ *
+ * RLS does the scoping: signature_requests is readable only through
+ * clients.agent_id = auth.uid(), so there is no agent filter here and there must
+ * never be one — a filter can be forgotten, a policy cannot.
+ */
+export async function listConsents(
+  filters: ConsentFilters = {},
+  page = 1,
+  pageSize = 25
+): Promise<ConsentPage> {
+  let query = supabase
+    .from('signature_requests')
+    .select(
+      '*, clients!inner(full_name), consent_templates(internal_name), signature_request_signers(full_name, email, phone, signer_order)',
+      { count: 'exact' }
+    );
+
+  if (filters.status) query = query.eq('status', filters.status);
+  if (filters.templateId) query = query.eq('template_id', filters.templateId);
+  if (filters.channel) query = query.eq('selected_delivery_channel', filters.channel);
+  if (filters.dateFrom) query = query.gte('created_at', `${filters.dateFrom}T00:00:00.000Z`);
+  // The whole end day is inclusive; a bare date would cut off everything after
+  // midnight and quietly hide a day's work.
+  if (filters.dateTo) query = query.lte('created_at', `${filters.dateTo}T23:59:59.999Z`);
+
+  if (filters.clientSearch?.trim()) {
+    // !inner above makes this filter the parent rows rather than just the join.
+    const term = filters.clientSearch.trim().replace(/[,()]/g, ' ');
+    query = query.ilike('clients.full_name', `%${term}%`);
+  }
+
+  const from = (page - 1) * pageSize;
+  query = query.order('created_at', { ascending: false }).range(from, from + pageSize - 1);
+
+  const { data, error, count } = await query;
+  if (error) throw new RequestServiceError(describeSupabaseError(error));
+
+  return {
+    rows: (data ?? []).map(toDashboardRow),
+    total: count ?? 0,
+  };
+}
+
+function toDashboardRow(row: Record<string, unknown>): DashboardConsentRow {
+  const client = row.clients as { full_name?: string } | null;
+  const template = row.consent_templates as { internal_name?: string } | null;
+  const signers = (row.signature_request_signers ?? []) as Array<{
+    full_name?: string;
+    email?: string | null;
+    phone?: string | null;
+    signer_order?: number;
+  }>;
+  const primary = [...signers].sort((a, b) => (a.signer_order ?? 1) - (b.signer_order ?? 1))[0];
+
+  return {
+    ...(row as unknown as SignatureRequest),
+    client_name: client?.full_name ?? null,
+    template_internal_name: template?.internal_name ?? null,
+    signer_name: primary?.full_name ?? null,
+    signer_email: primary?.email ?? null,
+    signer_phone: primary?.phone ?? null,
+  };
+}
+
+/**
+ * Counts per status for the summary cards.
+ *
+ * Every number is a real COUNT against the database rather than a tally of the
+ * current page — a card that only counts what is on screen is a lie the moment
+ * pagination kicks in. Uses head:true so no rows travel for a number.
+ */
+export async function countConsentsByStatus(
+  filters: ConsentFilters = {}
+): Promise<Record<RequestStatus, number>> {
+  const statuses: RequestStatus[] = [
+    'draft',
+    'pending',
+    'sent',
+    'viewed',
+    'signed',
+    'declined',
+    'expired',
+  ];
+
+  const counts = await Promise.all(
+    statuses.map(async (status) => {
+      let query = supabase
+        .from('signature_requests')
+        .select('id, clients!inner(full_name)', { count: 'exact', head: true })
+        .eq('status', status);
+
+      if (filters.templateId) query = query.eq('template_id', filters.templateId);
+      if (filters.channel) query = query.eq('selected_delivery_channel', filters.channel);
+      if (filters.dateFrom) query = query.gte('created_at', `${filters.dateFrom}T00:00:00.000Z`);
+      if (filters.dateTo) query = query.lte('created_at', `${filters.dateTo}T23:59:59.999Z`);
+      if (filters.clientSearch?.trim()) {
+        const term = filters.clientSearch.trim().replace(/[,()]/g, ' ');
+        query = query.ilike('clients.full_name', `%${term}%`);
+      }
+
+      const { count, error } = await query;
+      if (error) throw new RequestServiceError(describeSupabaseError(error));
+      return [status, count ?? 0] as const;
+    })
+  );
+
+  const result = {} as Record<RequestStatus, number>;
+  for (const [status, count] of counts) result[status] = count;
+  // Statuses without a card still need a key so callers can index safely.
+  result.cancelled = 0;
+  result.failed = 0;
+  return result;
+}
+
+/** Templates that have ever been used, for the template filter. */
+export async function listTemplatesForFilter(): Promise<Array<{ id: string; internal_name: string }>> {
+  const { data, error } = await supabase
+    .from('consent_templates')
+    .select('id, internal_name')
+    .order('internal_name', { ascending: true });
+
+  if (error) throw new RequestServiceError(describeSupabaseError(error));
+  return (data ?? []) as Array<{ id: string; internal_name: string }>;
 }
 
 export async function getConsent(requestId: string): Promise<SignatureRequest> {
@@ -309,6 +461,202 @@ export async function createConsentDraft(input: CreateDraftInput): Promise<Creat
   }
 
   return { requestId, signerId: signer.id as string, token: token.raw, warning };
+}
+
+// ---------------------------------------------------------------------------
+// Update a draft
+// ---------------------------------------------------------------------------
+
+/** The primary signer of a request. V1 always has exactly one. */
+export async function getPrimarySigner(requestId: string): Promise<SignatureRequestSigner | null> {
+  const { data, error } = await supabase
+    .from('signature_request_signers')
+    .select('*')
+    .eq('request_id', requestId)
+    .order('signer_order', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new RequestServiceError(describeSupabaseError(error));
+  return (data as SignatureRequestSigner) ?? null;
+}
+
+export interface UpdateDraftInput {
+  requestId: string;
+  title: string;
+  signer: { fullName: string; email: string | null; phone: string | null };
+  expiresAt: Date;
+  /**
+   * Present only when the agent chose to regenerate the document with fresh
+   * data. Omitted when they chose to keep the original snapshot — in which case
+   * nothing about the document is touched at all.
+   */
+  regenerated?: {
+    policyId: string | null;
+    renderedContent: TemplateContent;
+    mergeSnapshot: MergeDataSnapshot;
+    originalDocumentHash: string;
+  };
+}
+
+/**
+ * Edits a draft.
+ *
+ * The document and the metadata are updated separately on purpose. Renaming a
+ * draft or fixing a typo in the signer's email must never silently re-merge the
+ * document against data that has changed since — the agent decides that, and the
+ * decision arrives here as the presence or absence of `regenerated`.
+ *
+ * Only drafts can be edited. Once sent, rendered_content is frozen by
+ * signature_requests_guard_transitions_trg regardless of what this code does.
+ */
+export async function updateConsentDraft(input: UpdateDraftInput): Promise<void> {
+  const existing = await getConsent(input.requestId);
+
+  if (existing.status !== 'draft') {
+    throw new RequestServiceError(
+      `This consent has status "${existing.status}" and can no longer be edited. Only drafts can be changed.`
+    );
+  }
+  if (!input.title.trim()) throw new RequestServiceError('A title is required.');
+  if (!input.signer.fullName.trim()) throw new RequestServiceError('The signer needs a full name.');
+  if (input.expiresAt.getTime() <= Date.now()) {
+    throw new RequestServiceError('The expiration date must be in the future.');
+  }
+
+  const patch: Record<string, unknown> = {
+    title: input.title.trim(),
+    expires_at: input.expiresAt.toISOString(),
+  };
+
+  if (input.regenerated) {
+    if (!/^[a-f0-9]{64}$/.test(input.regenerated.originalDocumentHash)) {
+      throw new RequestServiceError('Internal error: the document hash is malformed.');
+    }
+    patch.policy_id = input.regenerated.policyId;
+    patch.rendered_content = input.regenerated.renderedContent;
+    patch.merge_data_snapshot = input.regenerated.mergeSnapshot;
+    patch.original_document_hash = input.regenerated.originalDocumentHash;
+  }
+
+  const { error: requestError } = await supabase
+    .from('signature_requests')
+    .update(patch)
+    .eq('id', input.requestId);
+
+  if (requestError) throw new RequestServiceError(describeSupabaseError(requestError));
+
+  const signer = await getPrimarySigner(input.requestId);
+  if (!signer) {
+    throw new RequestServiceError('This draft has no signer. It cannot be repaired — delete it and start again.');
+  }
+
+  // token_hash is untouched here. Issuing a link is a separate, deliberate act.
+  const { error: signerError } = await supabase
+    .from('signature_request_signers')
+    .update({
+      full_name: input.signer.fullName.trim(),
+      email: input.signer.email?.trim() || null,
+      phone: input.signer.phone?.trim() || null,
+      token_expires_at: input.expiresAt.toISOString(),
+    })
+    .eq('id', signer.id);
+
+  if (signerError) throw new RequestServiceError(describeSupabaseError(signerError));
+
+  const { data: userData } = await supabase.auth.getUser();
+  await supabase.from('signature_events').insert({
+    request_id: input.requestId,
+    signer_id: signer.id,
+    performed_by: userData?.user?.id ?? null,
+    event_type: 'request_updated',
+    metadata: {
+      document_regenerated: Boolean(input.regenerated),
+      unresolved_variables: input.regenerated?.mergeSnapshot.unresolved ?? null,
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Status changes
+// ---------------------------------------------------------------------------
+
+/**
+ * Moves a request to a new status, refusing illegal moves before the database
+ * has to.
+ *
+ * signature_requests_guard_transitions_trg is the real authority — it makes
+ * signed/declined/cancelled terminal even for the service role. This wrapper
+ * exists so the agent gets a sentence and so the matching timestamp is always
+ * written alongside the status, which the CHECK constraints require.
+ */
+export async function setConsentStatus(
+  requestId: string,
+  next: RequestStatus,
+  options: { reason?: string } = {}
+): Promise<void> {
+  const existing = await getConsent(requestId);
+
+  if (existing.status === next) return;
+
+  if (!canTransition(existing.status, next)) {
+    throw new RequestServiceError(
+      explainTransition(existing.status, next) ?? `Cannot move this consent to "${next}".`
+    );
+  }
+
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = { status: next };
+
+  // Each status implies its timestamp; the CHECK constraints reject the row
+  // otherwise, so this is not optional bookkeeping.
+  if (next === 'sent' && !existing.sent_at) patch.sent_at = now;
+  if (next === 'viewed' && !existing.viewed_at) patch.viewed_at = now;
+  if (next === 'declined') patch.declined_at = now;
+  if (next === 'cancelled') patch.cancelled_at = now;
+
+  const { error } = await supabase.from('signature_requests').update(patch).eq('id', requestId);
+  if (error) throw new RequestServiceError(describeSupabaseError(error));
+
+  const { data: userData } = await supabase.auth.getUser();
+  const eventType =
+    next === 'cancelled'
+      ? 'request_cancelled'
+      : next === 'expired'
+        ? 'request_expired'
+        : next === 'sent'
+          ? 'request_sent'
+          : 'request_updated';
+
+  await supabase.from('signature_events').insert({
+    request_id: requestId,
+    performed_by: userData?.user?.id ?? null,
+    event_type: eventType,
+    metadata: { from: existing.status, to: next, reason: options.reason ?? null },
+  });
+}
+
+/**
+ * Cancels a consent.
+ *
+ * Cancelling is the only way to stop something that has already gone out —
+ * deleting it is refused by the database, because a document a client has seen is
+ * a fact and facts are not deleted.
+ */
+export async function cancelConsent(requestId: string, reason?: string): Promise<void> {
+  return setConsentStatus(requestId, 'cancelled', { reason });
+}
+
+/** The full audit trail for one request, oldest first. */
+export async function listConsentEvents(requestId: string) {
+  const { data, error } = await supabase
+    .from('signature_events')
+    .select('*')
+    .eq('request_id', requestId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw new RequestServiceError(describeSupabaseError(error));
+  return data ?? [];
 }
 
 // ---------------------------------------------------------------------------

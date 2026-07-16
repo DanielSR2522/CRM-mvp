@@ -165,6 +165,24 @@ export async function getVersion(
   return (data as ConsentTemplateVersion) ?? null;
 }
 
+/**
+ * A version by its own id.
+ *
+ * Needed when editing a draft: the draft points at template_version_id, and that
+ * exact version is the document — not whatever the template's current_version has
+ * become since.
+ */
+export async function getVersionById(versionId: string): Promise<ConsentTemplateVersion | null> {
+  const { data, error } = await supabase
+    .from('consent_template_versions')
+    .select('*')
+    .eq('id', versionId)
+    .maybeSingle();
+
+  if (error) throw new TemplateServiceError(describeSupabaseError(error));
+  return (data as ConsentTemplateVersion) ?? null;
+}
+
 /** The version current_version points at. */
 export async function getCurrentVersion(
   template: ConsentTemplate
