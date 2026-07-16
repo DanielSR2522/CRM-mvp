@@ -267,9 +267,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <div className="absolute bottom-[20%] left-[-10%] w-[40%] h-[40%] rounded-full bg-slate-200/40 blur-[120px] pointer-events-none" />
         
         {/* Adjusted left padding when sidebar is completely collapsed/hidden to provide space for the floating expand button */}
-        <div className={`flex-1 overflow-y-auto px-6 py-8 md:py-10 relative z-10 transition-all duration-300 ${
-          isCollapsed && mounted ? 'md:pl-16 md:pr-10' : 'md:px-10'
-        }`}>
+        <div className="flex-1 overflow-y-auto px-6 py-8 md:py-10 relative z-10 transition-all duration-300 md:px-10">
           {children}
         </div>
       </main>

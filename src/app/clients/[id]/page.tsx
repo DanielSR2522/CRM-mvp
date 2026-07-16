@@ -99,7 +99,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   };
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'overview' | 'personal-info' | 'policies'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'personal-info' | 'policies' | 'timeline'>('overview');
 
   // Policies Search and Filters States
   const [policiesSearch, setPoliciesSearch] = useState('');
@@ -119,6 +119,34 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   const [loadingPersonal, setLoadingPersonal] = useState(true);
   const [loadingResidence, setLoadingResidence] = useState(true);
   const [loadingIncome, setLoadingIncome] = useState(true);
+
+  // Activity Timeline Interface
+  interface ActivityEvent {
+    id: string;
+    client_id: string;
+    policy_id: string | null;
+    actor_id: string;
+    event_type: string;
+    title: string;
+    description: string | null;
+    metadata: {
+      policy_number?: string | null;
+      line_of_business?: string | null;
+    };
+    created_at: string;
+    profiles?: {
+      name: string | null;
+      email: string | null;
+    } | null;
+  }
+
+  // Timeline & Counter States
+  const [events, setEvents] = useState<ActivityEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [timelineFilter, setTimelineFilter] = useState<'all' | 'policies' | 'notes' | 'documents'>('all');
+  const [noteCounts, setNoteCounts] = useState<{ [policyId: string]: number }>({});
+  const [docCounts, setDocCounts] = useState<{ [policyId: string]: number }>({});
 
   // Personal Information States
   const [personalInfo, setPersonalInfo] = useState<ClientPersonalInformation | null>(null);
@@ -484,6 +512,140 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
       setLoadingIncome(false);
     }
   };
+
+  // Fetch note counts separately (non-blocking)
+  const fetchNoteCounts = async (policyIds: string[]) => {
+    if (policyIds.length === 0) return;
+    try {
+      const { data, error } = await supabase
+        .from('policy_notes')
+        .select('policy_id')
+        .in('policy_id', policyIds);
+
+      if (error) throw error;
+
+      const counts: { [policyId: string]: number } = {};
+      data.forEach((note: any) => {
+        counts[note.policy_id] = (counts[note.policy_id] || 0) + 1;
+      });
+      setNoteCounts(counts);
+    } catch (err) {
+      console.error('Error fetching note counts:', err);
+    }
+  };
+
+  // Fetch document counts separately (non-blocking)
+  const fetchDocCounts = async (policyIds: string[]) => {
+    if (policyIds.length === 0) return;
+    try {
+      const { data, error } = await supabase
+        .from('policy_documents')
+        .select('policy_id')
+        .in('policy_id', policyIds);
+
+      if (error) throw error;
+
+      const counts: { [policyId: string]: number } = {};
+      data.forEach((doc: any) => {
+        counts[doc.policy_id] = (counts[doc.policy_id] || 0) + 1;
+      });
+      setDocCounts(counts);
+    } catch (err) {
+      console.error('Error fetching document counts:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (policies.length > 0) {
+      const policyIds = policies.map(p => p.id);
+      fetchNoteCounts(policyIds);
+      fetchDocCounts(policyIds);
+    }
+  }, [policies]);
+
+  // Fetch timeline events
+  const fetchTimelineEvents = async () => {
+    try {
+      setEventsLoading(true);
+      setEventsError(null);
+
+      // 1. Fetch activity_events without profiles relation
+      const { data: eventsData, error: eventsErr } = await supabase
+        .from('activity_events')
+        .select('*')
+        .eq('client_id', clientId)
+        .order('created_at', { ascending: false });
+
+      if (eventsErr) throw eventsErr;
+
+      const loadedEvents = (eventsData || []) as ActivityEvent[];
+
+      // 2. Collect unique actor_id values
+      const actorIds = Array.from(new Set(loadedEvents.map(e => e.actor_id).filter(Boolean)));
+
+      // 3. Fetch profiles separately
+      let profilesMap: { [id: string]: { name?: string | null; full_name?: string | null; email?: string | null } } = {};
+      if (actorIds.length > 0) {
+        const { data: profilesData, error: profilesErr } = await supabase
+          .from('profiles')
+          .select('id, name, email')
+          .in('id', actorIds);
+
+        if (profilesErr) {
+          console.error('Error fetching profiles for timeline:', profilesErr);
+        } else if (profilesData) {
+          profilesData.forEach((p: any) => {
+            profilesMap[p.id] = {
+              name: p.name,
+              full_name: p.full_name || null,
+              email: p.email
+            };
+          });
+        }
+      }
+
+      // Get current logged in user details for fallback
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUserId = session?.user?.id;
+      const currentUserEmailAddr = session?.user?.email || null;
+
+      // 4. Merge profiles and author displays into events
+      const mergedEvents = loadedEvents.map(evt => {
+        const profile = profilesMap[evt.actor_id];
+        let authorDisplay = 'Agent';
+
+        if (profile) {
+          authorDisplay = profile.full_name || profile.name || profile.email || 'Agent';
+        } else if (currentUserId && evt.actor_id === currentUserId && currentUserEmailAddr) {
+          authorDisplay = currentUserEmailAddr;
+        }
+
+        return {
+          ...evt,
+          profiles: profile ? {
+            name: authorDisplay,
+            email: profile.email || null
+          } : {
+            name: authorDisplay,
+            email: null
+          }
+        };
+      });
+
+      setEvents(mergedEvents);
+    } catch (err: any) {
+      console.error('Error fetching timeline events:', err);
+      setEventsError(err?.message || 'Failed to fetch timeline.');
+    } finally {
+      setEventsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'timeline') {
+      fetchTimelineEvents();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     fetchClientDetails();
@@ -923,7 +1085,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
 
   return (
     <DashboardLayout>
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="w-full space-y-6">
         {/* Navigation Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Link href="/clients" className="hover:text-blue-600 transition-colors">Clients</Link>
@@ -942,7 +1104,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
           <div className="flex flex-col lg:flex-row gap-6 items-start">
             
             {/* Left Sidebar Summary */}
-            <aside className="w-full lg:w-80 bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 flex-shrink-0">
+            <aside className="w-full lg:w-[280px] bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 flex-shrink-0 lg:sticky lg:top-6">
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client Profile</span>
                 <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">{client?.full_name}</h2>
@@ -989,7 +1151,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'overview'
                         ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-500 hover:text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
                     Overview
@@ -999,7 +1161,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'personal-info'
                         ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-500 hover:text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
                     Personal Info
@@ -1009,12 +1171,19 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'policies'
                         ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-500 hover:text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
                     Policies
                   </button>
-                  <button className="px-4 text-sm font-semibold text-slate-400 cursor-not-allowed hover:text-slate-400 text-slate-300" disabled>
+                  <button
+                    onClick={() => setActiveTab('timeline')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                      activeTab === 'timeline'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
+                    }`}
+                  >
                     Timeline
                   </button>
                 </div>
@@ -1113,6 +1282,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                                 className="bg-slate-50/50 border border-slate-100 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                               >
                                 <div className="space-y-1.5 min-w-0 flex-1">
+                                  {/* Line 1: Status & LOB & Number */}
                                   <div className="flex flex-wrap items-center gap-2">
                                     <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex-shrink-0 ${
                                       policy.status === 'Active'
@@ -1133,11 +1303,13 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                                     </span>
                                   </div>
 
+                                  {/* Line 2: Company */}
                                   <div className="text-xs text-slate-400 font-medium">
                                     {policy.writing_company ?? policy.company_name ?? 'Company not specified'}
                                   </div>
 
-                                  <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-slate-550">
+                                  {/* Line 3, 4, 5: Term, Premium, Transaction Type */}
+                                  <div className="flex flex-col gap-1 text-xs text-slate-550">
                                     <div>
                                       <span className="text-slate-400">Term: </span>
                                       <span>
@@ -1147,16 +1319,24 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                                       </span>
                                     </div>
                                     <div>
+                                      <span className="text-slate-400">Premium: </span>
+                                      <strong className="text-slate-800">{formatCurrency(policy.total_premium ?? policy.premium)}</strong>
+                                    </div>
+                                    <div>
                                       <span className="text-slate-400">Transaction Type: </span>
                                       <strong>{policy.transaction_type || 'New'}</strong>
                                     </div>
                                   </div>
                                 </div>
 
-                                <div className="flex items-center sm:justify-end">
+                                {/* Actions / Placeholders */}
+                                <div className="flex items-center gap-4 sm:justify-end text-xs text-slate-400 whitespace-nowrap">
+                                  <span>Documents: {docCounts[policy.id] || 0}</span>
+                                  <span>|</span>
+                                  <span>Notes: {noteCounts[policy.id] || 0}</span>
                                   <Link
                                     href={`/clients/${clientId}/policies/${policy.id}`}
-                                    className="text-blue-650 hover:text-blue-850 font-bold text-xs bg-white border border-slate-100 px-3 py-1.5 rounded-lg shadow-sm hover:shadow transition-all"
+                                    className="text-blue-650 hover:text-blue-850 font-bold ml-2 bg-white border border-slate-100 px-3 py-1.5 rounded-lg shadow-sm hover:shadow transition-all"
                                   >
                                     View
                                   </Link>
@@ -1904,6 +2084,183 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                   </div>
                 </div>
               )}
+
+              {activeTab === 'timeline' && (() => {
+        const filteredEvents = events.filter(evt => {
+          if (timelineFilter === 'policies') {
+            return evt.event_type.startsWith('policy_');
+          }
+          if (timelineFilter === 'notes') {
+            return evt.event_type.startsWith('note_');
+          }
+          if (timelineFilter === 'documents') {
+            return evt.event_type.startsWith('document_');
+          }
+          return true;
+        });
+
+        // Group by calendar date (MM/DD/YYYY)
+        const groupEventsByDate = (eventsList: ActivityEvent[]) => {
+          const groups: { [key: string]: ActivityEvent[] } = {};
+          eventsList.forEach(evt => {
+            const dateStr = new Date(evt.created_at).toLocaleDateString('en-US', {
+              month: '2-digit',
+              day: '2-digit',
+              year: 'numeric'
+            });
+            if (!groups[dateStr]) {
+              groups[dateStr] = [];
+            }
+            groups[dateStr].push(evt);
+          });
+          return groups;
+        };
+
+        const groupedEvents = groupEventsByDate(filteredEvents);
+        const uniqueDates = Array.from(new Set(filteredEvents.map(evt => 
+          new Date(evt.created_at).toLocaleDateString('en-US', {
+            month: '2-digit',
+            day: '2-digit',
+            year: 'numeric'
+          })
+        )));
+
+        return (
+          <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
+            {/* Timeline Header & Filters */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-50 pb-4 gap-4">
+              <h3 className="text-lg font-extrabold text-slate-900 font-sans">Client Activity Timeline</h3>
+              <div className="flex bg-slate-50 border border-slate-200/60 p-1 rounded-xl gap-1">
+                <button
+                  onClick={() => setTimelineFilter('all')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    timelineFilter === 'all'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-slate-550 hover:text-slate-800'
+                  }`}
+                >
+                  All Activity
+                </button>
+                <button
+                  onClick={() => setTimelineFilter('policies')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    timelineFilter === 'policies'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-slate-550 hover:text-slate-800'
+                  }`}
+                >
+                  Policies
+                </button>
+                <button
+                  onClick={() => setTimelineFilter('notes')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    timelineFilter === 'notes'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-slate-550 hover:text-slate-800'
+                  }`}
+                >
+                  Notes
+                </button>
+                <button
+                  onClick={() => setTimelineFilter('documents')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    timelineFilter === 'documents'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-slate-550 hover:text-slate-800'
+                  }`}
+                >
+                  Documents
+                </button>
+              </div>
+            </div>
+
+            {/* Timeline Body */}
+            {eventsLoading ? (
+              <div className="flex justify-center items-center py-20">
+                <svg className="animate-spin h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              </div>
+            ) : eventsError ? (
+              <div className="p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm">
+                {eventsError}
+              </div>
+            ) : filteredEvents.length === 0 ? (
+              <div className="text-center py-20 border border-dashed border-slate-200 rounded-2xl">
+                <svg className="w-12 h-12 text-slate-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-sm text-slate-400 font-sans">No events found for this client.</p>
+              </div>
+            ) : (
+              <div className="relative border-l border-slate-100 ml-4 pl-6 space-y-8">
+                {uniqueDates.map(dateStr => {
+                  const dayEvents = groupedEvents[dateStr] || [];
+                  return (
+                    <div key={dateStr} className="space-y-4">
+                      {/* Date Header */}
+                      <div className="relative -ml-[31px] flex items-center gap-3">
+                        <div className="w-2.5 h-2.5 rounded-full bg-blue-600 ring-4 ring-blue-50" />
+                        <span className="text-xs font-bold text-slate-400 font-sans tracking-wider uppercase bg-white px-2">
+                          {dateStr}
+                        </span>
+                      </div>
+
+                      {/* Events List for this date */}
+                      <div className="space-y-4">
+                        {dayEvents.map(evt => {
+                          const actorDisplay = evt.profiles?.name || evt.profiles?.email || 'Agent';
+                          const timeStr = new Date(evt.created_at).toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true
+                          });
+
+                          const policyLabel = evt.metadata?.line_of_business || evt.metadata?.policy_number;
+
+                          return (
+                            <div key={evt.id} className="bg-slate-50/50 border border-slate-100/85 rounded-xl p-4 space-y-1.5 shadow-sm hover:shadow-md transition-all">
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
+                                <h4 className="text-sm font-extrabold text-slate-800 font-sans">
+                                  {evt.title}
+                                </h4>
+                                <span className="text-[10px] font-bold text-slate-400 font-sans">
+                                  {timeStr} • By {actorDisplay}
+                                </span>
+                              </div>
+                              {evt.description && (
+                                <p className="text-xs text-slate-655 font-sans">
+                                  {evt.description}
+                                </p>
+                              )}
+
+                              {evt.policy_id && (
+                                <div className="pt-1 text-xs">
+                                  <span className="text-slate-450 font-sans">Related Policy: </span>
+                                  <Link
+                                    href={`/clients/${clientId}/policies/${evt.policy_id}`}
+                                    className="text-blue-650 hover:text-blue-800 font-bold font-sans inline-flex items-center gap-0.5 hover:underline"
+                                  >
+                                    {policyLabel ? `${evt.metadata?.line_of_business || ''}${evt.metadata?.policy_number ? ` | ${evt.metadata?.policy_number}` : ''}` : 'View Policy'}
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                                    </svg>
+                                  </Link>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
             </div>
           </div>
         )}
@@ -2136,6 +2493,8 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
           </div>
         </div>
       )}
+
+      
     </DashboardLayout>
   );
 }

@@ -110,6 +110,27 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
       if (error) throw error;
 
+      // Log activity event (non-blocking)
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          await supabase.from('activity_events').insert({
+            client_id: id,
+            policy_id: data.id,
+            actor_id: session.user.id,
+            event_type: 'policy_created',
+            title: 'Policy created',
+            description: `Policy ${lob} (${policyNumber || 'Not specified'}) was created.`,
+            metadata: {
+              policy_number: policyNumber || null,
+              line_of_business: lob || null
+            }
+          });
+        }
+      } catch (errEvent) {
+        console.error('Failed to log policy creation event:', errEvent);
+      }
+
       // Navigate to the newly created policy profile page
       router.push(`/clients/${id}/policies/${data.id}`);
     } catch (err: any) {
