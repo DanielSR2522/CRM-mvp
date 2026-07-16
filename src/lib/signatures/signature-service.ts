@@ -494,6 +494,11 @@ export async function signDocument(
     has_image: Boolean(imagePath),
   });
 
+  await writeConsentChronology(request, 'consent_signed', `Consent signed: ${request.title}`, {
+    signer_name: signer.full_name,
+    method: input.method,
+  });
+
   // ---- Register the signature file --------------------------------------
   if (imagePath && imageBuffer) {
     await admin.from('signature_files').insert({
@@ -550,9 +555,53 @@ export async function declineDocument(
     // Trimmed: a reason box is a free-text field on a public endpoint.
     reason: reason ? reason.slice(0, 500) : null,
   });
+
+  await writeConsentChronology(request, 'consent_declined', `Consent declined: ${request.title}`, {
+    signer_name: signer.full_name,
+  });
 }
 
 /** Used by the PDF generator to name temporary artifacts deterministically. */
 export function newFileId(): string {
   return randomUUID();
+}
+
+// ---------------------------------------------------------------------------
+// Chronology
+// ---------------------------------------------------------------------------
+
+/**
+ * Writes a consent event to the CRM's own timeline.
+ *
+ * activity_events is a different audience from signature_events. The latter is
+ * forensic — every view, every delivery attempt, every IP. This is the human
+ * story an agent skims on a client's profile, so only the moments that change
+ * the situation land here.
+ *
+ * Best-effort by design: a timeline entry is never worth failing a signature over.
+ */
+export async function writeConsentChronology(
+  request: Pick<SignatureRequest, 'id' | 'client_id' | 'policy_id' | 'created_by' | 'title'>,
+  eventType: 'consent_signed' | 'consent_declined',
+  title: string,
+  metadata: Record<string, unknown> = {}
+): Promise<void> {
+  try {
+    const admin = getSupabaseAdmin();
+    await admin.from('activity_events').insert({
+      client_id: request.client_id,
+      // Set when the consent has a policy, so the entry also shows on the
+      // policy's own timeline. activity_events.policy_id exists for exactly this.
+      policy_id: request.policy_id,
+      // The agent who created the consent. activity_events.actor_id is NOT NULL
+      // and references auth.users, and the signer is not a CRM user — attributing
+      // it to the owning agent is the only honest option available.
+      actor_id: request.created_by,
+      event_type: eventType,
+      title,
+      metadata: { request_id: request.id, ...metadata },
+    });
+  } catch (err) {
+    console.error('Could not write consent Chronology:', err instanceof Error ? err.message : err);
+  }
 }

@@ -10,6 +10,7 @@ import ConsentTable from '@/components/consents/ConsentTable';
 import ConsentPreview from '@/components/consents/ConsentPreview';
 import ConsentAuditTrail from '@/components/consents/ConsentAuditTrail';
 import ConsentStatusBadge from '@/components/consents/ConsentStatusBadge';
+import ConsentDocumentActions from '@/components/consents/ConsentDocumentActions';
 import DeliveryDialog from '@/components/consents/DeliveryDialog';
 import type { DashboardConsentRow, DeliveryChannel, RequestStatus } from '@/lib/consents/types';
 import {
@@ -278,6 +279,15 @@ export default function ConsentsDashboardPage() {
               </div>
             </div>
           </div>
+
+          {/* Only renders for a signed consent; it returns null otherwise. */}
+          <ConsentDocumentActions
+            row={row}
+            onChanged={() => {
+              setDetail(null);
+              reload();
+            }}
+          />
 
           {tab === 'document' ? (
             <ConsentPreview

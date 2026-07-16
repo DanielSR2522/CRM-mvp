@@ -13,6 +13,7 @@
  *   failure mode ends with final_document_status = 'failed' and a retry.
  */
 
+import { createHash } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 import type { MergeDataSnapshot, SignatureRequest, SignatureRequestSigner } from '@/lib/consents/types';
 import { buildAuditCertificate, buildSignedPdf, type AuditEventRow } from './pdf-generator';
@@ -65,6 +66,32 @@ export async function generateFinalDocuments(requestId: string): Promise<Generat
     if (!client) return { ok: false, error: 'Client not found.' };
 
     if (request.final_document_status === 'generated' && request.final_file_path) {
+      // The PDF is already built and is never rebuilt — a second one would carry
+      // a different hash and there would be no way to say which the client
+      // signed. But the Documents copy may have failed on the first pass, and it
+      // is idempotent, so a retry re-attempts just that.
+      const repair = await copyToPolicyDocuments(request, client).catch((err) => ({
+        ok: false as const,
+        error: safeError(err),
+      }));
+
+      if (!repair.ok) {
+        await noteCopyFailure(requestId, repair.error ?? 'The signed PDF could not be filed under the policy.');
+        return {
+          ok: false,
+          signedPath: request.final_file_path,
+          finalHash: request.final_document_hash ?? undefined,
+          error: repair.error,
+        };
+      }
+
+      // Cleared: the copy is in place, so there is nothing left to repair.
+      await admin
+        .from('signature_requests')
+        .update({ final_document_error: null })
+        .eq('id', requestId)
+        .not('final_document_error', 'is', null);
+
       return {
         ok: true,
         signedPath: request.final_file_path,
@@ -236,12 +263,18 @@ export async function generateFinalDocuments(requestId: string): Promise<Generat
     });
 
     // ---- File it where the agency will look for it -----------------------
-    // Both are best-effort: the document exists and is downloadable from the
-    // Consents module regardless. A failure to cross-file is an inconvenience,
-    // not a reason to mark a perfectly good PDF as failed.
-    await linkToPolicyDocuments(requestId, request, client, signedPath, signedPdf.bytes.length).catch((err) =>
-      console.error('Could not file the consent under the policy:', safeError(err))
-    );
+    // Best-effort by design: the canonical PDF exists and is downloadable from
+    // Consents & Signatures regardless. A failure to cross-file is an
+    // inconvenience to repair, never a reason to mark a good PDF as failed —
+    // that would block its download and ask a client to sign again for nothing.
+    const copy = await copyToPolicyDocuments({ ...request, final_file_path: signedPath }, client).catch((err) => ({
+      ok: false as const,
+      error: safeError(err),
+    }));
+
+    if (!copy.ok) {
+      await noteCopyFailure(requestId, copy.error ?? 'The signed PDF could not be filed under the policy.');
+    }
 
     await writeChronology(request, client, 'signed_document_generated', 'Signed document generated', {
       request_id: requestId,
@@ -285,109 +318,232 @@ async function fail(requestId: string, error: string): Promise<GenerationResult>
 const SIGNED_CONSENTS_SECTION = 'Signed Consents';
 const MAX_SECTIONS = 10;
 
+interface CopyResult {
+  ok: boolean;
+  error?: string;
+  /** The path inside policy-documents, when the copy is in place. */
+  copyPath?: string;
+}
+
+/** The presentation copy's path inside the pre-existing policy-documents bucket. */
+function policyDocumentsPath(agentId: string, clientId: string, policyId: string, requestId: string): string {
+  // agent_id first: the bucket's RLS rule is
+  // `auth.uid()::text = split_part(name, '/', 1)`, so any other layout would be
+  // invisible to the very agent who owns it.
+  return `${agentId}/${clientId}/${policyId}/signed-consents/${requestId}/signed-document.pdf`;
+}
+
 /**
- * Files the signed PDF under the policy's Documents tab.
+ * Puts the signed PDF where the existing Documents tab can find it.
  *
- * Only when the consent has a policy: policy_documents.policy_id and section_id
- * are both NOT NULL, and inventing a policy to satisfy a foreign key would be
- * fabricating a record. A consent without a policy simply lives in the Consents
- * module, which is where the agent will look for it anyway.
+ * TWO COPIES, ONE DOCUMENT — and they are not equals:
+ *
+ *   signed-documents/…/signed-document.pdf   canonical. The evidence. Referenced
+ *                                            by signature_files, hashed in
+ *                                            signature_requests.final_document_hash.
+ *
+ *   policy-documents/…/signed-document.pdf   presentation copy. Exists only so the
+ *                                            Documents tab — which reads
+ *                                            storage_path from *its* bucket and has
+ *                                            no bucket column — can download it
+ *                                            without touching its schema.
+ *
+ * The copy is made by downloading the canonical object and re-uploading those
+ * exact bytes, so both files are byte-identical and share a SHA-256. Rebuilding
+ * the PDF for the copy would produce a different document with a different hash,
+ * and then "which one did the client sign?" would have no answer.
+ *
+ * signature_files keeps pointing only at the canonical file. policy_documents
+ * points only at the copy. Neither ever crosses over.
+ *
+ * Only runs when the consent has a policy: policy_documents.policy_id and
+ * section_id are both NOT NULL, and inventing a policy to satisfy a foreign key
+ * would be fabricating a record.
  */
-async function linkToPolicyDocuments(
-  requestId: string,
+async function copyToPolicyDocuments(
   request: SignatureRequest,
-  client: { id: string; agent_id: string },
-  storagePath: string,
-  sizeBytes: number
-): Promise<void> {
-  if (!request.policy_id) return;
+  client: { id: string; agent_id: string }
+): Promise<CopyResult> {
+  if (!request.policy_id) return { ok: true };
+  if (!request.final_file_path) return { ok: false, error: 'The canonical PDF path is missing.' };
 
   const admin = getSupabaseAdmin();
+  const copyPath = policyDocumentsPath(client.agent_id, client.id, request.policy_id, request.id);
 
-  // ---- Find or create the section --------------------------------------
-  const { data: existing } = await admin
-    .from('policy_document_sections')
-    .select('id')
-    .eq('policy_id', request.policy_id)
-    .eq('name', SIGNED_CONSENTS_SECTION)
-    .maybeSingle();
-
-  let sectionId = existing?.id as string | undefined;
-
-  if (!sectionId) {
-    // The 10-section limit is enforced by a trigger. Checking first turns a
-    // raised exception into a skip with a readable log line.
-    const { count } = await admin
-      .from('policy_document_sections')
-      .select('id', { count: 'exact', head: true })
-      .eq('policy_id', request.policy_id);
-
-    if ((count ?? 0) >= MAX_SECTIONS) {
-      console.warn(
-        `Policy ${request.policy_id} already has ${count} document sections, so "${SIGNED_CONSENTS_SECTION}" could not be created. The signed PDF is still available from Consents & Signatures.`
-      );
-      return;
-    }
-
-    const { data: created, error: sectionError } = await admin
-      .from('policy_document_sections')
-      .insert({
-        policy_id: request.policy_id,
-        name: SIGNED_CONSENTS_SECTION,
-        position: count ?? 0,
-        created_by: request.created_by,
-      })
-      .select('id')
-      .single();
-
-    if (sectionError || !created) {
-      // A unique-violation here means a concurrent signature created it first.
-      const { data: retry } = await admin
-        .from('policy_document_sections')
-        .select('id')
-        .eq('policy_id', request.policy_id)
-        .eq('name', SIGNED_CONSENTS_SECTION)
-        .maybeSingle();
-
-      if (!retry) throw new Error(sectionError?.message ?? 'Could not create the section.');
-      sectionId = retry.id as string;
-    } else {
-      sectionId = created.id as string;
-    }
-  }
-
-  // ---- Register the document, once -------------------------------------
+  // ---- Already filed? --------------------------------------------------
+  // storage_path is UNIQUE on policy_documents, so this both prevents a
+  // duplicate row and short-circuits a retry that has nothing left to do.
   const { data: alreadyFiled } = await admin
     .from('policy_documents')
     .select('id')
-    .eq('storage_path', storagePath)
+    .eq('storage_path', copyPath)
     .maybeSingle();
 
-  if (alreadyFiled) return; // a retry; nothing to do
+  if (alreadyFiled) return { ok: true, copyPath };
 
-  // NOTE: policy_documents rows point at the signed-documents bucket, not at
-  // policy-documents. The Documents tab reads storage_path from the
-  // policy-documents bucket, so this row is currently a metadata reference the
-  // existing UI cannot download. Flagged in the report — filing it correctly
-  // needs either a bucket column on policy_documents or a copy of the PDF into
-  // policy-documents, and both are decisions for the owner rather than
-  // something to guess at.
-  const { error } = await admin.from('policy_documents').insert({
+  // ---- The canonical bytes ---------------------------------------------
+  const { data: blob, error: downloadError } = await admin.storage
+    .from('signed-documents')
+    .download(request.final_file_path);
+
+  if (downloadError || !blob) {
+    return { ok: false, error: `Could not read the signed PDF: ${downloadError?.message ?? 'missing'}` };
+  }
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+
+  // The copy must be the same document, provably. If the canonical file on disk
+  // no longer matches what we recorded, something is wrong that copying would
+  // only spread.
+  if (request.final_document_hash && sha256 !== request.final_document_hash) {
+    return {
+      ok: false,
+      error: 'The stored PDF does not match its recorded hash. Not copying a document that may have been altered.',
+    };
+  }
+
+  // ---- Upload, without duplicating -------------------------------------
+  // upsert:false so a concurrent run cannot have two writers racing over the
+  // same object. "Already exists" is a success here, not a failure: it means a
+  // previous attempt uploaded the bytes and only the row is missing.
+  const { error: uploadError } = await admin.storage
+    .from('policy-documents')
+    .upload(copyPath, bytes, { contentType: 'application/pdf', upsert: false });
+
+  if (uploadError) {
+    const alreadyThere =
+      uploadError.message.toLowerCase().includes('already exists') ||
+      uploadError.message.toLowerCase().includes('duplicate');
+
+    if (!alreadyThere) {
+      return { ok: false, error: `Could not copy the PDF into Documents: ${uploadError.message}` };
+    }
+  }
+
+  // ---- Find or create the section --------------------------------------
+  const sectionResult = await findOrCreateSignedConsentsSection(request.policy_id, request.created_by);
+  if (!sectionResult.ok) return { ok: false, error: sectionResult.error };
+
+  // ---- Register --------------------------------------------------------
+  // mime_type is hard-coded rather than taken from the blob: this file is one we
+  // generated ourselves seconds ago, and it is a PDF by construction. The bucket
+  // enforces the whitelist independently.
+  const { error: insertError } = await admin.from('policy_documents').insert({
     policy_id: request.policy_id,
-    section_id: sectionId,
+    section_id: sectionResult.sectionId,
     uploaded_by: request.created_by,
     display_name: request.title,
     original_filename: 'signed-document.pdf',
-    storage_path: storagePath,
+    // Points at policy-documents. Never at the canonical file.
+    storage_path: copyPath,
     mime_type: 'application/pdf',
-    size_bytes: sizeBytes,
+    size_bytes: bytes.length,
   });
 
-  if (error) throw new Error(error.message);
+  if (insertError) {
+    // A unique violation means a concurrent run filed it first — which is the
+    // outcome we wanted anyway.
+    if (insertError.code === '23505') return { ok: true, copyPath };
+    return { ok: false, error: `Could not register the document: ${insertError.message}` };
+  }
 
   await writeChronology(request, client, 'document_uploaded', `Signed consent filed: ${request.title}`, {
-    request_id: requestId,
+    request_id: request.id,
     section: SIGNED_CONSENTS_SECTION,
+    sha256,
+  }).catch((err) => console.error('Could not write Chronology for the filed document:', safeError(err)));
+
+  return { ok: true, copyPath };
+}
+
+interface SectionResult {
+  ok: boolean;
+  sectionId?: string;
+  error?: string;
+}
+
+/**
+ * The "Signed Consents" section, created at most once per policy.
+ *
+ * The 10-section limit is enforced by a trigger on policy_document_sections.
+ * Counting first turns a raised exception into a readable message, and the
+ * concurrent-creation path turns a unique violation into a plain lookup.
+ */
+async function findOrCreateSignedConsentsSection(
+  policyId: string,
+  createdBy: string
+): Promise<SectionResult> {
+  const admin = getSupabaseAdmin();
+
+  const { data: existing } = await admin
+    .from('policy_document_sections')
+    .select('id')
+    .eq('policy_id', policyId)
+    .eq('name', SIGNED_CONSENTS_SECTION)
+    .maybeSingle();
+
+  if (existing?.id) return { ok: true, sectionId: existing.id as string };
+
+  const { count } = await admin
+    .from('policy_document_sections')
+    .select('id', { count: 'exact', head: true })
+    .eq('policy_id', policyId);
+
+  if ((count ?? 0) >= MAX_SECTIONS) {
+    return {
+      ok: false,
+      error: `This policy already has ${count} document sections, the maximum allowed, so "${SIGNED_CONSENTS_SECTION}" could not be created. Remove a section and retry. The signed PDF is safe and downloadable from Consents & Signatures.`,
+    };
+  }
+
+  const { data: created, error } = await admin
+    .from('policy_document_sections')
+    .insert({
+      policy_id: policyId,
+      name: SIGNED_CONSENTS_SECTION,
+      position: count ?? 0,
+      created_by: createdBy,
+    })
+    .select('id')
+    .single();
+
+  if (created?.id) return { ok: true, sectionId: created.id as string };
+
+  // Someone created it between our lookup and our insert.
+  const { data: raced } = await admin
+    .from('policy_document_sections')
+    .select('id')
+    .eq('policy_id', policyId)
+    .eq('name', SIGNED_CONSENTS_SECTION)
+    .maybeSingle();
+
+  if (raced?.id) return { ok: true, sectionId: raced.id as string };
+
+  return { ok: false, error: error?.message ?? 'Could not create the Signed Consents section.' };
+}
+
+/**
+ * Records that the Documents copy failed, without touching the PDF's status.
+ *
+ * final_document_status stays 'generated' on purpose: the signature and the
+ * canonical PDF are both fine, and marking them failed would block the download
+ * of a perfectly good document. The error lives in final_document_error, which
+ * is what makes the Retry button appear.
+ */
+async function noteCopyFailure(requestId: string, error: string): Promise<void> {
+  const admin = getSupabaseAdmin();
+
+  await admin
+    .from('signature_requests')
+    .update({ final_document_error: error.slice(0, 500) })
+    .eq('id', requestId);
+
+  await admin.from('signature_events').insert({
+    request_id: requestId,
+    performed_by: null,
+    event_type: 'final_document_failed',
+    metadata: { stage: 'policy_documents_copy', error: error.slice(0, 300) },
   });
 }
 

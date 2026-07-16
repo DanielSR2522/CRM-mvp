@@ -145,7 +145,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsError, setEventsError] = useState<string | null>(null);
-  const [timelineFilter, setTimelineFilter] = useState<'all' | 'policies' | 'notes' | 'documents'>('all');
+  const [timelineFilter, setTimelineFilter] = useState<'all' | 'policies' | 'notes' | 'documents' | 'consents'>('all');
   const [noteCounts, setNoteCounts] = useState<{ [policyId: string]: number }>({});
   const [docCounts, setDocCounts] = useState<{ [policyId: string]: number }>({});
 
@@ -2115,6 +2115,11 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
           if (timelineFilter === 'documents') {
             return evt.event_type.startsWith('document_');
           }
+          // Consent events use two prefixes: consent_ for lifecycle moments and
+          // signed_document_ for the generated PDF. Both belong here.
+          if (timelineFilter === 'consents') {
+            return evt.event_type.startsWith('consent_') || evt.event_type.startsWith('signed_document_');
+          }
           return true;
         });
 
@@ -2189,6 +2194,16 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                   }`}
                 >
                   Documents
+                </button>
+                <button
+                  onClick={() => setTimelineFilter('consents')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    timelineFilter === 'consents'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-slate-550 hover:text-slate-800'
+                  }`}
+                >
+                  Consents
                 </button>
               </div>
             </div>

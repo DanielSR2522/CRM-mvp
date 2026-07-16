@@ -48,7 +48,7 @@ export async function POST(request: Request, context: { params: Promise<{ reques
 
   const { data: row, error } = await admin
     .from('signature_requests')
-    .select('id, status, final_document_status, clients(agent_id)')
+    .select('id, status, final_document_status, final_document_error, clients(agent_id)')
     .eq('id', requestId)
     .maybeSingle();
 
@@ -71,14 +71,21 @@ export async function POST(request: Request, context: { params: Promise<{ reques
       { status: 409 }
     );
   }
-  if (row.final_document_status === 'generated') {
-    return NextResponse.json(
-      { error: 'This document has already been generated and will not be rebuilt.' },
-      { status: 409 }
-    );
-  }
   if (row.final_document_status === 'generating') {
     return NextResponse.json({ error: 'Generation is already in progress.' }, { status: 409 });
+  }
+
+  // 'generated' with an error recorded means the PDF is fine but filing it under
+  // the policy failed. That repair is allowed and is idempotent —
+  // generateFinalDocuments short-circuits the build and only re-attempts the copy.
+  // 'generated' with no error means there is genuinely nothing to do; rebuilding
+  // would produce a second PDF with a different hash and no way to say which one
+  // the client signed.
+  if (row.final_document_status === 'generated' && !row.final_document_error) {
+    return NextResponse.json(
+      { error: 'This document is already generated and filed. It will not be rebuilt.' },
+      { status: 409 }
+    );
   }
 
   const result = await generateFinalDocuments(requestId);

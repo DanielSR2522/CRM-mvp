@@ -150,9 +150,46 @@ export async function retryDocumentGeneration(requestId: string): Promise<void> 
   }
 }
 
-/** True when the PDF failed and the agent can do something about it. */
-export function canRetryGeneration(request: Pick<SignatureRequest, 'status' | 'final_document_status'>): boolean {
-  return request.status === 'signed' && request.final_document_status === 'failed';
+/**
+ * Whether there is something for the agent to retry.
+ *
+ * Two distinct failures hide behind one button:
+ *   - the PDF itself failed to build      -> status 'failed'
+ *   - the PDF is fine but filing it under the policy failed
+ *                                          -> status 'generated' + an error recorded
+ *
+ * The second keeps status 'generated' on purpose: the canonical PDF is good and
+ * downloadable, and marking it failed would block a document that exists.
+ */
+export function canRetryGeneration(
+  request: Pick<SignatureRequest, 'status' | 'final_document_status' | 'final_document_error'>
+): boolean {
+  if (request.status !== 'signed') return false;
+  if (request.final_document_status === 'failed') return true;
+  return request.final_document_status === 'generated' && Boolean(request.final_document_error);
+}
+
+/** What went wrong, in words the agent can act on. */
+export function retryReason(
+  request: Pick<SignatureRequest, 'final_document_status' | 'final_document_error'>
+): string | null {
+  if (!request.final_document_error) return null;
+
+  return request.final_document_status === 'failed'
+    ? `The signed PDF could not be generated: ${request.final_document_error}`
+    : `The signed PDF exists and can be downloaded, but filing it under the policy's Documents failed: ${request.final_document_error}`;
+}
+
+/** Whether an audit certificate exists for this consent. */
+export async function hasAuditCertificate(requestId: string): Promise<boolean> {
+  const { count, error } = await supabase
+    .from('signature_files')
+    .select('id', { count: 'exact', head: true })
+    .eq('request_id', requestId)
+    .eq('file_type', 'audit_certificate');
+
+  if (error) return false;
+  return (count ?? 0) > 0;
 }
 
 export { DocumentServiceError };
