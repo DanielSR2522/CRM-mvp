@@ -7,7 +7,10 @@ export function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  const isProtectedRoute = pathname.startsWith('/dashboard') || pathname.startsWith('/personal-information') || pathname.startsWith('/clients');
+  // Note: /sign is deliberately absent here and from the matcher below. The public
+  // signing page has no session by design, and its access control is the secure
+  // token validated server-side — not this cookie.
+  const isProtectedRoute = pathname.startsWith('/dashboard') || pathname.startsWith('/personal-information') || pathname.startsWith('/clients') || pathname.startsWith('/consents');
   const isAuthRoute = pathname === '/login' || pathname === '/register';
 
   if (isProtectedRoute && !isAuth) {
@@ -26,6 +29,7 @@ export const config = {
     '/dashboard/:path*',
     '/personal-information/:path*',
     '/clients/:path*',
+    '/consents/:path*',
     '/login',
     '/register',
   ],

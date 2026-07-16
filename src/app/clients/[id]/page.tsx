@@ -4,6 +4,7 @@ import React, { useState, useEffect, use, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
+import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate } from '@/utils/dateUtils';
 
@@ -99,7 +100,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   };
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'overview' | 'personal-info' | 'policies' | 'timeline'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'personal-info' | 'policies' | 'consents' | 'timeline'>('overview');
 
   // Policies Search and Filters States
   const [policiesSearch, setPoliciesSearch] = useState('');
@@ -1177,6 +1178,16 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     Policies
                   </button>
                   <button
+                    onClick={() => setActiveTab('consents')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                      activeTab === 'consents'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
+                    }`}
+                  >
+                    Consents
+                  </button>
+                  <button
                     onClick={() => setActiveTab('timeline')}
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'timeline'
@@ -2083,6 +2094,14 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     )}
                   </div>
                 </div>
+              )}
+
+              {/*
+                All the tab's logic lives in the component, so this monolith only
+                gains a mount point rather than another inline section.
+              */}
+              {activeTab === 'consents' && client && (
+                <ClientConsentsTab clientId={clientId} clientName={client.full_name} />
               )}
 
               {activeTab === 'timeline' && (() => {
