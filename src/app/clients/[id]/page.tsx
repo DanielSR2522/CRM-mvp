@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
+import HealthPolicyTab from '@/components/health/HealthPolicyTab';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate } from '@/utils/dateUtils';
 
@@ -100,7 +101,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   };
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'overview' | 'personal-info' | 'policies' | 'consents' | 'timeline'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'personal-info' | 'policies' | 'consents' | 'timeline' | 'health'>('overview');
 
   // Policies Search and Filters States
   const [policiesSearch, setPoliciesSearch] = useState('');
@@ -114,6 +115,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   const [loadingClient, setLoadingClient] = useState(true);
   const [loadingPolicies, setLoadingPolicies] = useState(true);
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('Agent');
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [agentProfile, setAgentProfile] = useState<AgentProfile | null>(null);
 
   // Sub-modules Loading states
@@ -332,6 +334,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         setCurrentUserEmail(session.user.email || 'Agent');
+        setCurrentUserId(session.user.id);
       }
 
       if (!isValidUuid(clientId)) {
@@ -1175,7 +1178,17 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                         : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
-                    Policies
+                    Commercial Policies
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('health')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                      activeTab === 'health'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
+                    }`}
+                  >
+                    Health
                   </button>
                   <button
                     onClick={() => setActiveTab('consents')}
@@ -2295,6 +2308,15 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
           </div>
         );
       })()}
+
+      {activeTab === 'health' && client && (
+        <HealthPolicyTab
+          clientId={clientId}
+          agentName={getAgentDisplayName()}
+          currentUserId={currentUserId}
+          formatIsoToUsDate={formatIsoToUsDate}
+        />
+      )}
             </div>
           </div>
         )}
