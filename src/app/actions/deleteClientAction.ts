@@ -1,20 +1,69 @@
 'use server';
 
-import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { cookies } from 'next/headers';
+import { getSupabaseAdmin, isAdminConfigured } from '@/lib/supabaseAdmin';
 import { revalidatePath } from 'next/cache';
 
-export async function deleteClientSecure(clientId: string, accessToken: string) {
+export async function deleteClientSecure(clientId: string) {
   try {
-    const adminSupabase = getSupabaseAdmin();
-    
-    // 1. Verify the authenticated user securely from the JWT token
-    const { data: userData, error: userError } = await adminSupabase.auth.getUser(accessToken);
-    if (userError || !userData?.user) {
-      return { success: false, error: 'Unauthorized: Invalid or expired session.' };
+    if (!isAdminConfigured()) {
+      return { success: false, error: 'Delete failed: Server configuration is missing.' };
     }
-    const agentId = userData.user.id;
 
-    // 2. Verify ownership (sanity check, RLS is bypassed by Admin, so we MUST check agent_id)
+    // 1. Obtain authenticated user from actual Supabase server session/cookies
+    const cookieStore = await cookies();
+    let accessToken: string | null = null;
+
+    const allCookies = cookieStore.getAll();
+    for (const c of allCookies) {
+      const val = c.value.trim();
+      if (!val) continue;
+
+      if (
+        c.name.includes('auth-token') ||
+        c.name.includes('access_token') ||
+        c.name.startsWith('sb-') ||
+        c.name.includes('supabase') ||
+        c.name.includes('session')
+      ) {
+        try {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed) && typeof parsed[0] === 'string' && parsed[0].split('.').length === 3) {
+            accessToken = parsed[0];
+            break;
+          } else if (parsed && typeof parsed.access_token === 'string') {
+            accessToken = parsed.access_token;
+            break;
+          } else if (parsed && typeof parsed.currentSession?.access_token === 'string') {
+            accessToken = parsed.currentSession.access_token;
+            break;
+          }
+        } catch {
+          if (val.split('.').length === 3) {
+            accessToken = val;
+            break;
+          }
+        }
+      }
+    }
+
+    const adminSupabase = getSupabaseAdmin();
+
+    let authenticatedUserId: string | null = null;
+    if (accessToken) {
+      const { data: userData, error: userError } = await adminSupabase.auth.getUser(accessToken);
+      if (!userError && userData?.user) {
+        authenticatedUserId = userData.user.id;
+      }
+    }
+
+    if (!authenticatedUserId) {
+      return { success: false, error: 'Not authenticated. Please sign in again.' };
+    }
+
+    const agentId = authenticatedUserId;
+
+    // 2. Fetch the client by client ID and verify ownership
     const { data: clientData, error: clientError } = await adminSupabase
       .from('clients')
       .select('agent_id')
@@ -22,11 +71,11 @@ export async function deleteClientSecure(clientId: string, accessToken: string) 
       .single();
 
     if (clientError || !clientData) {
-      return { success: false, error: 'Client not found or could not be verified.' };
+      return { success: false, error: 'Client not found.' };
     }
 
     if (clientData.agent_id !== agentId) {
-      return { success: false, error: 'Unauthorized: You do not have permission to delete this client.' };
+      return { success: false, error: 'Unauthorized: You do not own this client.' };
     }
 
     // 3. Identify and cleanup Storage for Policies
@@ -47,7 +96,7 @@ export async function deleteClientSecure(clientId: string, accessToken: string) 
         const paths = docs.map((d: any) => d.storage_path).filter(Boolean);
         if (paths.length > 0) {
           const { error: storageErr } = await adminSupabase.storage.from('policy-documents').remove(paths);
-          if (storageErr) return { success: false, error: 'Failed to clean up policy documents. Deletion aborted.' };
+          if (storageErr) return { success: false, error: 'Delete failed: Failed to clean up policy documents. Deletion aborted.' };
         }
       }
 
@@ -66,7 +115,7 @@ export async function deleteClientSecure(clientId: string, accessToken: string) 
           const attPaths = atts.map((a: any) => a.storage_path).filter(Boolean);
           if (attPaths.length > 0) {
             const { error: storageErr } = await adminSupabase.storage.from('policy-notes').remove(attPaths);
-            if (storageErr) return { success: false, error: 'Failed to clean up policy notes. Deletion aborted.' };
+            if (storageErr) return { success: false, error: 'Delete failed: Failed to clean up policy notes. Deletion aborted.' };
           }
         }
       }
@@ -90,7 +139,7 @@ export async function deleteClientSecure(clientId: string, accessToken: string) 
         const hpPaths = hpDocs.map((d: any) => d.storage_path).filter(Boolean);
         if (hpPaths.length > 0) {
           const { error: storageErr } = await adminSupabase.storage.from('health-documents').remove(hpPaths);
-          if (storageErr) return { success: false, error: 'Failed to clean up health documents. Deletion aborted.' };
+          if (storageErr) return { success: false, error: 'Delete failed: Failed to clean up health documents. Deletion aborted.' };
         }
       }
 
@@ -109,7 +158,7 @@ export async function deleteClientSecure(clientId: string, accessToken: string) 
           const hpAttPaths = hpAtts.map((a: any) => a.storage_path).filter(Boolean);
           if (hpAttPaths.length > 0) {
             const { error: storageErr } = await adminSupabase.storage.from('health-notes').remove(hpAttPaths);
-            if (storageErr) return { success: false, error: 'Failed to clean up health notes. Deletion aborted.' };
+            if (storageErr) return { success: false, error: 'Delete failed: Failed to clean up health notes. Deletion aborted.' };
           }
         }
       }
@@ -131,7 +180,6 @@ export async function deleteClientSecure(clientId: string, accessToken: string) 
         .in('request_id', reqIds);
         
       if (sigFiles && sigFiles.length > 0) {
-        // Group by bucket
         const byBucket = sigFiles.reduce((acc: any, file: any) => {
           if (!acc[file.storage_bucket]) acc[file.storage_bucket] = [];
           if (file.storage_path) acc[file.storage_bucket].push(file.storage_path);
@@ -141,17 +189,17 @@ export async function deleteClientSecure(clientId: string, accessToken: string) 
         for (const bucket of Object.keys(byBucket)) {
           if (byBucket[bucket].length > 0) {
             const { error: storageErr } = await adminSupabase.storage.from(bucket).remove(byBucket[bucket]);
-            if (storageErr) return { success: false, error: 'Failed to clean up signature storage. Deletion aborted.' };
+            if (storageErr) return { success: false, error: 'Delete failed: Failed to clean up signature storage. Deletion aborted.' };
           }
         }
       }
 
       // Manually delete signature requests to bypass RESTRICT
       const { error: sigErr } = await adminSupabase.from('signature_requests').delete().in('id', reqIds);
-      if (sigErr) return { success: false, error: 'Failed to remove signature requests. Deletion aborted.' };
+      if (sigErr) return { success: false, error: 'Delete failed: Failed to remove signature requests. Deletion aborted.' };
     }
 
-    // 6. Delete the Client (DB ON DELETE CASCADE handles the rest: policies, personal info, etc.)
+    // 6. Delete the Client (DB ON DELETE CASCADE handles the rest)
     const { error: deleteError } = await adminSupabase
       .from('clients')
       .delete()
@@ -159,7 +207,7 @@ export async function deleteClientSecure(clientId: string, accessToken: string) 
 
     if (deleteError) {
       console.error('Server Action Delete Error:', deleteError);
-      return { success: false, error: 'Database error while deleting client: ' + deleteError.message };
+      return { success: false, error: 'Delete failed: ' + deleteError.message };
     }
 
     revalidatePath('/clients');

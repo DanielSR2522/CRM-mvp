@@ -1199,8 +1199,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
     setDeleteClientError(null);
     try {
       const { deleteClientSecure } = await import('@/app/actions/deleteClientAction');
-      const currentUser = await supabase.auth.getUser();
-      const res = await deleteClientSecure(client.id, currentUser.data.user?.id || '');
+      const res = await deleteClientSecure(client.id);
       
       if (!res.success) {
         setDeleteClientError(res.error || 'Failed to delete client.');
