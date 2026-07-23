@@ -1,25 +1,28 @@
 'use server';
 
-import { createClient } from '@/lib/supabaseServer';
 import { getSupabaseAdmin, isAdminConfigured } from '@/lib/supabaseAdmin';
 import { revalidatePath } from 'next/cache';
 
-export async function deleteClientSecure(clientId: string) {
+export async function deleteClientSecure(clientId: string, accessToken: string) {
   try {
+    if (!clientId || !accessToken) {
+      return { success: false, error: 'Not authenticated. Please sign in again.' };
+    }
+
     if (!isAdminConfigured()) {
       return { success: false, error: 'Delete failed: Server administration service is not configured.' };
     }
 
-    // 1. Authenticate user using official @supabase/ssr server client and Next.js cookies()
-    const supabaseServer = await createClient();
-    const { data: { user }, error: authError } = await supabaseServer.auth.getUser();
+    const adminSupabase = getSupabaseAdmin();
+
+    // 1. Verify the authenticated user securely from the JWT token with Supabase Auth
+    const { data: { user }, error: authError } = await adminSupabase.auth.getUser(accessToken);
 
     if (authError || !user) {
       return { success: false, error: 'Not authenticated. Please sign in again.' };
     }
 
-    // 2. Fetch client using Service Role to verify existence & agent ownership
-    const adminSupabase = getSupabaseAdmin();
+    // 2. Fetch the client by client ID and verify ownership
     const { data: clientData, error: clientError } = await adminSupabase
       .from('clients')
       .select('agent_id')
@@ -30,13 +33,11 @@ export async function deleteClientSecure(clientId: string) {
       return { success: false, error: 'Client not found.' };
     }
 
-    // 3. Ownership Authorization check
     if (clientData.agent_id !== user.id) {
       return { success: false, error: 'Unauthorized: You do not own this client.' };
     }
 
-    // 4. Elevated Destructive Operation via Service Role Key (Admin Supabase)
-    // Identify and cleanup Storage for Policies
+    // 3. Identify and cleanup Storage for Policies
     const { data: policies } = await adminSupabase
       .from('policies')
       .select('id')
@@ -79,7 +80,7 @@ export async function deleteClientSecure(clientId: string) {
       }
     }
 
-    // Identify and cleanup Storage for Health Policies
+    // 4. Identify and cleanup Storage for Health Policies
     const { data: healthPolicies } = await adminSupabase
       .from('health_policies')
       .select('id')
@@ -122,7 +123,7 @@ export async function deleteClientSecure(clientId: string) {
       }
     }
 
-    // Identify and cleanup Signatures (RESTRICT constraint)
+    // 5. Identify and cleanup Signatures (RESTRICT constraint)
     const { data: sigReqs } = await adminSupabase
       .from('signature_requests')
       .select('id')
@@ -157,7 +158,7 @@ export async function deleteClientSecure(clientId: string) {
       if (sigErr) return { success: false, error: 'Delete failed: Failed to remove signature requests. Deletion aborted.' };
     }
 
-    // 5. Delete the Client (DB ON DELETE CASCADE handles the rest)
+    // 6. Delete the Client (DB ON DELETE CASCADE handles the rest)
     const { error: deleteError } = await adminSupabase
       .from('clients')
       .delete()

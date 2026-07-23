@@ -1198,8 +1198,15 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
     setIsDeletingClient(true);
     setDeleteClientError(null);
     try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session?.access_token) {
+        setDeleteClientError('Not authenticated. Please sign in again.');
+        setIsDeletingClient(false);
+        return;
+      }
+
       const { deleteClientSecure } = await import('@/app/actions/deleteClientAction');
-      const res = await deleteClientSecure(client.id);
+      const res = await deleteClientSecure(client.id, session.access_token);
       
       if (!res.success) {
         setDeleteClientError(res.error || 'Failed to delete client.');
