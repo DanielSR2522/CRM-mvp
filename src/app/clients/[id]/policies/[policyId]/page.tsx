@@ -34,6 +34,11 @@ interface Policy {
   annual_premium?: number;
   policy_payment_frequency?: string | null;
   billing_type?: string | null;
+  policy_ownership_type?: 'personal' | 'company' | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
 }
 
 interface AgentProfile {
@@ -211,9 +216,36 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
   const [billingType, setBillingType] = useState<'Direct Bill' | 'Agency Bill'>('Direct Bill');
   const [brokerName, setBrokerName] = useState('');
   const [writingCompany, setWritingCompany] = useState('');
+  const [policyOwnershipType, setPolicyOwnershipType] = useState<'personal' | 'company'>('personal');
+  const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [zipCode, setZipCode] = useState('');
+  const [useAddressOnFile, setUseAddressOnFile] = useState(false);
+  const [residenceError, setResidenceError] = useState<string | null>(null);
   const [totalPremium, setTotalPremium] = useState<number | ''>('');
   const [annualPremium, setAnnualPremium] = useState<number | ''>('');
   const [policyStatus, setPolicyStatus] = useState<'Active' | 'Cancelled' | 'Expired' | 'Pending'>('Active');
+
+  // Linked Personal Client State
+  interface LinkedPersonalClient {
+    personal_client_id: string;
+    linked_person_role: 'main_applicant' | 'co_applicant';
+    client: {
+      id: string;
+      full_name: string;
+      email: string | null;
+      phone: string | null;
+    } | null;
+  }
+
+  const [linkedPersonalClient, setLinkedPersonalClient] = useState<LinkedPersonalClient | null>(null);
+  const [loadingLinkedClient, setLoadingLinkedClient] = useState(false);
+
+  // Unlinking State
+  const [isConfirmUnlinkOpen, setIsConfirmUnlinkOpen] = useState(false);
+  const [unlinkingClient, setUnlinkingClient] = useState(false);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
 
   // Fetch client details for sidebar
   const fetchClientDetails = async () => {
@@ -280,6 +312,11 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
       setBillingType(policyData.billing_type === 'Agency Bill' ? 'Agency Bill' : 'Direct Bill');
       setBrokerName(policyData.broker_name || '');
       setWritingCompany(policyData.writing_company || policyData.company_name || '');
+        setPolicyOwnershipType(policyData.policy_ownership_type || 'personal');
+        setAddress(policyData.address || '');
+        setCity(policyData.city || '');
+        setState(policyData.state || '');
+        setZipCode(policyData.zip_code || '');
       setTotalPremium(policyData.total_premium ?? policyData.premium ?? '');
       setAnnualPremium(policyData.annual_premium ?? '');
       setPolicyStatus(policyData.status || 'Active');
@@ -291,26 +328,133 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
     }
   };
 
+  // Fetch Linked Personal Client
+  const fetchLinkedPersonalClient = async () => {
+    try {
+      setLoadingLinkedClient(true);
+      if (!policyId) {
+        setLinkedPersonalClient(null);
+        return;
+      }
+
+      // 1. Fetch link row from personal_commercial_policy_links
+      const { data: linkData, error: linkErr } = await supabase
+        .from('personal_commercial_policy_links')
+        .select('personal_client_id, linked_person_role')
+        .eq('commercial_policy_id', policyId)
+        .maybeSingle();
+
+      if (linkErr || !linkData) {
+        setLinkedPersonalClient(null);
+        return;
+      }
+
+      // 2. Fetch linked personal client from clients table
+      const { data: clientData, error: clientErr } = await supabase
+        .from('clients')
+        .select('id, full_name, email, phone')
+        .eq('id', linkData.personal_client_id)
+        .single();
+
+      if (clientErr || !clientData) {
+        setLinkedPersonalClient(null);
+        return;
+      }
+
+      setLinkedPersonalClient({
+        personal_client_id: linkData.personal_client_id,
+        linked_person_role: linkData.linked_person_role,
+        client: clientData,
+      });
+    } catch (err) {
+      console.error('Error fetching linked personal client:', err);
+      setLinkedPersonalClient(null);
+    } finally {
+      setLoadingLinkedClient(false);
+    }
+  };
+
+  // Unlink Personal Client
+  const handleConfirmUnlinkClient = async () => {
+    if (!linkedPersonalClient || !policyId) return;
+    try {
+      setUnlinkingClient(true);
+      setUnlinkError(null);
+
+      const { error } = await supabase
+        .from('personal_commercial_policy_links')
+        .delete()
+        .eq('commercial_policy_id', policyId)
+        .eq('personal_client_id', linkedPersonalClient.personal_client_id);
+
+      if (error) throw error;
+
+      setIsConfirmUnlinkOpen(false);
+      setLinkedPersonalClient(null);
+      setSuccessMsg('Personal client unlinked successfully.');
+    } catch (err: any) {
+      console.error('Error unlinking personal client:', err);
+      setUnlinkError(err?.message || 'Failed to unlink personal client.');
+    } finally {
+      setUnlinkingClient(false);
+    }
+  };
+
   useEffect(() => {
     fetchClientDetails();
     fetchData();
+    fetchLinkedPersonalClient();
   }, [id, policyId]);
 
   // Fetch policy notes
-  const fetchNotes = async () => {
+    const fetchNotes = async () => {
     try {
       setNotesLoading(true);
       setNotesError(null);
-      const { data, error } = await supabase
+      
+      // Fetch notes without profiles join
+      const { data: notesData, error: notesError } = await supabase
         .from('policy_notes')
-        .select('*, profiles(name, email)')
+        .select('*')
         .eq('policy_id', policyId)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setNotes((data as any) || []);
+      if (notesError) throw notesError;
+      
+      if (!notesData || notesData.length === 0) {
+        setNotes([]);
+        return;
+      }
+
+      // Collect unique author_ids
+      const authorIds = [...new Set(notesData.map(n => n.author_id).filter(Boolean))];
+      
+      let profilesMap = new Map();
+      if (authorIds.length > 0) {
+        const { data: profilesData, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, name, email')
+          .in('id', authorIds);
+          
+        if (!profilesError && profilesData) {
+          profilesMap = new Map(profilesData.map(p => [p.id, p]));
+        }
+      }
+
+      // Merge
+      const mergedNotes = notesData.map(n => ({
+        ...n,
+        profiles: profilesMap.get(n.author_id) || null
+      }));
+
+      setNotes(mergedNotes as any);
     } catch (err: any) {
-      console.error('Error fetching policy notes:', err);
+      console.error('Error fetching policy notes:', {
+        message: err?.message,
+        code: err?.code,
+        details: err?.details,
+        hint: err?.hint
+      });
       setNotesError(err?.message || 'Failed to fetch notes.');
     } finally {
       setNotesLoading(false);
@@ -1360,6 +1504,69 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
   };
 
   // Submit Form
+  // Delete Policy
+  const handleDeletePolicy = async () => {
+    if (!confirm('Are you sure you want to permanently delete this policy? This action cannot be undone.')) return;
+    
+    setSaving(true);
+    setErrorMsg(null);
+    try {
+      // 1. Cleanup Storage for Documents
+      const { data: docs } = await supabase
+        .from('policy_documents')
+        .select('storage_path')
+        .eq('policy_id', policyId);
+        
+      if (docs && docs.length > 0) {
+        const paths = docs.map(d => d.storage_path).filter(Boolean);
+        if (paths.length > 0) {
+          await supabase.storage.from('policy-documents').remove(paths);
+        }
+      }
+
+      // 2. Cleanup Storage for Note Attachments
+      const { data: notes } = await supabase
+        .from('policy_notes')
+        .select('id')
+        .eq('policy_id', policyId);
+        
+      if (notes && notes.length > 0) {
+        const noteIds = notes.map(n => n.id);
+        const { data: atts } = await supabase
+          .from('policy_note_attachments')
+          .select('storage_path')
+          .in('note_id', noteIds);
+          
+        if (atts && atts.length > 0) {
+          const attPaths = atts.map(a => a.storage_path).filter(Boolean);
+          if (attPaths.length > 0) {
+            await supabase.storage.from('policy-notes').remove(attPaths);
+          }
+        }
+      }
+
+      // 3. Delete the policy (Dependent DB records cascade or must be set up to cascade)
+      const { error: deleteError } = await supabase
+        .from('policies')
+        .delete()
+        .eq('id', policyId);
+
+      if (deleteError) throw deleteError;
+
+      // 4. Redirect to client dashboard
+      router.push(`/clients/${id}`);
+    } catch (err: any) {
+      console.error('Error deleting policy:', {
+        message: err?.message,
+        code: err?.code,
+        details: err?.details,
+        hint: err?.hint
+      });
+      setErrorMsg(err?.message || 'Failed to delete policy. It may have dependent records preventing deletion.');
+      setSaving(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -1408,6 +1615,11 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
           billing_type: billingType,
           broker_name: brokerName.trim() || null,
           writing_company: writingCompany.trim() || null,
+      policy_ownership_type: policyOwnershipType,
+      address: address.trim() || null,
+      city: city.trim() || null,
+      state: state.trim() || null,
+      zip_code: zipCode.trim() || null,
           company_name: writingCompany.trim() || null, // Keep synced with legacy column
           total_premium: totalPremium === '' ? 0 : Number(totalPremium),
           premium: totalPremium === '' ? 0 : Number(totalPremium), // Keep synced with legacy column
@@ -1549,6 +1761,39 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
             {/* Right: Policy Content */}
             <div className="flex-1 w-full space-y-6">
             
+            {/* AREA 0: LINKED PERSONAL CLIENT (if linked) */}
+            {linkedPersonalClient && linkedPersonalClient.client && (
+              <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+                <div className="space-y-1">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-rose-700 block">Linked Personal Client</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-base font-extrabold text-slate-900">{linkedPersonalClient.client.full_name}</h4>
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white text-rose-700 border border-rose-200 shadow-2xs">
+                      {linkedPersonalClient.linked_person_role === 'co_applicant' ? 'Co-Applicant' : 'Main Applicant'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUnlinkError(null);
+                      setIsConfirmUnlinkOpen(true);
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-200 text-xs font-bold px-3.5 py-2 rounded-xl transition-all"
+                  >
+                    Unlink Client
+                  </button>
+                  <Link
+                    href={`/clients/${linkedPersonalClient.personal_client_id}`}
+                    className="inline-flex items-center justify-center gap-1.5 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-md shadow-rose-500/10"
+                  >
+                    View Client Profile
+                  </Link>
+                </div>
+              </div>
+            )}
+
             {/* AREA 1: TOP POLICY SUMMARY (Non-sticky) */}
             <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
               {/* Row 1 */}
@@ -1583,7 +1828,11 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                   </span>
                 </div>
                 <div>
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Company</span>
+<span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ownership Type</span>
+<span className="font-semibold text-slate-800 mt-1 block">{policyOwnershipType === 'company' ? 'Company' : 'Personal'}</span>
+</div>
+<div>
+<span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Company</span>
                   <span className="font-semibold text-slate-800 mt-1 block">{writingCompany || '-'}</span>
                 </div>
                 <div>
@@ -2304,8 +2553,16 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                   <h3 className="text-lg font-extrabold text-slate-900">Summary Details</h3>
                   <div className="flex items-center gap-2">
                     <button
-                      type="button"
-                      onClick={handleCancel}
+                        type="button"
+                        onClick={handleDeletePolicy}
+                        disabled={saving}
+                        className="text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+                      >
+                        Delete Policy
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancel}
                       className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg transition-all"
                     >
                       Cancel
@@ -2430,7 +2687,85 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                   {/* RIGHT COLUMN */}
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Broker Name</label>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Policy Ownership Type</label>
+                      <select
+                        value={policyOwnershipType}
+                        onChange={e => setPolicyOwnershipType(e.target.value as any)}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                      >
+                        <option value="personal">Personal</option>
+                        <option value="company">Company</option>
+                      </select>
+                    </div>
+
+                    <div className="border-t border-slate-100 pt-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-sm font-extrabold text-slate-900">Policy Address</h4>
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={useAddressOnFile}
+                            onChange={e => setUseAddressOnFile(e.target.checked)}
+                            className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                          />
+                          <span className="text-xs font-semibold text-slate-700">Use Address on File</span>
+                        </label>
+                      </div>
+
+                      {residenceError && (
+                        <div className="p-3 mb-4 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 text-xs leading-relaxed">
+                          {residenceError}
+                        </div>
+                      )}
+
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Street Address</label>
+                          <input
+                            type="text"
+                            value={address}
+                            onChange={e => setAddress(e.target.value)}
+                            disabled={useAddressOnFile}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm disabled:opacity-60 disabled:cursor-not-allowed outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">City</label>
+                          <input
+                            type="text"
+                            value={city}
+                            onChange={e => setCity(e.target.value)}
+                            disabled={useAddressOnFile}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm disabled:opacity-60 disabled:cursor-not-allowed outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">State</label>
+                            <input
+                              type="text"
+                              value={state}
+                              onChange={e => setState(e.target.value)}
+                              disabled={useAddressOnFile}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm disabled:opacity-60 disabled:cursor-not-allowed outline-none focus:border-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">ZIP Code</label>
+                            <input
+                              type="text"
+                              value={zipCode}
+                              onChange={e => setZipCode(e.target.value)}
+                              disabled={useAddressOnFile}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm disabled:opacity-60 disabled:cursor-not-allowed outline-none focus:border-blue-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+<div>
+<label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Broker Name</label>
                       <input
                         type="text"
                         value={brokerName}
@@ -2495,6 +2830,68 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
         </div>
       )}
     </div>
-  </DashboardLayout>
+      {/* Unlink Personal Client Confirmation Modal */}
+      {isConfirmUnlinkOpen && linkedPersonalClient && linkedPersonalClient.client && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white border border-slate-100 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-extrabold text-slate-900">Unlink Personal Client</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsConfirmUnlinkOpen(false);
+                  setUnlinkError(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to unlink this personal client from the company policy?
+            </p>
+
+            <div className="bg-slate-50 border border-slate-200/70 rounded-xl p-4 space-y-2 text-xs text-slate-700">
+              <div><span className="font-bold text-slate-500">Personal Client:</span> <strong className="text-slate-900">{linkedPersonalClient.client.full_name}</strong></div>
+              <div><span className="font-bold text-slate-500">Linked Role:</span> <strong className="text-slate-900">{linkedPersonalClient.linked_person_role === 'co_applicant' ? 'Co-Applicant' : 'Main Applicant'}</strong></div>
+              <div><span className="font-bold text-slate-500">Policy Number:</span> <strong className="text-slate-900">{policyNumber || '-'}</strong></div>
+            </div>
+
+            <div className="p-3 text-[11px] bg-amber-50 border border-amber-200/60 text-amber-800 rounded-xl font-medium">
+              ⚠️ No policy or client data will be deleted. Only the relationship link will be removed.
+            </div>
+
+            {unlinkError && (
+              <div className="p-3 text-xs bg-rose-50 border border-rose-100 text-rose-600 rounded-xl">
+                {unlinkError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsConfirmUnlinkOpen(false);
+                  setUnlinkError(null);
+                }}
+                disabled={unlinkingClient}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUnlinkClient}
+                disabled={unlinkingClient}
+                className="px-4 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white rounded-xl transition-all shadow-md shadow-rose-500/10 flex items-center gap-1.5"
+              >
+                {unlinkingClient ? 'Unlinking...' : 'Confirm Unlink'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </DashboardLayout>
   );
 }

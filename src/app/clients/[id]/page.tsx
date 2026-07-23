@@ -7,7 +7,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
 import { supabase } from '@/lib/supabaseClient';
-import { formatIsoToUsDate } from '@/utils/dateUtils';
+import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
 
 declare global {
   interface Window {
@@ -54,6 +54,14 @@ interface Policy {
   annual_premium?: number;
   policy_payment_frequency?: string | null;
   billing_type?: string | null;
+  policy_ownership_type?: 'personal' | 'company' | null;
+  linkedPersonalClient?: {
+    id: string;
+    full_name: string;
+    email: string | null;
+    phone: string | null;
+    role: 'main_applicant' | 'co_applicant';
+  } | null;
 }
 
 interface ClientPersonalInformation {
@@ -62,7 +70,9 @@ interface ClientPersonalInformation {
   ssn: string;
   email: string;
   phone: string;
-  tax_members: number;
+  secondary_phone: string;
+  secondary_email: string;
+  has_co_applicant: boolean;
   gender: 'Female' | 'Male' | '';
   marital_status: 'Single' | 'Married' | '';
   born_in_usa: boolean | null;
@@ -75,9 +85,29 @@ interface ClientPersonalInformation {
   immigration_other_description: string;
 }
 
+interface CoApplicantInformation {
+  full_name: string;
+  date_of_birth: string;
+  ssn: string;
+  primary_phone: string;
+  secondary_phone: string;
+  primary_email: string;
+  secondary_email: string;
+  gender: 'Female' | 'Male' | '';
+  marital_status: 'Single' | 'Married' | '';
+  immigration_status: 'Resident' | 'Work Permit' | 'Citizen' | 'Other' | '';
+  alien_number: string;
+  card_number: string;
+  uscis_number: string;
+  immigration_category: string;
+  immigration_expiration_date: string;
+  immigration_other_description: string;
+}
+
 interface ClientResidenceInformation {
   address: string;
   city: string;
+  state: string;
   zip_code: string;
   county: string;
 }
@@ -154,13 +184,18 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   // Personal Information States
   const [personalInfo, setPersonalInfo] = useState<ClientPersonalInformation | null>(null);
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
+  const [isDeletingClient, setIsDeletingClient] = useState(false);
+  const [isDeleteClientModalOpen, setIsDeleteClientModalOpen] = useState(false);
+  const [deleteClientError, setDeleteClientError] = useState<string | null>(null);
   const [personalForm, setPersonalForm] = useState<ClientPersonalInformation>({
     full_name: '',
     date_of_birth: '',
     ssn: '',
     email: '',
     phone: '',
-    tax_members: 1,
+    secondary_phone: '',
+    secondary_email: '',
+    has_co_applicant: false,
     gender: '',
     marital_status: '',
     born_in_usa: null,
@@ -175,12 +210,35 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   const [savingPersonal, setSavingPersonal] = useState(false);
   const [personalError, setPersonalError] = useState<string | null>(null);
 
+  // Co-Applicant States
+  const [coApplicantInfo, setCoApplicantInfo] = useState<CoApplicantInformation | null>(null);
+  const [coApplicantForm, setCoApplicantForm] = useState<CoApplicantInformation>({
+    full_name: '',
+    date_of_birth: '',
+    ssn: '',
+    primary_phone: '',
+    secondary_phone: '',
+    primary_email: '',
+    secondary_email: '',
+    gender: '',
+    marital_status: '',
+    immigration_status: '',
+    alien_number: '',
+    card_number: '',
+    uscis_number: '',
+    immigration_category: '',
+    immigration_expiration_date: '',
+    immigration_other_description: '',
+  });
+  const [loadingCoApplicant, setLoadingCoApplicant] = useState(false);
+
   // Residence States
   const [residenceInfo, setResidenceInfo] = useState<ClientResidenceInformation | null>(null);
   const [isEditingResidence, setIsEditingResidence] = useState(false);
   const [residenceForm, setResidenceForm] = useState<ClientResidenceInformation>({
     address: '',
     city: '',
+    state: '',
     zip_code: '',
     county: '',
   });
@@ -224,6 +282,33 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   const [formStatus, setFormStatus] = useState<'Active' | 'Cancelled' | 'Expired' | 'Pending' | ''>('Active');
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Company Policy Search & Linking state
+  const [companySearchQuery, setCompanySearchQuery] = useState('');
+  const [companySearchResults, setCompanySearchResults] = useState<any[]>([]);
+  const [companyLinksMap, setCompanyLinksMap] = useState<Record<string, string>>({});
+  const [companySearchLoading, setCompanySearchLoading] = useState(false);
+  const [companySearchError, setCompanySearchError] = useState<string | null>(null);
+  const [hasSearchedCompany, setHasSearchedCompany] = useState(false);
+  const [companySearchSuccess, setCompanySearchSuccess] = useState<string | null>(null);
+
+  // Linking state
+  const [selectedCompanyPolicy, setSelectedCompanyPolicy] = useState<any | null>(null);
+  const [isConfirmLinkOpen, setIsConfirmLinkOpen] = useState(false);
+  const [linkedPersonRole, setLinkedPersonRole] = useState<'main_applicant' | 'co_applicant'>('main_applicant');
+  const [linkingPolicy, setLinkingPolicy] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  // Linked Company Policies state
+  const [linkedCompanyPolicies, setLinkedCompanyPolicies] = useState<any[]>([]);
+  const [loadingLinkedPolicies, setLoadingLinkedPolicies] = useState(false);
+
+  // Unlinking state
+  const [selectedUnlinkPolicy, setSelectedUnlinkPolicy] = useState<any | null>(null);
+  const [isConfirmUnlinkOpen, setIsConfirmUnlinkOpen] = useState(false);
+  const [unlinkingPolicy, setUnlinkingPolicy] = useState(false);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+  const [companyUnlinkSuccess, setCompanyUnlinkSuccess] = useState<string | null>(null);
 
   // Expanded Policy IDs
   const [expandedPolicies, setExpandedPolicies] = useState<Record<string, boolean>>({});
@@ -386,7 +471,57 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setPolicies(data || []);
+      const loadedPolicies = data || [];
+
+      // Lookup linked personal clients for directly owned company policies
+      const companyPolicyIds = loadedPolicies
+        .filter((p: any) => p.policy_ownership_type === 'company')
+        .map((p: any) => p.id);
+
+      if (companyPolicyIds.length > 0) {
+        const { data: linksData, error: linksErr } = await supabase
+          .from('personal_commercial_policy_links')
+          .select('commercial_policy_id, personal_client_id, linked_person_role')
+          .in('commercial_policy_id', companyPolicyIds);
+
+        if (!linksErr && linksData && linksData.length > 0) {
+          const personalClientIds = Array.from(new Set(linksData.map((l: any) => l.personal_client_id).filter(Boolean)));
+
+          if (personalClientIds.length > 0) {
+            const { data: personalClientsData } = await supabase
+              .from('clients')
+              .select('id, full_name, email, phone')
+              .in('id', personalClientIds);
+
+            const personalClientMap: Record<string, any> = {};
+            (personalClientsData || []).forEach((c: any) => {
+              personalClientMap[c.id] = c;
+            });
+
+            const linkByPolicyId: Record<string, any> = {};
+            linksData.forEach((l: any) => {
+              const personalClient = personalClientMap[l.personal_client_id];
+              if (personalClient) {
+                linkByPolicyId[l.commercial_policy_id] = {
+                  id: personalClient.id,
+                  full_name: personalClient.full_name,
+                  email: personalClient.email,
+                  phone: personalClient.phone,
+                  role: l.linked_person_role,
+                };
+              }
+            });
+
+            loadedPolicies.forEach((p: any) => {
+              if (linkByPolicyId[p.id]) {
+                p.linkedPersonalClient = linkByPolicyId[p.id];
+              }
+            });
+          }
+        }
+      }
+
+      setPolicies(loadedPolicies);
     } catch (err: any) {
       console.error("Error fetching policies", {
         message: err?.message,
@@ -425,7 +560,9 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
           ssn: data.ssn || '',
           email: data.email || '',
           phone: data.phone || '',
-          tax_members: data.tax_members || 1,
+          secondary_phone: data.secondary_phone || '',
+          secondary_email: data.secondary_email || '',
+          has_co_applicant: data.has_co_applicant || false,
           gender: data.gender || '',
           marital_status: data.marital_status || '',
           born_in_usa: data.born_in_usa ?? null,
@@ -444,6 +581,9 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
           full_name: client?.full_name || '',
           email: client?.email || '',
           phone: client?.phone || '',
+          secondary_phone: '',
+          secondary_email: '',
+          has_co_applicant: false,
         }));
       }
     } catch (err: any) {
@@ -454,6 +594,71 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   };
 
   // Fetch Residence Information
+  const fetchCoApplicantInformation = async () => {
+    try {
+      setLoadingCoApplicant(true);
+      if (!isValidUuid(clientId)) {
+        setCoApplicantInfo(null);
+        setLoadingCoApplicant(false);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('client_co_applicant_information')
+        .select('*')
+        .eq('client_id', clientId)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Co-Applicant fetch error:', error.message, error.code, error.details, error.hint);
+      }
+      
+      setCoApplicantInfo(data);
+      if (data) {
+        setCoApplicantForm({
+          full_name: data.full_name || '',
+          date_of_birth: data.date_of_birth || '',
+          ssn: data.ssn || '',
+          primary_phone: data.primary_phone || '',
+          secondary_phone: data.secondary_phone || '',
+          primary_email: data.primary_email || '',
+          secondary_email: data.secondary_email || '',
+          gender: data.gender || '',
+          marital_status: data.marital_status || '',
+          immigration_status: data.immigration_status || '',
+          alien_number: data.alien_number || '',
+          card_number: data.card_number || '',
+          uscis_number: data.uscis_number || '',
+          immigration_category: data.immigration_category || '',
+          immigration_expiration_date: data.immigration_expiration_date || '',
+          immigration_other_description: data.immigration_other_description || '',
+        });
+      } else {
+        setCoApplicantForm({
+          full_name: '',
+          date_of_birth: '',
+          ssn: '',
+          primary_phone: '',
+          secondary_phone: '',
+          primary_email: '',
+          secondary_email: '',
+          gender: '',
+          marital_status: '',
+          immigration_status: '',
+          alien_number: '',
+          card_number: '',
+          uscis_number: '',
+          immigration_category: '',
+          immigration_expiration_date: '',
+          immigration_other_description: '',
+        });
+      }
+    } catch (err: any) {
+      console.error('Error fetching co-applicant info:', err);
+    } finally {
+      setLoadingCoApplicant(false);
+    }
+  };
+
   const fetchResidenceInformation = async () => {
     try {
       setLoadingResidence(true);
@@ -475,6 +680,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
         setResidenceForm({
           address: data.address || '',
           city: data.city || '',
+          state: data.state || '',
           zip_code: data.zip_code || '',
           county: data.county || '',
         });
@@ -489,6 +695,88 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
       console.error('Error fetching residence info:', err);
     } finally {
       setLoadingResidence(false);
+    }
+  };
+
+  // Fetch Linked Company Policies
+  const fetchLinkedCompanyPolicies = async () => {
+    try {
+      setLoadingLinkedPolicies(true);
+      if (!isValidUuid(clientId)) {
+        setLinkedCompanyPolicies([]);
+        setLoadingLinkedPolicies(false);
+        return;
+      }
+
+      // 1. Fetch links for this personal client
+      const { data: linksData, error: linksErr } = await supabase
+        .from('personal_commercial_policy_links')
+        .select('commercial_policy_id, linked_person_role, created_at')
+        .eq('personal_client_id', clientId);
+
+      if (linksErr) throw linksErr;
+      if (!linksData || linksData.length === 0) {
+        setLinkedCompanyPolicies([]);
+        return;
+      }
+
+      // 2. Fetch policies for commercial_policy_ids
+      const policyIds = Array.from(new Set(linksData.map((l: any) => l.commercial_policy_id).filter(Boolean)));
+      if (policyIds.length === 0) {
+        setLinkedCompanyPolicies([]);
+        return;
+      }
+
+      const { data: policiesData, error: policiesErr } = await supabase
+        .from('policies')
+        .select('id, client_id, policy_number, policy_type, policy_subtype, company_name, writing_company, effective_date, expiration_date, premium, total_premium, status, policy_ownership_type')
+        .in('id', policyIds);
+
+      if (policiesErr) throw policiesErr;
+
+      // 3. Fetch owning clients details for policy client_ids
+      const clientIds = Array.from(new Set((policiesData || []).map((p: any) => p.client_id).filter(Boolean)));
+      let clientMap: Record<string, any> = {};
+      if (clientIds.length > 0) {
+        const { data: clientsData } = await supabase
+          .from('clients')
+          .select('id, full_name, agency_name, email, phone')
+          .in('id', clientIds);
+        if (clientsData) {
+          clientsData.forEach((c: any) => {
+            clientMap[c.id] = c;
+          });
+        }
+      }
+
+      // 4. Merge links, policies, and client data
+      const linkMapByPolicyId: Record<string, any> = {};
+      linksData.forEach((l: any) => {
+        linkMapByPolicyId[l.commercial_policy_id] = l;
+      });
+
+      const merged: any[] = [];
+      const seenPolicyIds = new Set<string>();
+
+      (policiesData || []).forEach((pol: any) => {
+        if (!seenPolicyIds.has(pol.id)) {
+          seenPolicyIds.add(pol.id);
+          const link = linkMapByPolicyId[pol.id];
+          merged.push({
+            ...pol,
+            link_role: link?.linked_person_role || 'main_applicant',
+            link_created_at: link?.created_at,
+            client: clientMap[pol.client_id] || null,
+          });
+        }
+      });
+
+      setLinkedCompanyPolicies(merged);
+    } catch (err: any) {
+      console.error('Error fetching linked company policies:', err);
+      setLinkedCompanyPolicies([]);
+    } finally {
+      setLoadingLinkedPolicies(false);
     }
   };
 
@@ -514,6 +802,156 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
       console.error('Error fetching income info:', err);
     } finally {
       setLoadingIncome(false);
+    }
+  };
+
+  // Search Company Policies
+  const handleSearchCompany = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setCompanySearchLoading(true);
+    setCompanySearchError(null);
+    setHasSearchedCompany(true);
+
+    try {
+      // 1. Query company policies using real table columns only
+      const { data: rawPolicies, error: policiesErr } = await supabase
+        .from('policies')
+        .select('id, client_id, policy_number, policy_type, policy_subtype, company_name, writing_company, policy_ownership_type')
+        .eq('policy_ownership_type', 'company');
+
+      if (policiesErr) throw policiesErr;
+
+      const policiesList = rawPolicies || [];
+
+      // 2. Load related client details
+      const clientIds = Array.from(new Set(policiesList.map((p: any) => p.client_id).filter(Boolean)));
+      let clientMap: Record<string, any> = {};
+      if (clientIds.length > 0) {
+        const { data: clientsData } = await supabase
+          .from('clients')
+          .select('id, full_name, agency_name, email, phone')
+          .in('id', clientIds);
+        if (clientsData) {
+          clientsData.forEach((c: any) => {
+            clientMap[c.id] = c;
+          });
+        }
+      }
+
+      // 3. Merge policies and clients
+      const merged = policiesList.map((p: any) => ({
+        ...p,
+        client: clientMap[p.client_id] || null,
+      }));
+
+      // 4. Filter matching search query case-insensitively
+      const q = companySearchQuery.trim().toLowerCase();
+      const filtered = merged.filter((item: any) => {
+        if (!q) return true;
+        const pNum = (item.policy_number || '').toLowerCase();
+        const cName = (item.client?.full_name || '').toLowerCase();
+        const cAgency = (item.client?.agency_name || '').toLowerCase();
+        const cEmail = (item.client?.email || '').toLowerCase();
+        const cPhone = (item.client?.phone || '').toLowerCase();
+        return pNum.includes(q) || cName.includes(q) || cAgency.includes(q) || cEmail.includes(q) || cPhone.includes(q);
+      });
+
+      // 5. Deduplicate by policy ID
+      const uniqueResults: any[] = [];
+      const seenIds = new Set<string>();
+      filtered.forEach((item: any) => {
+        if (!seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          uniqueResults.push(item);
+        }
+      });
+
+      // 6. Fetch link status from personal_commercial_policy_links
+      const policyIds = uniqueResults.map((item: any) => item.id);
+      let linksMap: Record<string, string> = {};
+      if (policyIds.length > 0) {
+        const { data: linksData } = await supabase
+          .from('personal_commercial_policy_links')
+          .select('commercial_policy_id, personal_client_id')
+          .in('commercial_policy_id', policyIds);
+        
+        if (linksData) {
+          linksData.forEach((l: any) => {
+            linksMap[l.commercial_policy_id] = l.personal_client_id;
+          });
+        }
+      }
+
+      setCompanySearchResults(uniqueResults);
+      setCompanyLinksMap(linksMap);
+    } catch (err: any) {
+      console.error('Error searching company policies:', err);
+      setCompanySearchError(err?.message || 'Error searching company policies');
+      setCompanySearchResults([]);
+    } finally {
+      setCompanySearchLoading(false);
+    }
+  };
+
+  // Confirm and Execute Link Commercial Policy
+  const handleConfirmLinkPolicy = async () => {
+    if (!selectedCompanyPolicy || !selectedCompanyPolicy.id) return;
+    setLinkingPolicy(true);
+    setLinkError(null);
+    setCompanySearchSuccess(null);
+
+    try {
+      const { data, error } = await supabase.rpc('link_commercial_policy', {
+        p_personal_client_id: clientId,
+        p_commercial_policy_id: selectedCompanyPolicy.id,
+        p_linked_person_role: linkedPersonRole,
+      });
+
+      if (error) throw error;
+      if (data && data.success === false) {
+        throw new Error(data.error || 'Failed to link company policy');
+      }
+
+      setIsConfirmLinkOpen(false);
+      setSelectedCompanyPolicy(null);
+      setCompanySearchSuccess('Company policy successfully linked!');
+      await fetchLinkedCompanyPolicies();
+      await handleSearchCompany();
+    } catch (err: any) {
+      console.error('Error linking company policy:', err);
+      setLinkError(err?.message || 'Failed to link company policy.');
+    } finally {
+      setLinkingPolicy(false);
+    }
+  };
+
+  // Unlink Company Policy
+  const handleConfirmUnlinkPolicy = async () => {
+    if (!selectedUnlinkPolicy || !clientId) return;
+    try {
+      setUnlinkingPolicy(true);
+      setUnlinkError(null);
+
+      const { error } = await supabase
+        .from('personal_commercial_policy_links')
+        .delete()
+        .eq('commercial_policy_id', selectedUnlinkPolicy.id)
+        .eq('personal_client_id', clientId);
+
+      if (error) throw error;
+
+      setIsConfirmUnlinkOpen(false);
+      setSelectedUnlinkPolicy(null);
+      setCompanyUnlinkSuccess('Company policy unlinked successfully.');
+      await fetchLinkedCompanyPolicies();
+      if (companySearchQuery.trim()) {
+        await handleSearchCompany();
+      }
+    } catch (err: any) {
+      console.error('Error unlinking company policy:', err);
+      setUnlinkError(err?.message || 'Failed to unlink company policy.');
+    } finally {
+      setUnlinkingPolicy(false);
     }
   };
 
@@ -654,6 +1092,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   useEffect(() => {
     fetchClientDetails();
     fetchPolicies();
+    fetchLinkedCompanyPolicies();
   }, [clientId]);
 
   // Lazy load modules only when tab is active
@@ -662,12 +1101,22 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
       fetchPersonalInformation();
       fetchResidenceInformation();
       fetchIncomeInformation();
+      fetchCoApplicantInformation();
     }
   }, [activeTab, client]);
 
-  // Clean irrelevant conditional values from form payload before database storage
-  const cleanPersonalPayload = (form: ClientPersonalInformation) => {
-    const cleaned = { ...form };
+  const cleanCoApplicantPayload = (form: CoApplicantInformation) => {
+    const cleaned = { ...form } as any;
+    const dobIso = cleaned.date_of_birth
+      ? (cleaned.date_of_birth.includes('/') ? usDateToIso(cleaned.date_of_birth) : cleaned.date_of_birth)
+      : null;
+    cleaned.date_of_birth = dobIso || '';
+
+    const expIso = cleaned.immigration_expiration_date
+      ? (cleaned.immigration_expiration_date.includes('/') ? usDateToIso(cleaned.immigration_expiration_date) : cleaned.immigration_expiration_date)
+      : null;
+    cleaned.immigration_expiration_date = expIso || null;
+
     if (cleaned.immigration_status === 'Resident') {
       cleaned.uscis_number = '';
       cleaned.immigration_category = '';
@@ -680,32 +1129,110 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
       cleaned.card_number = '';
       cleaned.uscis_number = '';
       cleaned.immigration_category = '';
-      cleaned.immigration_expiration_date = '';
+      cleaned.immigration_expiration_date = null;
       cleaned.immigration_other_description = '';
     } else if (cleaned.immigration_status === 'Other') {
       cleaned.alien_number = '';
       cleaned.card_number = '';
       cleaned.uscis_number = '';
       cleaned.immigration_category = '';
-      cleaned.immigration_expiration_date = '';
+      cleaned.immigration_expiration_date = null;
     } else {
       cleaned.alien_number = '';
       cleaned.card_number = '';
       cleaned.uscis_number = '';
       cleaned.immigration_category = '';
-      cleaned.immigration_expiration_date = '';
+      cleaned.immigration_expiration_date = null;
+      cleaned.immigration_other_description = '';
+    }
+    return cleaned;
+  };
+
+  // Clean irrelevant conditional values from form payload before database storage
+  const cleanPersonalPayload = (form: ClientPersonalInformation) => {
+    const cleaned = { ...form } as any;
+    const dobIso = cleaned.date_of_birth
+      ? (cleaned.date_of_birth.includes('/') ? usDateToIso(cleaned.date_of_birth) : cleaned.date_of_birth)
+      : null;
+    cleaned.date_of_birth = dobIso || '';
+
+    const expIso = cleaned.immigration_expiration_date
+      ? (cleaned.immigration_expiration_date.includes('/') ? usDateToIso(cleaned.immigration_expiration_date) : cleaned.immigration_expiration_date)
+      : null;
+    cleaned.immigration_expiration_date = expIso || null;
+
+    if (cleaned.immigration_status === 'Resident') {
+      cleaned.uscis_number = '';
+      cleaned.immigration_category = '';
+      cleaned.immigration_other_description = '';
+    } else if (cleaned.immigration_status === 'Work Permit') {
+      cleaned.alien_number = '';
+      cleaned.immigration_other_description = '';
+    } else if (cleaned.immigration_status === 'Citizen') {
+      cleaned.alien_number = '';
+      cleaned.card_number = '';
+      cleaned.uscis_number = '';
+      cleaned.immigration_category = '';
+      cleaned.immigration_expiration_date = null;
+      cleaned.immigration_other_description = '';
+    } else if (cleaned.immigration_status === 'Other') {
+      cleaned.alien_number = '';
+      cleaned.card_number = '';
+      cleaned.uscis_number = '';
+      cleaned.immigration_category = '';
+      cleaned.immigration_expiration_date = null;
+    } else {
+      cleaned.alien_number = '';
+      cleaned.card_number = '';
+      cleaned.uscis_number = '';
+      cleaned.immigration_category = '';
+      cleaned.immigration_expiration_date = null;
       cleaned.immigration_other_description = '';
     }
     return cleaned;
   };
 
   // Save Personal Info
+  const handleDeleteClient = async () => {
+    if (!client) return;
+    setIsDeletingClient(true);
+    setDeleteClientError(null);
+    try {
+      const { deleteClientSecure } = await import('@/app/actions/deleteClientAction');
+      const currentUser = await supabase.auth.getUser();
+      const res = await deleteClientSecure(client.id, currentUser.data.user?.id || '');
+      
+      if (!res.success) {
+        setDeleteClientError(res.error || 'Failed to delete client.');
+        setIsDeletingClient(false);
+      } else {
+        router.push('/clients');
+      }
+    } catch (err: any) {
+      console.error('Error deleting client:', err);
+      setDeleteClientError('An unexpected error occurred while deleting the client.');
+      setIsDeletingClient(false);
+    }
+  };
+
   const handleSavePersonal = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingPersonal(true);
     setPersonalError(null);
 
+    if (!personalForm.date_of_birth || !personalForm.date_of_birth.trim()) {
+      setPersonalError('Applicant Date of Birth is required.');
+      setSavingPersonal(false);
+      return;
+    }
+
     const payload = cleanPersonalPayload(personalForm);
+
+    if (!payload.date_of_birth) {
+      setPersonalError('Applicant Date of Birth is required.');
+      setSavingPersonal(false);
+      return;
+    }
 
     try {
       // 1. Upsert sub-table
@@ -719,7 +1246,24 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
 
       if (subError) throw subError;
 
-      // 2. Sync master clients values
+      // 2. Co-Applicant
+      if (payload.has_co_applicant) {
+        const coAppPayload = cleanCoApplicantPayload(coApplicantForm);
+        if (!coApplicantForm.full_name?.trim() || !coAppPayload.date_of_birth) {
+           throw new Error('Co-Applicant Name and DOB are required when Co-Applicant is enabled.');
+        }
+        const { error: coAppError } = await supabase
+          .from('client_co_applicant_information')
+          .upsert({
+            client_id: clientId,
+            ...coAppPayload,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'client_id' });
+        
+        if (coAppError) throw coAppError;
+      }
+
+      // 3. Sync master clients values
       const { error: masterError } = await supabase
         .from('clients')
         .update({
@@ -735,6 +1279,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
       setIsEditingPersonal(false);
       await fetchClientDetails();
       await fetchPersonalInformation();
+      await fetchCoApplicantInformation();
     } catch (err: any) {
       setPersonalError(err?.message || 'Failed to save personal information.');
     } finally {
@@ -1111,7 +1656,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
             <aside className="w-full lg:w-[280px] bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 flex-shrink-0 lg:sticky lg:top-6">
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client Profile</span>
-                <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">{client?.full_name}</h2>
+                <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">{personalInfo?.full_name || client?.full_name || '-'}</h2>
               </div>
 
               <div className="border-t border-slate-100 pt-5 space-y-4">
@@ -1125,22 +1670,241 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                 </div>
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email Address</span>
-                  <a href={`mailto:${client?.email}`} className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline block mt-1 truncate">
-                    {client?.email || '-'}
-                  </a>
+                  {(() => {
+                    const resolvedEmail = personalInfo?.email || client?.email || '-';
+                    return (
+                      <a
+                        href={resolvedEmail !== '-' ? `mailto:${resolvedEmail}` : '#'}
+                        className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline block mt-1 truncate"
+                      >
+                        {resolvedEmail}
+                      </a>
+                    );
+                  })()}
                 </div>
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Phone Number</span>
-                  <a href={`tel:${client?.phone}`} className="text-sm font-semibold text-slate-800 hover:text-blue-600 block mt-1">
-                    {client?.phone || '-'}
-                  </a>
+                  {(() => {
+                    const resolvedPhone = personalInfo?.phone || client?.phone || '-';
+                    return (
+                      <a
+                        href={resolvedPhone !== '-' ? `tel:${resolvedPhone}` : '#'}
+                        className="text-sm font-semibold text-slate-800 hover:text-blue-600 block mt-1"
+                      >
+                        {resolvedPhone}
+                      </a>
+                    );
+                  })()}
                 </div>
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Address</span>
                   <span className="text-sm font-medium text-slate-700 block mt-1 leading-relaxed">
-                    {client?.address || '-'}
+                    {[residenceInfo?.address, residenceInfo?.city, residenceInfo?.state, residenceInfo?.county, residenceInfo?.zip_code].filter(Boolean).join(', ') || '-'}
                   </span>
                 </div>
+
+                {personalInfo?.has_co_applicant === true && (
+                  <div className="border-t border-slate-100 pt-4 space-y-3">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Co-Applicant</span>
+                    <div>
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Name</span>
+                      <span className="text-sm font-semibold text-slate-800 block mt-0.5">{coApplicantInfo?.full_name || '-'}</span>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email</span>
+                      <a href={coApplicantInfo?.primary_email ? `mailto:${coApplicantInfo.primary_email}` : '#'} className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline block mt-0.5 truncate">
+                        {coApplicantInfo?.primary_email || '-'}
+                      </a>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Phone</span>
+                      <a href={coApplicantInfo?.primary_phone ? `tel:${coApplicantInfo.primary_phone}` : '#'} className="text-sm font-semibold text-slate-800 hover:text-blue-600 block mt-0.5">
+                        {coApplicantInfo?.primary_phone || '-'}
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {/* Linked Company Policies Block in Sidebar */}
+                {linkedCompanyPolicies.length > 0 && (
+                  <div className="border-t border-slate-100 pt-4 space-y-3">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Linked Company Policies</span>
+                    <div className="space-y-2">
+                      {linkedCompanyPolicies.map((linkedPol) => (
+                        <div key={linkedPol.id} className="bg-rose-600 border border-rose-700 rounded-xl p-3 text-white space-y-1.5 shadow-sm">
+                          <div className="flex items-start justify-between gap-1">
+                            <h5 className="font-extrabold text-white text-xs truncate">{linkedPol.client?.full_name || '-'}</h5>
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-white/20 text-white flex-shrink-0">
+                              {linkedPol.link_role === 'co_applicant' ? 'Co-App' : 'Main App'}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-rose-100 space-y-0.5">
+                            <div><span className="text-rose-200">Policy #:</span> {linkedPol.policy_number || '-'}</div>
+                            <div><span className="text-rose-200">LOB:</span> {linkedPol.policy_type || '-'}</div>
+                          </div>
+                          <div className="pt-1 flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedUnlinkPolicy(linkedPol);
+                                setUnlinkError(null);
+                                setIsConfirmUnlinkOpen(true);
+                              }}
+                              className="text-[10px] font-bold text-white bg-white/20 hover:bg-white/30 border border-white/30 px-2 py-1 rounded-md transition-all shadow-xs"
+                            >
+                              Unlink
+                            </button>
+                            <Link
+                              href={`/clients/${linkedPol.client_id}/policies/${linkedPol.id}`}
+                              className="text-[10px] font-bold text-rose-700 bg-white hover:bg-rose-50 px-2.5 py-1 rounded-md transition-all shadow-xs"
+                            >
+                              View Policy
+                            </Link>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Company Policy Search Block in Sidebar */}
+                {activeTab === 'policies' && (
+                  <div className="border-t border-slate-100 pt-4 space-y-3">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Company Policy Search</span>
+                    <form onSubmit={handleSearchCompany} className="space-y-2">
+                      <input
+                        type="text"
+                        value={companySearchQuery}
+                        onChange={e => setCompanySearchQuery(e.target.value)}
+                        placeholder="Search policy #, company, agency, email..."
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-800 placeholder-slate-400 text-xs outline-none transition-all"
+                      />
+                      <button
+                        type="submit"
+                        disabled={companySearchLoading}
+                        className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold px-3 py-2 rounded-xl transition-all shadow-sm disabled:opacity-50 flex items-center justify-center gap-1.5"
+                      >
+                        {companySearchLoading ? (
+                          <>
+                            <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            <span>Searching...</span>
+                          </>
+                        ) : (
+                          'Search'
+                        )}
+                      </button>
+                    </form>
+
+                    {companySearchError && (
+                      <div className="p-2 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 text-[11px]">
+                        {companySearchError}
+                      </div>
+                    )}
+
+                    {companySearchSuccess && (
+                      <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-semibold">
+                        {companySearchSuccess}
+                      </div>
+                    )}
+
+                    {companySearchLoading ? (
+                      <div className="flex justify-center items-center py-4">
+                        <svg className="animate-spin h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                      </div>
+                    ) : hasSearchedCompany && companySearchResults.length === 0 ? (
+                      <div className="text-center py-4 bg-slate-50/50 border border-slate-100 rounded-lg">
+                        <p className="text-[11px] text-slate-400 font-medium">No company policies found.</p>
+                      </div>
+                    ) : companySearchResults.length > 0 ? (
+                      <div className="space-y-3 pt-1">
+                        {companySearchResults.map((result) => {
+                          const clientInfo = result.client || {};
+                          const linkOwnerId = companyLinksMap[result.id];
+                          let badgeLabel = 'Available';
+                          let badgeStyle = 'bg-emerald-50 text-emerald-700 border-emerald-100';
+
+                          if (linkOwnerId) {
+                            if (linkOwnerId === clientId) {
+                              badgeLabel = 'Linked to this client';
+                              badgeStyle = 'bg-blue-50 text-blue-700 border-blue-100';
+                            } else {
+                              badgeLabel = 'Unavailable';
+                              badgeStyle = 'bg-amber-50 text-amber-700 border-amber-100';
+                            }
+                          }
+
+                          const clientNameDisplay = clientInfo.full_name || '-';
+                          const policyNumDisplay = result.policy_number || '-';
+                          const lobDisplay = result.policy_type ? (result.policy_subtype ? `${result.policy_type} (${result.policy_subtype})` : result.policy_type) : '-';
+                          const companyDisplay = result.writing_company || result.company_name || '-';
+                          const emailDisplay = clientInfo.email || '-';
+                          const phoneDisplay = clientInfo.phone || '-';
+
+                          return (
+                            <div key={result.id} className="bg-slate-50/80 border border-slate-100 rounded-xl p-3 space-y-2 text-xs">
+                              <div className="flex items-start justify-between gap-1.5">
+                                <div className="min-w-0">
+                                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Company / Client</span>
+                                  <h5 className="font-extrabold text-slate-900 text-xs truncate">{clientNameDisplay}</h5>
+                                </div>
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border flex-shrink-0 ${badgeStyle}`}>
+                                  {badgeLabel}
+                                </span>
+                              </div>
+
+                              <div className="space-y-1 text-[11px] border-t border-slate-100 pt-1.5 text-slate-600">
+                                <div className="flex justify-between gap-2">
+                                  <span className="text-slate-400">Policy #:</span>
+                                  <span className="font-semibold text-slate-800 truncate">{policyNumDisplay}</span>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                  <span className="text-slate-400">LOB:</span>
+                                  <span className="font-semibold text-slate-800 truncate">{lobDisplay}</span>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                  <span className="text-slate-400">Company:</span>
+                                  <span className="font-semibold text-slate-700 truncate">{companyDisplay}</span>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                  <span className="text-slate-400">Email:</span>
+                                  <span className="font-medium text-slate-700 truncate">{emailDisplay}</span>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                  <span className="text-slate-400">Phone:</span>
+                                  <span className="font-medium text-slate-700 truncate">{phoneDisplay}</span>
+                                </div>
+                              </div>
+
+                              {/* Select Policy Button (Only for Available status) */}
+                              {!linkOwnerId && (
+                                <div className="pt-1.5 border-t border-slate-100">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedCompanyPolicy(result);
+                                      setLinkedPersonRole('main_applicant');
+                                      setLinkError(null);
+                                      setIsConfirmLinkOpen(true);
+                                    }}
+                                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-[11px] font-bold py-1.5 rounded-lg transition-all shadow-xs"
+                                  >
+                                    Select Policy
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </div>
             </aside>
 
@@ -1178,7 +1942,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                         : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
-                    Commercial Policies
+                    Property & Casualty
                   </button>
                   <button
                     onClick={() => setActiveTab('health')}
@@ -1350,6 +2114,27 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                                       <span className="text-slate-400">Transaction Type: </span>
                                       <strong>{policy.transaction_type || 'New'}</strong>
                                     </div>
+
+                                    {/* Neutral Linked Personal Client Block for Company Policy Owners */}
+                                    {policy.linkedPersonalClient && (
+                                      <div className="mt-2.5 bg-slate-100/90 border border-slate-200/90 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                                        <div className="space-y-0.5 min-w-0">
+                                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">Linked Personal Client</span>
+                                          <div className="flex items-center gap-2 truncate">
+                                            <strong className="text-slate-900 font-bold truncate">{policy.linkedPersonalClient.full_name}</strong>
+                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-white text-slate-700 border border-slate-200 flex-shrink-0">
+                                              {policy.linkedPersonalClient.role === 'co_applicant' ? 'Co-Applicant' : 'Main Applicant'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <Link
+                                          href={`/clients/${policy.linkedPersonalClient.id}`}
+                                          className="text-xs font-bold text-slate-700 hover:text-blue-600 bg-white hover:bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg transition-all shadow-xs inline-flex items-center justify-center flex-shrink-0"
+                                        >
+                                          View Client Profile
+                                        </Link>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
 
@@ -1370,6 +2155,91 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                           </div>
                         )}
                       </div>
+
+                      {/* Linked Company Policies Section in Overview */}
+                      {linkedCompanyPolicies.length > 0 && (
+                        <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
+                          <div className="flex items-center justify-between border-b border-slate-50 pb-4">
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-base font-extrabold text-slate-900">Linked Company Policies</h4>
+                              <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-700">
+                                {linkedCompanyPolicies.length}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3">
+                            {linkedCompanyPolicies.map((policy) => (
+                              <div
+                                key={policy.id}
+                                className="bg-gradient-to-r from-red-600 to-rose-600 border border-rose-700 rounded-xl p-4 text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                              >
+                                <div className="space-y-2 min-w-0 flex-1">
+                                  {/* Line 1: Badges & Title */}
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider bg-white text-rose-700">
+                                      Company Policy
+                                    </span>
+                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white/20 text-white border border-white/30">
+                                      {policy.status || 'Active'}
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-rose-800/60 text-rose-100">
+                                      Role: {policy.link_role === 'co_applicant' ? 'Co-Applicant' : 'Main Applicant'}
+                                    </span>
+                                  </div>
+
+                                  <div className="font-extrabold text-white text-sm">
+                                    {policy.client?.full_name ? `${policy.client.full_name} | ` : ''}
+                                    {policy.policy_type}
+                                    {policy.policy_subtype ? ` (${policy.policy_subtype})` : ''}
+                                    {policy.policy_number ? ` | ${policy.policy_number}` : ''}
+                                  </div>
+
+                                  {/* Details */}
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-rose-100 border-t border-white/10 pt-2">
+                                    <div>
+                                      <span className="text-rose-200">Company: </span>
+                                      <strong className="text-white">{policy.writing_company ?? policy.company_name ?? 'Company not specified'}</strong>
+                                    </div>
+                                    <div>
+                                      <span className="text-rose-200">Term: </span>
+                                      <strong className="text-white">
+                                        {policy.effective_date && policy.expiration_date
+                                          ? `${formatIsoToUsDate(policy.effective_date)} to ${formatIsoToUsDate(policy.expiration_date)}`
+                                          : 'Not provided'}
+                                      </strong>
+                                    </div>
+                                    <div>
+                                      <span className="text-rose-200">Premium: </span>
+                                      <strong className="text-white">{formatCurrency(policy.total_premium ?? policy.premium ?? 0)}</strong>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 sm:justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedUnlinkPolicy(policy);
+                                      setUnlinkError(null);
+                                      setIsConfirmUnlinkOpen(true);
+                                    }}
+                                    className="text-xs font-bold text-white bg-white/20 hover:bg-white/30 border border-white/30 px-3.5 py-2 rounded-lg transition-all shadow-xs"
+                                  >
+                                    Unlink
+                                  </button>
+                                  <Link
+                                    href={`/clients/${policy.client_id}/policies/${policy.id}`}
+                                    className="text-xs font-bold text-rose-700 bg-white hover:bg-rose-50 px-4 py-2 rounded-lg shadow-sm transition-all"
+                                  >
+                                    View Policy
+                                  </Link>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -1378,6 +2248,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
               {/* POLICIES TAB CONTENT (Functional list, edit/delete actions, search/filters, details table) */}
               {activeTab === 'policies' && (
                 <div className="space-y-6">
+
                   {/* Policies Search and Filter Section */}
                   <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between shadow-sm">
                     {/* Search Input */}
@@ -1526,8 +2397,21 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                                   </span>
                                 </td>
                                 <td className="p-4 font-bold text-slate-800 whitespace-nowrap">
-                                  {policy.policy_type}
-                                  {policy.policy_subtype ? ` (${policy.policy_subtype})` : ''}
+                                  <div>{policy.policy_type}{policy.policy_subtype ? ` (${policy.policy_subtype})` : ''}</div>
+                                  {policy.linkedPersonalClient && (
+                                    <div className="mt-1 flex items-center gap-2 text-[10px] font-normal text-slate-600 bg-slate-100/90 border border-slate-200/80 px-2 py-1 rounded-md max-w-md" onClick={(e) => e.stopPropagation()}>
+                                      <span className="font-bold text-slate-700 truncate">Linked: {policy.linkedPersonalClient.full_name}</span>
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-white text-slate-700 border border-slate-200 flex-shrink-0">
+                                        {policy.linkedPersonalClient.role === 'co_applicant' ? 'Co-App' : 'Main App'}
+                                      </span>
+                                      <Link
+                                        href={`/clients/${policy.linkedPersonalClient.id}`}
+                                        className="ml-auto font-bold text-blue-600 hover:text-blue-800 hover:underline flex-shrink-0"
+                                      >
+                                        View Client Profile
+                                      </Link>
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="p-4 font-medium text-slate-600 whitespace-nowrap">
                                   {policy.policy_number || '-'}
@@ -1628,291 +2512,585 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                         </svg>
                       </div>
                     ) : (
-                      <form onSubmit={handleSavePersonal} className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-                        
-                        {/* Left Column */}
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Applicant Name</label>
-                            {isEditingPersonal ? (
-                              <input
-                                type="text"
-                                value={personalForm.full_name}
-                                onChange={e => setPersonalForm(prev => ({ ...prev, full_name: e.target.value }))}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                required
-                              />
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.full_name || '-'}</span>
-                            )}
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">DOB</label>
-                            {isEditingPersonal ? (
-                              <input
-                                type="date"
-                                value={personalForm.date_of_birth}
-                                onChange={e => setPersonalForm(prev => ({ ...prev, date_of_birth: e.target.value }))}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              />
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">
-                                {personalForm.date_of_birth ? new Date(personalForm.date_of_birth + 'T00:00:00').toLocaleDateString() : '-'}
-                              </span>
-                            )}
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</label>
-                            <span className="font-semibold text-slate-500 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center">
-                              {calculateAge(personalForm.date_of_birth)}
-                            </span>
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">SSN</label>
-                            {isEditingPersonal ? (
-                              <input
-                                type="text"
-                                value={personalForm.ssn}
-                                onChange={e => setPersonalForm(prev => ({ ...prev, ssn: e.target.value }))}
-                                placeholder="e.g. 000-00-0000"
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              />
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.ssn || '-'}</span>
-                            )}
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Phone</label>
-                            {isEditingPersonal ? (
-                              <input
-                                type="text"
-                                value={personalForm.phone}
-                                onChange={e => setPersonalForm(prev => ({ ...prev, phone: e.target.value }))}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              />
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.phone || '-'}</span>
-                            )}
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Email</label>
-                            {isEditingPersonal ? (
-                              <input
-                                type="email"
-                                value={personalForm.email}
-                                onChange={e => setPersonalForm(prev => ({ ...prev, email: e.target.value }))}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              />
-                            ) : (
-                              <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{personalForm.email || '-'}</span>
-                            )}
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Number of Tax Members</label>
-                            {isEditingPersonal ? (
-                              <input
-                                type="number"
-                                value={personalForm.tax_members}
-                                onChange={e => setPersonalForm(prev => ({ ...prev, tax_members: Number(e.target.value) }))}
-                                min={1}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              />
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.tax_members}</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Right Column */}
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Gender</label>
-                            {isEditingPersonal ? (
-                              <select
-                                value={personalForm.gender}
-                                onChange={e => setPersonalForm(prev => ({ ...prev, gender: e.target.value as any }))}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              >
-                                <option value="">Select Gender</option>
-                                <option value="Female">Female</option>
-                                <option value="Male">Male</option>
-                              </select>
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.gender || '-'}</span>
-                            )}
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Marital Status</label>
-                            {isEditingPersonal ? (
-                              <select
-                                value={personalForm.marital_status}
-                                onChange={e => setPersonalForm(prev => ({ ...prev, marital_status: e.target.value as any }))}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              >
-                                <option value="">Select Status</option>
-                                <option value="Single">Single</option>
-                                <option value="Married">Married</option>
-                              </select>
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.marital_status || '-'}</span>
-                            )}
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Immigration Status</label>
-                            {isEditingPersonal ? (
-                              <select
-                                value={personalForm.immigration_status}
-                                onChange={e => setPersonalForm(prev => ({ ...prev, immigration_status: e.target.value as any }))}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              >
-                                <option value="">Select Status</option>
-                                <option value="Resident">Resident</option>
-                                <option value="Work Permit">Work Permit</option>
-                                <option value="Citizen">Citizen</option>
-                                <option value="Other">Other</option>
-                              </select>
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.immigration_status || '-'}</span>
-                            )}
-                          </div>
-
-                          {/* CONDITIONAL IMMIGRATION FIELDS DIRECTLY BELOW IMMIGRATION STATUS */}
-
-                          {/* Resident fields */}
-                          {personalForm.immigration_status === 'Resident' && (
-                            <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                              <div>
-                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Alien Number</label>
-                                {isEditingPersonal ? (
-                                  <input
-                                    type="text"
-                                    value={personalForm.alien_number}
-                                    onChange={e => setPersonalForm(prev => ({ ...prev, alien_number: e.target.value }))}
-                                    className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                  />
-                                ) : (
-                                  <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.alien_number || '-'}</span>
-                                )}
-                              </div>
-                              <div>
-                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Card Number</label>
-                                {isEditingPersonal ? (
-                                  <input
-                                    type="text"
-                                    value={personalForm.card_number}
-                                    onChange={e => setPersonalForm(prev => ({ ...prev, card_number: e.target.value }))}
-                                    className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                  />
-                                ) : (
-                                  <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.card_number || '-'}</span>
-                                )}
-                              </div>
-                              <div>
-                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
-                                {isEditingPersonal ? (
-                                  <input
-                                    type="date"
-                                    value={personalForm.immigration_expiration_date}
-                                    onChange={e => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: e.target.value }))}
-                                    className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                  />
-                                ) : (
-                                  <span className="font-semibold text-slate-800 block min-h-[16px]">
-                                    {personalForm.immigration_expiration_date ? new Date(personalForm.immigration_expiration_date + 'T00:00:00').toLocaleDateString() : '-'}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Work Permit fields */}
-                          {personalForm.immigration_status === 'Work Permit' && (
-                            <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                              <div>
-                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Card Number</label>
-                                {isEditingPersonal ? (
-                                  <input
-                                    type="text"
-                                    value={personalForm.card_number}
-                                    onChange={e => setPersonalForm(prev => ({ ...prev, card_number: e.target.value }))}
-                                    className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                  />
-                                ) : (
-                                  <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.card_number || '-'}</span>
-                                )}
-                              </div>
-                              <div>
-                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">USCIS Number</label>
-                                {isEditingPersonal ? (
-                                  <input
-                                    type="text"
-                                    value={personalForm.uscis_number}
-                                    onChange={e => setPersonalForm(prev => ({ ...prev, uscis_number: e.target.value }))}
-                                    className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                  />
-                                ) : (
-                                  <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.uscis_number || '-'}</span>
-                                )}
-                              </div>
-                              <div>
-                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Category</label>
-                                {isEditingPersonal ? (
-                                  <input
-                                    type="text"
-                                    value={personalForm.immigration_category}
-                                    onChange={e => setPersonalForm(prev => ({ ...prev, immigration_category: e.target.value }))}
-                                    placeholder="e.g. C09"
-                                    className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                  />
-                                ) : (
-                                  <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.immigration_category || '-'}</span>
-                                )}
-                              </div>
-                              <div>
-                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
-                                {isEditingPersonal ? (
-                                  <input
-                                    type="date"
-                                    value={personalForm.immigration_expiration_date}
-                                    onChange={e => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: e.target.value }))}
-                                    className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                  />
-                                ) : (
-                                  <span className="font-semibold text-slate-800 block min-h-[16px]">
-                                    {personalForm.immigration_expiration_date ? new Date(personalForm.immigration_expiration_date + 'T00:00:00').toLocaleDateString() : '-'}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Other fields */}
-                          {personalForm.immigration_status === 'Other' && (
-                            <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Other Immigration Status Description</label>
+                      <form onSubmit={handleSavePersonal} className="space-y-8">
+                        {/* Main Applicant Grid */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
+                          {/* Left Column */}
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Applicant Name</label>
                               {isEditingPersonal ? (
-                                <textarea
-                                  value={personalForm.immigration_other_description}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, immigration_other_description: e.target.value }))}
-                                  className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all h-20 resize-none"
-                                  placeholder="e.g. Asylee, TPS"
+                                <input
+                                  type="text"
+                                  value={personalForm.full_name}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, full_name: e.target.value }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                  required
                                 />
                               ) : (
-                                <p className="font-semibold text-slate-700 leading-relaxed text-xs block min-h-[16px] whitespace-pre-line">
-                                  {personalForm.immigration_other_description || '-'}
-                                </p>
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.full_name || '-'}</span>
                               )}
                             </div>
-                          )}
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">DOB</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="text"
+                                  placeholder="MM/DD/YYYY"
+                                  value={personalForm.date_of_birth.includes('-') ? formatIsoToUsDate(personalForm.date_of_birth) : personalForm.date_of_birth}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, date_of_birth: formatAsDateInput(e.target.value) }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">
+                                  {personalForm.date_of_birth ? formatIsoToUsDate(personalForm.date_of_birth) : '-'}
+                                </span>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</label>
+                              <span className="font-semibold text-slate-500 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center">
+                                {calculateAge(personalForm.date_of_birth)}
+                              </span>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">SSN</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="text"
+                                  value={personalForm.ssn}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, ssn: e.target.value }))}
+                                  placeholder="e.g. 000-00-0000"
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.ssn || '-'}</span>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Phone</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="text"
+                                  value={personalForm.phone}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, phone: e.target.value }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.phone || '-'}</span>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Phone</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="text"
+                                  value={personalForm.secondary_phone}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, secondary_phone: e.target.value }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.secondary_phone || '-'}</span>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Email</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="email"
+                                  value={personalForm.email}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, email: e.target.value }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{personalForm.email || '-'}</span>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Email</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="email"
+                                  value={personalForm.secondary_email}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, secondary_email: e.target.value }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{personalForm.secondary_email || '-'}</span>
+                              )}
+                            </div>
+
+                            <div className="pt-2">
+                              <div className="flex items-center space-x-3 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                                <input
+                                  type="checkbox"
+                                  id="has_co_applicant"
+                                  checked={personalForm.has_co_applicant}
+                                  onChange={e => {
+                                    if (isEditingPersonal) {
+                                      setPersonalForm(prev => ({ ...prev, has_co_applicant: e.target.checked }));
+                                    }
+                                  }}
+                                  disabled={!isEditingPersonal}
+                                  className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 disabled:opacity-50"
+                                />
+                                <label htmlFor="has_co_applicant" className="text-sm font-bold text-slate-700 select-none cursor-pointer">
+                                  Include Co-Applicant
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Right Column */}
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Gender</label>
+                              {isEditingPersonal ? (
+                                <select
+                                  value={personalForm.gender}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, gender: e.target.value as any }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                >
+                                  <option value="">Select Gender</option>
+                                  <option value="Female">Female</option>
+                                  <option value="Male">Male</option>
+                                </select>
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.gender || '-'}</span>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Marital Status</label>
+                              {isEditingPersonal ? (
+                                <select
+                                  value={personalForm.marital_status}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, marital_status: e.target.value as any }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                >
+                                  <option value="">Select Status</option>
+                                  <option value="Single">Single</option>
+                                  <option value="Married">Married</option>
+                                </select>
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.marital_status || '-'}</span>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Immigration Status</label>
+                              {isEditingPersonal ? (
+                                <select
+                                  value={personalForm.immigration_status}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, immigration_status: e.target.value as any }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                >
+                                  <option value="">Select Status</option>
+                                  <option value="Resident">Resident</option>
+                                  <option value="Work Permit">Work Permit</option>
+                                  <option value="Citizen">Citizen</option>
+                                  <option value="Other">Other</option>
+                                </select>
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.immigration_status || '-'}</span>
+                              )}
+                            </div>
+
+                            {/* CONDITIONAL IMMIGRATION FIELDS DIRECTLY BELOW IMMIGRATION STATUS */}
+
+                            {/* Resident fields */}
+                            {personalForm.immigration_status === 'Resident' && (
+                              <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Alien Number</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={personalForm.alien_number}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, alien_number: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.alien_number || '-'}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Card Number</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={personalForm.card_number}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, card_number: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.card_number || '-'}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="date"
+                                      value={personalForm.immigration_expiration_date}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">
+                                      {personalForm.immigration_expiration_date ? new Date(personalForm.immigration_expiration_date + 'T00:00:00').toLocaleDateString() : '-'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Work Permit fields */}
+                            {personalForm.immigration_status === 'Work Permit' && (
+                              <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Card Number</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={personalForm.card_number}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, card_number: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.card_number || '-'}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">USCIS Number</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={personalForm.uscis_number}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, uscis_number: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.uscis_number || '-'}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Category</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={personalForm.immigration_category}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, immigration_category: e.target.value }))}
+                                      placeholder="e.g. C09"
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.immigration_category || '-'}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="date"
+                                      value={personalForm.immigration_expiration_date}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">
+                                      {personalForm.immigration_expiration_date ? new Date(personalForm.immigration_expiration_date + 'T00:00:00').toLocaleDateString() : '-'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Other fields */}
+                            {personalForm.immigration_status === 'Other' && (
+                              <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
+                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Other Immigration Status Description</label>
+                                {isEditingPersonal ? (
+                                  <textarea
+                                    value={personalForm.immigration_other_description}
+                                    onChange={e => setPersonalForm(prev => ({ ...prev, immigration_other_description: e.target.value }))}
+                                    className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all h-20 resize-none"
+                                    placeholder="e.g. Asylee, TPS"
+                                  />
+                                ) : (
+                                  <p className="font-semibold text-slate-700 leading-relaxed text-xs block min-h-[16px] whitespace-pre-line">
+                                    {personalForm.immigration_other_description || '-'}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
+
+                        {/* Co-Applicant Section - Rendered BELOW Main Applicant Grid */}
+                        {personalForm.has_co_applicant && (
+                          <div className="pt-8 mt-8 border-t border-slate-200">
+                            <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-widest mb-6">Co-Applicant Personal Information</h4>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
+                              {/* Left Column */}
+                              <div className="space-y-4">
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Co-Applicant Name</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={coApplicantForm.full_name}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, full_name: e.target.value }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.full_name || '-'}</span>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">DOB</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      placeholder="MM/DD/YYYY"
+                                      value={coApplicantForm.date_of_birth.includes('-') ? formatIsoToUsDate(coApplicantForm.date_of_birth) : coApplicantForm.date_of_birth}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, date_of_birth: formatAsDateInput(e.target.value) }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">
+                                      {coApplicantInfo?.date_of_birth ? formatIsoToUsDate(coApplicantInfo.date_of_birth) : '-'}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</label>
+                                  <span className="font-semibold text-slate-500 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center">
+                                    {calculateAge(isEditingPersonal ? coApplicantForm.date_of_birth : (coApplicantInfo?.date_of_birth || ''))}
+                                  </span>
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">SSN</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={coApplicantForm.ssn}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, ssn: e.target.value }))}
+                                      placeholder="e.g. 000-00-0000"
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.ssn || '-'}</span>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Phone</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={coApplicantForm.primary_phone}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, primary_phone: e.target.value }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.primary_phone || '-'}</span>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Phone</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={coApplicantForm.secondary_phone}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, secondary_phone: e.target.value }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.secondary_phone || '-'}</span>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Email</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="email"
+                                      value={coApplicantForm.primary_email}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, primary_email: e.target.value }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{coApplicantInfo?.primary_email || '-'}</span>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Email</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="email"
+                                      value={coApplicantForm.secondary_email}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, secondary_email: e.target.value }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{coApplicantInfo?.secondary_email || '-'}</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Right Column */}
+                              <div className="space-y-4">
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Gender</label>
+                                  {isEditingPersonal ? (
+                                    <select
+                                      value={coApplicantForm.gender}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, gender: e.target.value as any }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    >
+                                      <option value="">Select Gender</option>
+                                      <option value="Female">Female</option>
+                                      <option value="Male">Male</option>
+                                    </select>
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.gender || '-'}</span>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Marital Status</label>
+                                  {isEditingPersonal ? (
+                                    <select
+                                      value={coApplicantForm.marital_status}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, marital_status: e.target.value as any }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    >
+                                      <option value="">Select Status</option>
+                                      <option value="Single">Single</option>
+                                      <option value="Married">Married</option>
+                                    </select>
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.marital_status || '-'}</span>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Immigration Status</label>
+                                  {isEditingPersonal ? (
+                                    <select
+                                      value={coApplicantForm.immigration_status}
+                                      onChange={e => {
+                                        const newStatus = e.target.value as any;
+                                        setCoApplicantForm(prev => {
+                                          const next = { ...prev, immigration_status: newStatus };
+                                          if (newStatus === 'Resident') { next.uscis_number = ''; next.immigration_category = ''; next.immigration_other_description = ''; }
+                                          else if (newStatus === 'Work Permit') { next.alien_number = ''; next.immigration_other_description = ''; }
+                                          else if (newStatus === 'Citizen') { next.alien_number = ''; next.card_number = ''; next.uscis_number = ''; next.immigration_category = ''; next.immigration_expiration_date = ''; next.immigration_other_description = ''; }
+                                          else if (newStatus === 'Other') { next.alien_number = ''; next.card_number = ''; next.uscis_number = ''; next.immigration_category = ''; next.immigration_expiration_date = ''; }
+                                          return next;
+                                        });
+                                      }}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    >
+                                      <option value="">Select Status</option>
+                                      <option value="Resident">Resident</option>
+                                      <option value="Work Permit">Work Permit</option>
+                                      <option value="Citizen">Citizen</option>
+                                      <option value="Other">Other</option>
+                                    </select>
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.immigration_status || '-'}</span>
+                                  )}
+                                </div>
+
+                                {/* Co-Applicant Conditional Immigration Fields */}
+                                {['Resident', 'Work Permit', 'Other'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
+                                  <div className="space-y-4 pt-4 border-t border-slate-100">
+                                    {['Resident'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
+                                      <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Alien Number</label>
+                                        {isEditingPersonal ? (
+                                          <input type="text" value={coApplicantForm.alien_number} onChange={e => setCoApplicantForm(prev => ({ ...prev, alien_number: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                                        ) : (
+                                          <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.alien_number || '-'}</span>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {['Resident', 'Work Permit'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
+                                      <>
+                                        {coApplicantForm.immigration_status === 'Work Permit' && (
+                                          <div>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">USCIS Number</label>
+                                            {isEditingPersonal ? (
+                                              <input type="text" value={coApplicantForm.uscis_number} onChange={e => setCoApplicantForm(prev => ({ ...prev, uscis_number: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                                            ) : (
+                                              <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.uscis_number || '-'}</span>
+                                            )}
+                                          </div>
+                                        )}
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Card Number</label>
+                                          {isEditingPersonal ? (
+                                            <input type="text" value={coApplicantForm.card_number} onChange={e => setCoApplicantForm(prev => ({ ...prev, card_number: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                                          ) : (
+                                            <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.card_number || '-'}</span>
+                                          )}
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Expiration Date</label>
+                                          {isEditingPersonal ? (
+                                            <input type="text" placeholder="MM/DD/YYYY" value={coApplicantForm.immigration_expiration_date.includes('-') ? formatIsoToUsDate(coApplicantForm.immigration_expiration_date) : coApplicantForm.immigration_expiration_date} onChange={e => setCoApplicantForm(prev => ({ ...prev, immigration_expiration_date: formatAsDateInput(e.target.value) }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                                          ) : (
+                                            <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">
+                                              {coApplicantInfo?.immigration_expiration_date ? formatIsoToUsDate(coApplicantInfo.immigration_expiration_date) : '-'}
+                                            </span>
+                                          )}
+                                        </div>
+                                        {coApplicantForm.immigration_status === 'Work Permit' && (
+                                          <div>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Category</label>
+                                            {isEditingPersonal ? (
+                                              <input type="text" value={coApplicantForm.immigration_category} onChange={e => setCoApplicantForm(prev => ({ ...prev, immigration_category: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                                            ) : (
+                                              <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.immigration_category || '-'}</span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+
+                                    {['Other'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
+                                      <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Description</label>
+                                        {isEditingPersonal ? (
+                                          <textarea value={coApplicantForm.immigration_other_description} onChange={e => setCoApplicantForm(prev => ({ ...prev, immigration_other_description: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all resize-y min-h-[80px]" placeholder="e.g. Asylee, TPS" />
+                                        ) : (
+                                          <p className="font-semibold text-slate-700 leading-relaxed text-xs block min-h-[16px] whitespace-pre-line">
+                                            {coApplicantInfo?.immigration_other_description || '-'}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </form>
                     )}
                   </div>
@@ -1984,52 +3162,66 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                               required
                             />
                           ) : (
-                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceForm.address || '-'}</span>
+                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.address || '-'}</span>
                           )}
                         </div>
 
-                        <div className="grid grid-cols-3 md:col-span-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">City</label>
-                            {isEditingResidence ? (
-                              <input
-                                type="text"
-                                value={residenceForm.city}
-                                onChange={e => setResidenceForm(prev => ({ ...prev, city: e.target.value }))}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                required
-                              />
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceForm.city || '-'}</span>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Zip Code</label>
-                            {isEditingResidence ? (
-                              <input
-                                type="text"
-                                value={residenceForm.zip_code}
-                                onChange={e => setResidenceForm(prev => ({ ...prev, zip_code: e.target.value }))}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                required
-                              />
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceForm.zip_code || '-'}</span>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">County</label>
-                            {isEditingResidence ? (
-                              <input
-                                type="text"
-                                value={residenceForm.county}
-                                onChange={e => setResidenceForm(prev => ({ ...prev, county: e.target.value }))}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              />
-                            ) : (
-                              <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceForm.county || '-'}</span>
-                            )}
-                          </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">City</label>
+                          {isEditingResidence ? (
+                            <input
+                              type="text"
+                              value={residenceForm.city}
+                              onChange={e => setResidenceForm(prev => ({ ...prev, city: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                              required
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.city || '-'}</span>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">State</label>
+                          {isEditingResidence ? (
+                            <input
+                              type="text"
+                              value={residenceForm.state}
+                              onChange={e => setResidenceForm(prev => ({ ...prev, state: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.state || '-'}</span>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">County</label>
+                          {isEditingResidence ? (
+                            <input
+                              type="text"
+                              value={residenceForm.county}
+                              onChange={e => setResidenceForm(prev => ({ ...prev, county: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.county || '-'}</span>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ZIP Code</label>
+                          {isEditingResidence ? (
+                            <input
+                              type="text"
+                              value={residenceForm.zip_code}
+                              onChange={e => setResidenceForm(prev => ({ ...prev, zip_code: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                              required
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.zip_code || '-'}</span>
+                          )}
                         </div>
                       </form>
                     )}
@@ -2326,6 +3518,71 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
 
       {/* INCOME MODALS */}
 
+      {/* DANGER ZONE */}
+        <div className="mt-12 bg-rose-50 border border-rose-100 rounded-2xl p-6">
+          <h3 className="text-rose-800 font-extrabold text-lg mb-2">Danger Zone</h3>
+          <p className="text-rose-600/80 text-sm mb-6">
+            Deleting this client is a permanent action and cannot be reversed. All data associated with this client will be permanently removed.
+          </p>
+          <button
+            onClick={() => {
+              setDeleteClientError(null);
+              setIsDeleteClientModalOpen(true);
+            }}
+            className="text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 px-4 py-2.5 rounded-xl transition-all shadow-md shadow-rose-500/20"
+          >
+            Delete Client Profile
+          </button>
+        </div>
+
+      {/* Delete Client Modal */}
+      {isDeleteClientModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-lg shadow-2xl animate-scale-up border border-slate-100">
+            <h3 className="text-xl font-extrabold text-rose-600 mb-2">Delete Client</h3>
+            <p className="text-sm font-semibold text-slate-800 mb-2">
+              Are you sure you want to permanently delete this client? This action cannot be undone.
+            </p>
+            <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 mb-6">
+              <span className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Client Profile</span>
+              <span className="text-base font-bold text-slate-900">{personalInfo?.full_name || client?.full_name}</span>
+            </div>
+            
+            {policies.length > 0 && (
+              <div className="bg-orange-50 border border-orange-100 rounded-xl p-4 mb-6">
+                <span className="block text-xs font-bold uppercase tracking-wider text-orange-600 mb-1">Warning</span>
+                <span className="text-sm font-medium text-orange-800">
+                  This client has {policies.length} policies. Deleting the client will also permanently delete those policies and their related notes, documents, chronology, and attachments.
+                </span>
+              </div>
+            )}
+
+            {deleteClientError && (
+              <div className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-sm font-medium">
+                {deleteClientError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setIsDeleteClientModalOpen(false)}
+                className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
+                disabled={isDeletingClient}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteClient}
+                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-500/20 rounded-xl transition-all disabled:opacity-50"
+                disabled={isDeletingClient}
+              >
+                {isDeletingClient ? 'Deleting...' : 'Delete Client'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Income Modal */}
       {isAddIncomeOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
@@ -2551,6 +3808,183 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
       )}
 
       
+      {/* Modal: Confirm Company Policy Link */}
+      {isConfirmLinkOpen && selectedCompanyPolicy && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-xl max-w-md w-full p-6 space-y-5 animate-scaleUp">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-extrabold text-slate-900">Confirm Company Policy Link</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsConfirmLinkOpen(false);
+                  setSelectedCompanyPolicy(null);
+                  setLinkError(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 transition-colors p-1"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to link this company policy to the current personal client?
+            </p>
+
+            {/* Policy Summary Card */}
+            <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5 space-y-2 text-xs">
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">Company / Client:</span>
+                <span className="font-extrabold text-slate-900 truncate">{selectedCompanyPolicy.client?.full_name || '-'}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">Policy Number:</span>
+                <span className="font-semibold text-slate-800 truncate">{selectedCompanyPolicy.policy_number || '-'}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">Policy Type / LOB:</span>
+                <span className="font-semibold text-slate-800 truncate">
+                  {selectedCompanyPolicy.policy_type ? (selectedCompanyPolicy.policy_subtype ? `${selectedCompanyPolicy.policy_type} (${selectedCompanyPolicy.policy_subtype})` : selectedCompanyPolicy.policy_type) : '-'}
+                </span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">Carrier / Writing Co:</span>
+                <span className="font-semibold text-slate-700 truncate">{selectedCompanyPolicy.writing_company || selectedCompanyPolicy.company_name || '-'}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">Primary Email:</span>
+                <span className="font-medium text-slate-700 truncate">{selectedCompanyPolicy.client?.email || '-'}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">Primary Phone:</span>
+                <span className="font-medium text-slate-700 truncate">{selectedCompanyPolicy.client?.phone || '-'}</span>
+              </div>
+            </div>
+
+            {/* Role Selection */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700">Linked Person Role</label>
+              <select
+                value={linkedPersonRole}
+                onChange={(e) => setLinkedPersonRole(e.target.value as 'main_applicant' | 'co_applicant')}
+                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+              >
+                <option value="main_applicant">Main Applicant</option>
+                {personalInfo?.has_co_applicant === true && (
+                  <option value="co_applicant">Co-Applicant</option>
+                )}
+              </select>
+            </div>
+
+            {linkError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs">
+                {linkError}
+              </div>
+            )}
+
+            {/* Modal Buttons */}
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsConfirmLinkOpen(false);
+                  setSelectedCompanyPolicy(null);
+                  setLinkError(null);
+                }}
+                disabled={linkingPolicy}
+                className="border border-slate-200 hover:bg-slate-50 text-slate-600 font-semibold rounded-xl px-4 py-2 text-xs transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmLinkPolicy}
+                disabled={linkingPolicy}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl px-4 py-2 text-xs transition-all shadow-md shadow-blue-500/10 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {linkingPolicy ? (
+                  <>
+                    <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>Linking...</span>
+                  </>
+                ) : (
+                  'Confirm Link'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unlink Company Policy Confirmation Modal */}
+      {isConfirmUnlinkOpen && selectedUnlinkPolicy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white border border-slate-100 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-extrabold text-slate-900">Unlink Company Policy</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsConfirmUnlinkOpen(false);
+                  setSelectedUnlinkPolicy(null);
+                  setUnlinkError(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to unlink this company policy from the current personal client?
+            </p>
+
+            <div className="bg-slate-50 border border-slate-200/70 rounded-xl p-4 space-y-2 text-xs text-slate-700">
+              <div><span className="font-bold text-slate-500">Company / Client:</span> <strong className="text-slate-900">{selectedUnlinkPolicy.client?.full_name || '-'}</strong></div>
+              <div><span className="font-bold text-slate-500">Policy Number:</span> <strong className="text-slate-900">{selectedUnlinkPolicy.policy_number || '-'}</strong></div>
+              <div><span className="font-bold text-slate-500">Linked Role:</span> <strong className="text-slate-900">{selectedUnlinkPolicy.link_role === 'co_applicant' ? 'Co-Applicant' : 'Main Applicant'}</strong></div>
+            </div>
+
+            <div className="p-3 text-[11px] bg-amber-50 border border-amber-200/60 text-amber-800 rounded-xl font-medium">
+              ⚠️ The policy and both client profiles will remain intact. Only the relationship link will be removed.
+            </div>
+
+            {unlinkError && (
+              <div className="p-3 text-xs bg-rose-50 border border-rose-100 text-rose-600 rounded-xl">
+                {unlinkError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsConfirmUnlinkOpen(false);
+                  setSelectedUnlinkPolicy(null);
+                  setUnlinkError(null);
+                }}
+                disabled={unlinkingPolicy}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmUnlinkPolicy}
+                disabled={unlinkingPolicy}
+                className="px-4 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white rounded-xl transition-all shadow-md shadow-rose-500/10 flex items-center gap-1.5"
+              >
+                {unlinkingPolicy ? 'Unlinking...' : 'Confirm Unlink'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }
