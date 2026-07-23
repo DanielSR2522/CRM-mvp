@@ -1,69 +1,25 @@
 'use server';
 
-import { cookies } from 'next/headers';
+import { createClient } from '@/lib/supabaseServer';
 import { getSupabaseAdmin, isAdminConfigured } from '@/lib/supabaseAdmin';
 import { revalidatePath } from 'next/cache';
 
 export async function deleteClientSecure(clientId: string) {
   try {
     if (!isAdminConfigured()) {
-      return { success: false, error: 'Delete failed: Server configuration is missing.' };
+      return { success: false, error: 'Delete failed: Server administration service is not configured.' };
     }
 
-    // 1. Obtain authenticated user from actual Supabase server session/cookies
-    const cookieStore = await cookies();
-    let accessToken: string | null = null;
+    // 1. Authenticate user using official @supabase/ssr server client and Next.js cookies()
+    const supabaseServer = await createClient();
+    const { data: { user }, error: authError } = await supabaseServer.auth.getUser();
 
-    const allCookies = cookieStore.getAll();
-    for (const c of allCookies) {
-      const val = c.value.trim();
-      if (!val) continue;
-
-      if (
-        c.name.includes('auth-token') ||
-        c.name.includes('access_token') ||
-        c.name.startsWith('sb-') ||
-        c.name.includes('supabase') ||
-        c.name.includes('session')
-      ) {
-        try {
-          const parsed = JSON.parse(val);
-          if (Array.isArray(parsed) && typeof parsed[0] === 'string' && parsed[0].split('.').length === 3) {
-            accessToken = parsed[0];
-            break;
-          } else if (parsed && typeof parsed.access_token === 'string') {
-            accessToken = parsed.access_token;
-            break;
-          } else if (parsed && typeof parsed.currentSession?.access_token === 'string') {
-            accessToken = parsed.currentSession.access_token;
-            break;
-          }
-        } catch {
-          if (val.split('.').length === 3) {
-            accessToken = val;
-            break;
-          }
-        }
-      }
-    }
-
-    const adminSupabase = getSupabaseAdmin();
-
-    let authenticatedUserId: string | null = null;
-    if (accessToken) {
-      const { data: userData, error: userError } = await adminSupabase.auth.getUser(accessToken);
-      if (!userError && userData?.user) {
-        authenticatedUserId = userData.user.id;
-      }
-    }
-
-    if (!authenticatedUserId) {
+    if (authError || !user) {
       return { success: false, error: 'Not authenticated. Please sign in again.' };
     }
 
-    const agentId = authenticatedUserId;
-
-    // 2. Fetch the client by client ID and verify ownership
+    // 2. Fetch client using Service Role to verify existence & agent ownership
+    const adminSupabase = getSupabaseAdmin();
     const { data: clientData, error: clientError } = await adminSupabase
       .from('clients')
       .select('agent_id')
@@ -74,11 +30,13 @@ export async function deleteClientSecure(clientId: string) {
       return { success: false, error: 'Client not found.' };
     }
 
-    if (clientData.agent_id !== agentId) {
+    // 3. Ownership Authorization check
+    if (clientData.agent_id !== user.id) {
       return { success: false, error: 'Unauthorized: You do not own this client.' };
     }
 
-    // 3. Identify and cleanup Storage for Policies
+    // 4. Elevated Destructive Operation via Service Role Key (Admin Supabase)
+    // Identify and cleanup Storage for Policies
     const { data: policies } = await adminSupabase
       .from('policies')
       .select('id')
@@ -121,7 +79,7 @@ export async function deleteClientSecure(clientId: string) {
       }
     }
 
-    // 4. Identify and cleanup Storage for Health Policies
+    // Identify and cleanup Storage for Health Policies
     const { data: healthPolicies } = await adminSupabase
       .from('health_policies')
       .select('id')
@@ -164,7 +122,7 @@ export async function deleteClientSecure(clientId: string) {
       }
     }
 
-    // 5. Identify and cleanup Signatures (RESTRICT constraint)
+    // Identify and cleanup Signatures (RESTRICT constraint)
     const { data: sigReqs } = await adminSupabase
       .from('signature_requests')
       .select('id')
@@ -199,7 +157,7 @@ export async function deleteClientSecure(clientId: string) {
       if (sigErr) return { success: false, error: 'Delete failed: Failed to remove signature requests. Deletion aborted.' };
     }
 
-    // 6. Delete the Client (DB ON DELETE CASCADE handles the rest)
+    // 5. Delete the Client (DB ON DELETE CASCADE handles the rest)
     const { error: deleteError } = await adminSupabase
       .from('clients')
       .delete()
