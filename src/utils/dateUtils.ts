@@ -14,7 +14,7 @@ export const formatIsoToUsDate = (isoStr: string | null | undefined): string => 
 
 /**
  * Parses a US date input string (MM/DD/YYYY) safely to ISO format (YYYY-MM-DD).
- * Returns null if the format is invalid.
+ * Returns null if the format is invalid or if the date is not a real calendar date (e.g. 02/30/2026).
  */
 export const usDateToIso = (usStr: string | null | undefined): string | null => {
   if (!usStr) return null;
@@ -30,6 +30,12 @@ export const usDateToIso = (usStr: string | null | undefined): string | null => 
   if (m < 1 || m > 12) return null;
   if (d < 1 || d > 31) return null;
   if (y < 1000 || y > 9999) return null;
+
+  // Validate exact calendar day (e.g., rejects 02/30/2026)
+  const testDate = new Date(y, m - 1, d);
+  if (testDate.getFullYear() !== y || testDate.getMonth() !== m - 1 || testDate.getDate() !== d) {
+    return null;
+  }
   
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 };
@@ -41,7 +47,6 @@ export const usDateToIso = (usStr: string | null | undefined): string | null => 
 export const calculateTermDuration = (effStr: string | null | undefined, expStr: string | null | undefined): string => {
   if (!effStr || !expStr) return 'Not provided';
   
-  // Format inputs to standard ISO if they are not already
   const startIso = effStr.includes('/') ? usDateToIso(effStr) : effStr;
   const endIso = expStr.includes('/') ? usDateToIso(expStr) : expStr;
   
@@ -59,7 +64,6 @@ export const calculateTermDuration = (effStr: string | null | undefined, expStr:
 
   if (days < 0) {
     months--;
-    // Get number of days in start month to adjust
     const prevMonth = new Date(end.getFullYear(), end.getMonth(), 0);
     days += prevMonth.getDate();
   }
@@ -102,4 +106,71 @@ export const formatAsDateInput = (val: string): string => {
     return `${clean.slice(0, 2)}/${clean.slice(2)}`;
   }
   return clean;
+};
+
+/**
+ * Parses US date string (MM/DD/YYYY), 12-hour hour ("01"-"12"), minute ("00"-"59"), and AM/PM into a local Date object.
+ */
+export const parseUsDateAnd12hTimeToDate = (
+  usDateStr: string,
+  hour12Str: string,
+  minuteStr: string,
+  ampm: string
+): Date | null => {
+  const isoDate = usDateToIso(usDateStr);
+  if (!isoDate) return null;
+
+  const [y, m, d] = isoDate.split('-').map(Number);
+  let h = parseInt(hour12Str, 10);
+  const min = parseInt(minuteStr, 10);
+
+  if (isNaN(h) || h < 1 || h > 12) return null;
+  if (isNaN(min) || min < 0 || min > 59) return null;
+
+  if (ampm === 'PM' && h < 12) h += 12;
+  if (ampm === 'AM' && h === 12) h = 0;
+
+  const result = new Date(y, m - 1, d, h, min, 0, 0);
+  if (isNaN(result.getTime())) return null;
+  return result;
+};
+
+/**
+ * Extracts US date string (MM/DD/YYYY), 12-hour hour ("01"-"12"), minute ("00"-"59"), and AM/PM from a Date or ISO timestamp.
+ */
+export const extractUsDateAnd12hTime = (isoOrDate: Date | string | null | undefined) => {
+  if (!isoOrDate) {
+    const now = new Date();
+    return {
+      dateUs: formatIsoToUsDate(now.toISOString().split('T')[0]),
+      hour12: '09',
+      minute: '00',
+      ampm: 'AM' as 'AM' | 'PM',
+    };
+  }
+
+  const date = typeof isoOrDate === 'string' ? new Date(isoOrDate) : isoOrDate;
+  if (isNaN(date.getTime())) {
+    const now = new Date();
+    return {
+      dateUs: formatIsoToUsDate(now.toISOString().split('T')[0]),
+      hour12: '09',
+      minute: '00',
+      ampm: 'AM' as 'AM' | 'PM',
+    };
+  }
+
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const dateUs = `${mm}/${dd}/${yyyy}`;
+
+  let hours = date.getHours();
+  const ampm: 'AM' | 'PM' = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  const hour12 = String(hours).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+
+  return { dateUs, hour12, minute, ampm };
 };

@@ -46,7 +46,14 @@ export default function ClientsPage() {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        router.push('/login');
+        console.log('[NavTrace]', {
+          source: 'ClientsPage loadClients',
+          event: 'USER_NULL',
+          currentPath: typeof window !== 'undefined' ? window.location.pathname : '/clients',
+          target: 'none',
+          reason: 'User null during client data load; skipping router.push to prevent tab-switch redirect',
+        });
+        setLoading(false);
         return;
       }
       setCurrentUser(user);

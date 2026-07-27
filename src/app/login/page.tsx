@@ -4,24 +4,28 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
+import { resolveTargetRoute } from '@/lib/auth/routePersistence';
+import { navigateToDashboard } from '@/lib/auth/dashboardNavigationGuard';
+import { setDashboardIntent } from '@/lib/auth/navigationIntent';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [activeSessionUser, setActiveSessionUser] = useState<string | null>(null);
   const router = useRouter();
 
-  // Redirect if already logged in
+  // Check if session exists on mount only to display signed-in badge (NO AUTOMATIC REDIRECT)
   useEffect(() => {
     const checkUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        router.push('/dashboard');
+      if (session?.user) {
+        setActiveSessionUser(session.user.email || 'Active User');
       }
     };
     checkUser();
-  }, [router]);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,8 +46,10 @@ export default function LoginPage() {
 
       if (signInError) {
         setError(signInError.message);
-      } else if (data.session) {
-        router.push('/dashboard');
+      } else if (data.session?.user) {
+        setDashboardIntent('explicit-login-default');
+        const target = resolveTargetRoute(data.session.user.id, '/dashboard');
+        navigateToDashboard(router, 'explicit-login-submit', target);
       }
     } catch (err: any) {
       setError(err?.message || 'An unexpected error occurred.');
@@ -66,6 +72,22 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold text-white tracking-tight">Welcome back</h1>
           <p className="text-sm text-slate-400 mt-1">Sign in to access your CRM dashboard</p>
         </div>
+
+        {activeSessionUser && (
+          <div className="mb-6 p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm flex items-center justify-between">
+            <span>Signed in as <strong>{activeSessionUser}</strong></span>
+            <button
+              type="button"
+              onClick={() => {
+                const target = resolveTargetRoute('current', '/dashboard');
+                router.push(target);
+              }}
+              className="text-xs text-blue-400 underline hover:text-blue-300 font-semibold ml-2"
+            >
+              Continue to CRM
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm animate-pulse">

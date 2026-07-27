@@ -5,6 +5,10 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
+import { resolveTargetRoute } from '@/lib/auth/routePersistence';
+import { navigateToDashboard } from '@/lib/auth/dashboardNavigationGuard';
+import { setDashboardIntent } from '@/lib/auth/navigationIntent';
+
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -14,17 +18,7 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  // Redirect if already logged in
-  useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        router.push('/dashboard');
-      }
-    };
-    checkUser();
-  }, [router]);
-
+  // Only explicit successful registration action may navigate.
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -59,9 +53,9 @@ export default function RegisterPage() {
         // Check if session is established (meaning email verification is disabled)
         if (data.session) {
           setSuccessMsg('Registration successful! Redirecting...');
-          setTimeout(() => {
-            router.push('/dashboard');
-          }, 1500);
+          setDashboardIntent('explicit-login-default');
+          const target = resolveTargetRoute(data.session.user.id, '/dashboard');
+          navigateToDashboard(router, 'explicit-login-submit', target);
         } else {
           setSuccessMsg('Registration successful! Please check your email for a confirmation link, then log in.');
           setEmail('');

@@ -1,148 +1,772 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import DashboardLayout from '@/components/DashboardLayout';
 import { supabase } from '@/lib/supabaseClient';
+import { formatIsoToUsDate, extractUsDateAnd12hTime } from '@/utils/dateUtils';
 
 interface UserProfile {
   name: string | null;
   email: string | null;
 }
 
+interface ClientRow {
+  id: string;
+  full_name: string;
+}
+
+interface PolicyRow {
+  id: string;
+  client_id: string;
+  policy_type: string;
+  policy_number: string | null;
+  company_name: string | null;
+  expiration_date: string | null;
+  status: string;
+}
+
+interface LeadRow {
+  id: string;
+  first_name: string;
+  last_name: string;
+  status: string;
+  priority: string;
+  next_follow_up_at: string | null;
+}
+
+interface AppointmentRow {
+  id: string;
+  client_id: string | null;
+  title: string;
+  location: string | null;
+  starts_at: string;
+  status: string;
+}
+
+interface NeedsAttentionItem {
+  id: string;
+  type: 'expired_policy' | 'expiring_7d' | 'overdue_lead' | 'expiring_30d' | 'today_appt';
+  urgency: 'Critical' | 'High' | 'Medium' | 'Upcoming';
+  urgencyClass: string;
+  entityName: string;
+  reason: string;
+  relevantDate: string;
+  statusLabel: string;
+  actionUrl: string;
+  actionLabel: string;
+}
+
 export default function DashboardPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
 
+  // Independent Data States
+  const [clients, setClients] = useState<ClientRow[]>([]);
+  const [policies, setPolicies] = useState<PolicyRow[]>([]);
+  const [leads, setLeads] = useState<LeadRow[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
+
+  // Section Loading & Error States
+  const [clientsLoading, setClientsLoading] = useState(true);
+  const [leadsLoading, setLeadsLoading] = useState(true);
+  const [apptsLoading, setApptsLoading] = useState(true);
+
+  const [clientsError, setClientsError] = useState<string | null>(null);
+  const [leadsError, setLeadsError] = useState<string | null>(null);
+  const [apptsError, setApptsError] = useState<string | null>(null);
+
+  // Client Map for quick lookup
+  const clientMap = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    clients.forEach((c) => {
+      map[c.id] = c.full_name;
+    });
+    return map;
+  }, [clients]);
+
+  // Load User Profile
   useEffect(() => {
     const fetchProfile = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          const { data, error } = await supabase
+          const { data } = await supabase
             .from('profiles')
             .select('name, email')
             .eq('id', session.user.id)
             .single();
 
-          if (error) {
-            // Profile may not exist yet, default to auth session info
-            setProfile({
-              name: null,
-              email: session.user.email || 'User',
-            });
-          } else {
-            setProfile(data);
-          }
+          setProfile({
+            name: data?.name || null,
+            email: session.user.email || 'User',
+          });
         }
       } catch (err) {
-        console.error('Error fetching profile:', err);
-      } finally {
-        setLoading(false);
+        console.error('Error loading profile:', err);
       }
     };
-
     fetchProfile();
   }, []);
 
+  // Query 1: Clients & Policies (Isolated Query)
+  const loadClientsAndPolicies = useCallback(async () => {
+    try {
+      setClientsLoading(true);
+      setClientsError(null);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: clientsData, error: clientsErr } = await supabase
+        .from('clients')
+        .select('id, full_name')
+        .eq('agent_id', user.id);
+
+      if (clientsErr) throw clientsErr;
+      setClients(clientsData || []);
+
+      if (clientsData && clientsData.length > 0) {
+        const clientIds = clientsData.map((c) => c.id);
+        const { data: policiesData, error: polErr } = await supabase
+          .from('policies')
+          .select('id, client_id, policy_type, policy_number, company_name, expiration_date, status')
+          .in('client_id', clientIds);
+
+        if (polErr) throw polErr;
+        setPolicies(policiesData || []);
+      } else {
+        setPolicies([]);
+      }
+    } catch (err: any) {
+      console.error('Error loading clients/policies:', err);
+      setClientsError(err?.message || 'Failed to load clients and policies data.');
+    } finally {
+      setClientsLoading(false);
+    }
+  }, []);
+
+  // Query 2: Leads (Isolated Query)
+  const loadLeadsData = useCallback(async () => {
+    try {
+      setLeadsLoading(true);
+      setLeadsError(null);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error: fetchErr } = await supabase
+        .from('leads')
+        .select('id, first_name, last_name, status, priority, next_follow_up_at')
+        .eq('agent_id', user.id);
+
+      if (fetchErr) throw fetchErr;
+      setLeads(data || []);
+    } catch (err: any) {
+      console.error('Error loading leads:', err);
+      setLeadsError(err?.message || 'Failed to load leads data.');
+    } finally {
+      setLeadsLoading(false);
+    }
+  }, []);
+
+  // Query 3: Calendar Appointments (Isolated Query)
+  const loadCalendarAppointments = useCallback(async () => {
+    try {
+      setApptsLoading(true);
+      setApptsError(null);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error: fetchErr } = await supabase
+        .from('calendar_appointments')
+        .select('id, client_id, title, location, starts_at, status')
+        .eq('agent_id', user.id);
+
+      if (fetchErr) throw fetchErr;
+      setAppointments(data || []);
+    } catch (err: any) {
+      console.error('Error loading appointments:', err);
+      setApptsError(err?.message || 'Failed to load calendar schedule.');
+    } finally {
+      setApptsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadClientsAndPolicies();
+    loadLeadsData();
+    loadCalendarAppointments();
+  }, [loadClientsAndPolicies, loadLeadsData, loadCalendarAppointments]);
+
+  // DATE HELPERS & METRIC COMPUTATIONS
+  const now = new Date();
+  const todayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().split('T')[0];
+  
+  const in7Days = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+  const in7DaysIso = in7Days.toISOString().split('T')[0];
+
+  const in30Days = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30);
+  const in30DaysIso = in30Days.toISOString().split('T')[0];
+
+  // 1. KPI Metric Calculations
+  const totalClientsCount = clients.length;
+  const activePolicies = policies.filter((p) => p.status === 'Active');
+  const activePoliciesCount = activePolicies.length;
+
+  const policiesExpiring30Days = activePolicies.filter((p) => {
+    if (!p.expiration_date) return false;
+    return p.expiration_date >= todayIso && p.expiration_date <= in30DaysIso;
+  });
+  const policiesExpiring30DaysCount = policiesExpiring30Days.length;
+
+  const leadsInProgress = leads.filter((l) => ['new', 'contacted', 'in_progress', 'qualified'].includes(l.status));
+  const leadsInProgressCount = leadsInProgress.length;
+
+  const leadFollowUpsDue = leads.filter((l) => {
+    if (!l.next_follow_up_at || ['converted', 'lost'].includes(l.status)) return false;
+    return new Date(l.next_follow_up_at) <= now;
+  });
+  const leadFollowUpsDueCount = leadFollowUpsDue.length;
+
+  // Local Day Range for Today's Appointments
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+
+  const appointmentsToday = appointments.filter((a) => {
+    if (a.status !== 'scheduled') return false;
+    const start = new Date(a.starts_at);
+    return start >= todayStart && start <= todayEnd;
+  }).sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime());
+
+  const appointmentsTodayCount = appointmentsToday.length;
+
+  // 2. Needs Attention Item Assembly (Prioritized & Capped at 8-10)
+  const needsAttentionItems = React.useMemo(() => {
+    const items: NeedsAttentionItem[] = [];
+
+    // Priority 1: Expired Policies (active status but past expiration date)
+    activePolicies.forEach((p) => {
+      if (p.expiration_date && p.expiration_date < todayIso) {
+        items.push({
+          id: `exp-pol-${p.id}`,
+          type: 'expired_policy',
+          urgency: 'Critical',
+          urgencyClass: 'bg-rose-100 text-rose-800 border-rose-200',
+          entityName: clientMap[p.client_id] || 'Client Policy',
+          reason: `Policy #${p.policy_number || 'N/A'} (${p.policy_type}) has expired!`,
+          relevantDate: formatIsoToUsDate(p.expiration_date),
+          statusLabel: 'Expired',
+          actionUrl: `/clients/${p.client_id}`,
+          actionLabel: 'View Client',
+        });
+      }
+    });
+
+    // Priority 2: Policies Expiring within 7 Days
+    activePolicies.forEach((p) => {
+      if (p.expiration_date && p.expiration_date >= todayIso && p.expiration_date <= in7DaysIso) {
+        const days = Math.ceil((new Date(p.expiration_date + 'T00:00:00').getTime() - new Date(todayIso + 'T00:00:00').getTime()) / (1000 * 3600 * 24));
+        items.push({
+          id: `exp-7d-${p.id}`,
+          type: 'expiring_7d',
+          urgency: 'High',
+          urgencyClass: 'bg-amber-100 text-amber-800 border-amber-200',
+          entityName: clientMap[p.client_id] || 'Client Policy',
+          reason: `Policy #${p.policy_number || 'N/A'} expires in ${days} ${days === 1 ? 'day' : 'days'}.`,
+          relevantDate: formatIsoToUsDate(p.expiration_date),
+          statusLabel: `Expires in ${days}d`,
+          actionUrl: `/clients/${p.client_id}`,
+          actionLabel: 'Renew Policy',
+        });
+      }
+    });
+
+    // Priority 3: Leads with Overdue Follow-ups
+    leadFollowUpsDue.forEach((l) => {
+      const { dateUs, hour12, minute, ampm } = extractUsDateAnd12hTime(l.next_follow_up_at);
+      items.push({
+        id: `overdue-lead-${l.id}`,
+        type: 'overdue_lead',
+        urgency: 'High',
+        urgencyClass: 'bg-purple-100 text-purple-800 border-purple-200',
+        entityName: `${l.first_name} ${l.last_name}`,
+        reason: 'Overdue scheduled follow-up outreach.',
+        relevantDate: `${dateUs} ${hour12}:${minute} ${ampm}`,
+        statusLabel: 'Overdue Follow-up',
+        actionUrl: `/leads/${l.id}`,
+        actionLabel: 'Contact Lead',
+      });
+    });
+
+    // Priority 4: Policies Expiring in 8–30 Days
+    activePolicies.forEach((p) => {
+      if (p.expiration_date && p.expiration_date > in7DaysIso && p.expiration_date <= in30DaysIso) {
+        const days = Math.ceil((new Date(p.expiration_date + 'T00:00:00').getTime() - new Date(todayIso + 'T00:00:00').getTime()) / (1000 * 3600 * 24));
+        items.push({
+          id: `exp-30d-${p.id}`,
+          type: 'expiring_30d',
+          urgency: 'Medium',
+          urgencyClass: 'bg-blue-100 text-blue-800 border-blue-200',
+          entityName: clientMap[p.client_id] || 'Client Policy',
+          reason: `Policy #${p.policy_number || 'N/A'} expires in ${days} days.`,
+          relevantDate: formatIsoToUsDate(p.expiration_date),
+          statusLabel: `Expires in ${days}d`,
+          actionUrl: `/clients/${p.client_id}`,
+          actionLabel: 'Review',
+        });
+      }
+    });
+
+    // Priority 5: Today's Pending Appointments
+    appointmentsToday.forEach((a) => {
+      const { hour12, minute, ampm } = extractUsDateAnd12hTime(a.starts_at);
+      items.push({
+        id: `today-appt-${a.id}`,
+        type: 'today_appt',
+        urgency: 'Upcoming',
+        urgencyClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+        entityName: a.client_id ? (clientMap[a.client_id] || 'Client') : 'Scheduled Meeting',
+        reason: `Today's Appointment: "${a.title}"`,
+        relevantDate: `Today at ${hour12}:${minute} ${ampm}`,
+        statusLabel: 'Scheduled Today',
+        actionUrl: '/calendar',
+        actionLabel: 'View Schedule',
+      });
+    });
+
+    // Cap at 10 items max
+    return items.slice(0, 10);
+  }, [activePolicies, leadFollowUpsDue, appointmentsToday, clientMap, todayIso, in7DaysIso, in30DaysIso]);
+
+  // 3. Upcoming Expirations List (Nearest 5–8 items)
+  const upcomingExpirationsList = React.useMemo(() => {
+    return activePolicies
+      .filter((p) => p.expiration_date && p.expiration_date >= todayIso)
+      .sort((a, b) => (a.expiration_date! > b.expiration_date! ? 1 : -1))
+      .slice(0, 8)
+      .map((p) => {
+        const daysRemaining = Math.ceil(
+          (new Date(p.expiration_date + 'T00:00:00').getTime() - new Date(todayIso + 'T00:00:00').getTime()) / (1000 * 3600 * 24)
+        );
+        return {
+          ...p,
+          clientName: clientMap[p.client_id] || 'Client Record',
+          formattedExpDate: formatIsoToUsDate(p.expiration_date),
+          daysRemaining,
+        };
+      });
+  }, [activePolicies, clientMap, todayIso]);
+
+  // 4. Lead Pipeline Snapshot Counts
+  const leadPipelineSnapshot = React.useMemo(() => {
+    const counts = {
+      new: 0,
+      contacted: 0,
+      in_progress: 0,
+      qualified: 0,
+      converted: 0,
+      lost: 0,
+    };
+    leads.forEach((l) => {
+      if (l.status in counts) {
+        counts[l.status as keyof typeof counts]++;
+      }
+    });
+    const totalActiveLeads = leads.filter((l) => !['converted', 'lost'].includes(l.status)).length;
+    return { counts, totalActiveLeads };
+  }, [leads]);
+
+  // US Current Date Formatting
+  const currentDateFormatted = now.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
   return (
     <DashboardLayout>
-      <div className="space-y-8 max-w-5xl">
-        {/* Header Section */}
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Dashboard Overview</h1>
-          <p className="text-slate-400 mt-1">Manage your customer information and application status.</p>
+      <div className="space-y-8 max-w-7xl mx-auto pb-10">
+        
+        {/* SECTION 1: COMPACT HEADER */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">
+                Hello, {profile?.name || profile?.email || 'Agent'}!
+              </h1>
+              <span className="px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-xs font-semibold">
+                {currentDateFormatted}
+              </span>
+            </div>
+            <p className="text-sm text-slate-500 font-medium mt-1">
+              Here is what needs your attention today.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Link
+              href="/clients"
+              className="px-3.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold border border-blue-200 transition-colors"
+            >
+              + New Client
+            </Link>
+            <Link
+              href="/leads"
+              className="px-3.5 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold border border-purple-200 transition-colors"
+            >
+              + New Lead
+            </Link>
+            <Link
+              href="/calendar"
+              className="px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold border border-emerald-200 transition-colors"
+            >
+              + New Appointment
+            </Link>
+            <Link
+              href="/calendar"
+              className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors shadow-sm"
+            >
+              Open Calendar
+            </Link>
+          </div>
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <svg className="animate-spin h-8 w-8 text-violet-500" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
+        {/* SECTION 2: SIX KPI CARDS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          {/* Total Clients */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Clients</span>
+              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              </div>
+            </div>
+            <div className="mt-2">
+              <div className="text-2xl font-extrabold text-slate-900">{clientsLoading ? '...' : totalClientsCount}</div>
+              <span className="text-[10px] text-slate-500 font-medium">Customer records</span>
+            </div>
           </div>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-3">
-            {/* Welcome Card */}
-            <div className="md:col-span-3 bg-gradient-to-r from-violet-600/10 to-cyan-500/10 border border-violet-500/20 rounded-2xl p-6 md:p-8 relative overflow-hidden shadow-xl shadow-violet-500/5">
-              <div className="absolute right-0 bottom-0 top-0 w-1/3 bg-radial from-violet-500/10 to-transparent pointer-events-none" />
-              <div className="relative z-10 max-w-2xl">
-                <span className="text-xs font-bold uppercase tracking-wider text-violet-400">Welcome Back</span>
-                <h2 className="text-2xl md:text-3xl font-extrabold text-white mt-2">
-                  Hello, {profile?.name || profile?.email || 'User'}!
-                </h2>
-                
-                {profile?.name ? (
-                  <p className="text-slate-300 mt-3 text-sm md:text-base leading-relaxed">
-                    Your profile is active. You can review or edit your detailed personal information, address record, and income streams in the settings module.
-                  </p>
-                ) : (
-                  <div>
-                    <p className="text-slate-300 mt-3 text-sm md:text-base leading-relaxed">
-                      You haven't completed your personal information record yet. Please complete your registration details to ensure your profile is fully set up.
-                    </p>
+
+          {/* Active Policies */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Active Policies</span>
+              <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 flex items-center justify-center">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+            </div>
+            <div className="mt-2">
+              <div className="text-2xl font-extrabold text-slate-900">{clientsLoading ? '...' : activePoliciesCount}</div>
+              <span className="text-[10px] text-slate-500 font-medium">In-force policies</span>
+            </div>
+          </div>
+
+          {/* Policies Expiring in 30 Days */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Expiring 30 Days</span>
+              <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            </div>
+            <div className="mt-2">
+              <div className="text-2xl font-extrabold text-slate-900">{clientsLoading ? '...' : policiesExpiring30DaysCount}</div>
+              <span className="text-[10px] text-slate-500 font-medium">Require renewal</span>
+            </div>
+          </div>
+
+          {/* Leads in Progress */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Leads Active</span>
+              <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 border border-purple-200 flex items-center justify-center">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+              </div>
+            </div>
+            <div className="mt-2">
+              <div className="text-2xl font-extrabold text-slate-900">{leadsLoading ? '...' : leadsInProgressCount}</div>
+              <span className="text-[10px] text-slate-500 font-medium">In pipeline</span>
+            </div>
+          </div>
+
+          {/* Lead Follow-ups Due */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Follow-ups Due</span>
+              <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 border border-rose-200 flex items-center justify-center">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+              </div>
+            </div>
+            <div className="mt-2">
+              <div className="text-2xl font-extrabold text-slate-900">{leadsLoading ? '...' : leadFollowUpsDueCount}</div>
+              <span className="text-[10px] text-slate-500 font-medium">Overdue / Scheduled</span>
+            </div>
+          </div>
+
+          {/* Appointments Today */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Appts Today</span>
+              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+            </div>
+            <div className="mt-2">
+              <div className="text-2xl font-extrabold text-slate-900">{apptsLoading ? '...' : appointmentsTodayCount}</div>
+              <span className="text-[10px] text-slate-500 font-medium">Scheduled today</span>
+            </div>
+          </div>
+        </div>
+
+        {/* MIDDLE ROW: NEEDS ATTENTION & TODAY'S SCHEDULE */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* SECTION 3: NEEDS ATTENTION (Span 2 cols on Desktop) */}
+          <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Needs Attention</h2>
+                <p className="text-xs text-slate-500">Prioritized operational items requiring immediate action</p>
+              </div>
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                {needsAttentionItems.length} items
+              </span>
+            </div>
+
+            {(clientsLoading || leadsLoading || apptsLoading) ? (
+              <div className="p-8 text-center text-xs text-slate-400">Loading priority queue...</div>
+            ) : clientsError ? (
+              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">{clientsError}</div>
+            ) : needsAttentionItems.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-500">
+                No urgent policy expirations, overdue follow-ups, or pending tasks.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {needsAttentionItems.map((item) => (
+                  <div key={item.id} className="p-3.5 rounded-xl border border-slate-200 hover:border-slate-300 transition-colors flex items-center justify-between gap-4">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider ${item.urgencyClass}`}>
+                          {item.urgency}
+                        </span>
+                        <span className="font-bold text-xs text-slate-900 truncate">{item.entityName}</span>
+                        <span className="text-[11px] text-slate-400 font-medium">• {item.relevantDate}</span>
+                      </div>
+                      <p className="text-xs text-slate-600 truncate">{item.reason}</p>
+                    </div>
+
                     <Link
-                      href="/personal-information"
-                      className="inline-flex items-center gap-2 mt-5 bg-gradient-to-r from-violet-600 to-cyan-500 hover:from-violet-500 hover:to-cyan-400 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all duration-300 shadow-md shadow-violet-500/10 active:scale-[0.98]"
+                      href={item.actionUrl}
+                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex-shrink-0 transition-colors"
                     >
-                      Complete Personal Info
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                      </svg>
+                      {item.actionLabel}
                     </Link>
                   </div>
-                )}
+                ))}
               </div>
-            </div>
-
-            {/* Quick Stats/Links */}
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 shadow-lg">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Personal Info</h3>
-                <span className="w-8 h-8 rounded-lg bg-slate-850 flex items-center justify-center text-slate-400">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                </span>
-              </div>
-              <p className="text-2xl font-bold text-white mt-4">
-                {profile?.name ? 'Completed' : 'Pending'}
-              </p>
-              <p className="text-xs text-slate-500 mt-1">Core user details & demographics</p>
-            </div>
-
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 shadow-lg">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Residence</h3>
-                <span className="w-8 h-8 rounded-lg bg-slate-850 flex items-center justify-center text-slate-400">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </span>
-              </div>
-              <p className="text-2xl font-bold text-white mt-4">
-                Active
-              </p>
-              <p className="text-xs text-slate-500 mt-1">Primary residence address data</p>
-            </div>
-
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 shadow-lg">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Income Sources</h3>
-                <span className="w-8 h-8 rounded-lg bg-slate-850 flex items-center justify-center text-slate-400">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </span>
-              </div>
-              <p className="text-2xl font-bold text-white mt-4">
-                Configured
-              </p>
-              <p className="text-xs text-slate-500 mt-1">Manage multiple income records</p>
-            </div>
+            )}
           </div>
-        )}
+
+          {/* SECTION 4: TODAY'S SCHEDULE (Span 1 col on Desktop) */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Today's Schedule</h2>
+                <p className="text-xs text-slate-500">Appointments scheduled for today</p>
+              </div>
+              <Link href="/calendar" className="text-xs font-bold text-blue-600 hover:underline">
+                Open Calendar →
+              </Link>
+            </div>
+
+            {apptsLoading ? (
+              <div className="p-8 text-center text-xs text-slate-400">Loading schedule...</div>
+            ) : apptsError ? (
+              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">{apptsError}</div>
+            ) : appointmentsToday.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-500">
+                No appointments scheduled for today.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {appointmentsToday.map((appt) => {
+                  const { hour12, minute, ampm } = extractUsDateAnd12hTime(appt.starts_at);
+                  const clientName = appt.client_id ? (clientMap[appt.client_id] || 'Client') : 'Scheduled Meeting';
+
+                  return (
+                    <div key={appt.id} className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-blue-600">{hour12}:{minute} {ampm}</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase">
+                          {appt.status}
+                        </span>
+                      </div>
+                      <div className="font-semibold text-xs text-slate-900">{appt.title}</div>
+                      <div className="text-[11px] text-slate-500 flex items-center justify-between">
+                        <span>{clientName}</span>
+                        {appt.location && <span className="truncate max-w-[120px]">{appt.location}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* LOWER ROW: UPCOMING EXPIRATIONS & LEAD PIPELINE SNAPSHOT */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* SECTION 5: UPCOMING POLICY EXPIRATIONS (Span 2 cols on Desktop) */}
+          <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Upcoming Policy Expirations</h2>
+                <p className="text-xs text-slate-500">Nearest policy expirations requiring renewal attention</p>
+              </div>
+              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                {upcomingExpirationsList.length} items
+              </span>
+            </div>
+
+            {clientsLoading ? (
+              <div className="p-8 text-center text-xs text-slate-400">Loading expirations...</div>
+            ) : upcomingExpirationsList.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-500">
+                No active policies expiring in the near future.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                      <th className="py-2.5 px-3">Client</th>
+                      <th className="py-2.5 px-3">Policy / Number</th>
+                      <th className="py-2.5 px-3">Company</th>
+                      <th className="py-2.5 px-3">Expiration Date</th>
+                      <th className="py-2.5 px-3">Days Left</th>
+                      <th className="py-2.5 px-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs text-slate-800">
+                    {upcomingExpirationsList.map((p) => (
+                      <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-3 font-semibold text-slate-900">{p.clientName}</td>
+                        <td className="py-3 px-3">
+                          <div className="font-medium text-slate-900">{p.policy_type}</div>
+                          <div className="text-[10px] text-slate-400 font-mono">#{p.policy_number || 'N/A'}</div>
+                        </td>
+                        <td className="py-3 px-3 text-slate-600">{p.company_name || 'N/A'}</td>
+                        <td className="py-3 px-3 font-medium text-slate-900">{p.formattedExpDate}</td>
+                        <td className="py-3 px-3">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-bold ${
+                            p.daysRemaining <= 7 ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            {p.daysRemaining} {p.daysRemaining === 1 ? 'day' : 'days'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <Link
+                            href={`/clients/${p.client_id}`}
+                            className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-semibold transition-colors"
+                          >
+                            Open
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 6: LEAD PIPELINE SNAPSHOT (Span 1 col on Desktop) */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Lead Pipeline</h2>
+                <p className="text-xs text-slate-500">Stage breakdown & active summary</p>
+              </div>
+              <Link href="/leads" className="text-xs font-bold text-purple-600 hover:underline">
+                Open Leads →
+              </Link>
+            </div>
+
+            {leadsLoading ? (
+              <div className="p-8 text-center text-xs text-slate-400">Loading pipeline...</div>
+            ) : leadsError ? (
+              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">{leadsError}</div>
+            ) : (
+              <div className="space-y-4">
+                {/* Stage Breakdown Grid */}
+                <div className="grid grid-cols-2 gap-2.5 text-xs">
+                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                    <span className="font-semibold text-slate-600">New</span>
+                    <span className="font-extrabold text-slate-900">{leadPipelineSnapshot.counts.new}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                    <span className="font-semibold text-slate-600">Contacted</span>
+                    <span className="font-extrabold text-slate-900">{leadPipelineSnapshot.counts.contacted}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                    <span className="font-semibold text-slate-600">In Progress</span>
+                    <span className="font-extrabold text-slate-900">{leadPipelineSnapshot.counts.in_progress}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                    <span className="font-semibold text-slate-600">Qualified</span>
+                    <span className="font-extrabold text-slate-900">{leadPipelineSnapshot.counts.qualified}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center justify-between">
+                    <span className="font-semibold">Converted</span>
+                    <span className="font-extrabold">{leadPipelineSnapshot.counts.converted}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 flex items-center justify-between">
+                    <span className="font-semibold">Lost</span>
+                    <span className="font-extrabold">{leadPipelineSnapshot.counts.lost}</span>
+                  </div>
+                </div>
+
+                {/* Pipeline Summary Footer */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-700">
+                  <span>Total Active Leads: <strong className="text-slate-900">{leadPipelineSnapshot.totalActiveLeads}</strong></span>
+                  <span>Follow-ups: <strong className="text-rose-600">{leadFollowUpsDueCount}</strong></span>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <Link
+                    href="/leads"
+                    className="flex-1 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold text-center transition-colors shadow-sm"
+                  >
+                    Open Leads
+                  </Link>
+                  <Link
+                    href="/leads"
+                    className="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold text-center transition-colors"
+                  >
+                    + New Lead
+                  </Link>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
       </div>
     </DashboardLayout>
   );

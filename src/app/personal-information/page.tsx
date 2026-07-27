@@ -3,6 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { supabase } from '@/lib/supabaseClient';
+import {
+  SIDEBAR_THEMES,
+  SidebarThemeId,
+  getStoredSidebarTheme,
+  saveSidebarTheme,
+  DEFAULT_SIDEBAR_THEME,
+} from '@/lib/theme/sidebarTheme';
 
 interface ProfileData {
   name: string;
@@ -34,6 +41,7 @@ interface IncomeRow {
 
 export default function PersonalInformationPage() {
   const [userId, setUserId] = useState<string | null>(null);
+  const [selectedThemeId, setSelectedThemeId] = useState<SidebarThemeId>('navy');
 
   // Section 1 State (Personal Info)
   const [profile, setProfile] = useState<ProfileData>({
@@ -111,6 +119,7 @@ export default function PersonalInformationPage() {
       
       const currentUserId = session.user.id;
       setUserId(currentUserId);
+      setSelectedThemeId(getStoredSidebarTheme(currentUserId).id);
 
       // Fetch Profile
       try {
@@ -735,6 +744,66 @@ export default function PersonalInformationPage() {
               </table>
             </div>
           )}
+        </section>
+
+        {/* SECTION 4: APPEARANCE */}
+        <section className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6 md:p-8 relative shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800/80 pb-4 mb-6 gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-white">Appearance</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Customize your SmarTrack sidebar theme</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                saveSidebarTheme(userId, DEFAULT_SIDEBAR_THEME);
+                setSelectedThemeId(DEFAULT_SIDEBAR_THEME);
+              }}
+              className="px-3.5 py-1.5 rounded-xl border border-slate-800 hover:bg-slate-800 text-slate-300 text-xs font-semibold transition-colors self-start sm:self-auto"
+            >
+              Reset to Default
+            </button>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+              Sidebar Color
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
+              {(Object.values(SIDEBAR_THEMES) as Array<typeof SIDEBAR_THEMES[SidebarThemeId]>).map((theme) => {
+                const isSelected = selectedThemeId === theme.id;
+                return (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    onClick={() => {
+                      saveSidebarTheme(userId, theme.id);
+                      setSelectedThemeId(theme.id);
+                    }}
+                    className={`flex flex-col items-center p-3 rounded-xl border transition-all ${
+                      isSelected
+                        ? 'bg-slate-850 border-blue-500 shadow-md ring-2 ring-blue-500/20'
+                        : 'bg-slate-950/40 border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
+                    }`}
+                  >
+                    <div
+                      className="w-8 h-8 rounded-full border border-white/20 shadow-inner flex items-center justify-center mb-2"
+                      style={{ backgroundColor: theme.swatchHex }}
+                    >
+                      {isSelected && (
+                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
+                    <span className={`text-xs font-semibold ${isSelected ? 'text-white' : 'text-slate-400'}`}>
+                      {theme.name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </section>
       </div>
 

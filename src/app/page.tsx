@@ -3,17 +3,27 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { resolveTargetRoute } from '@/lib/auth/routePersistence';
+import { navigateToDashboard } from '@/lib/auth/dashboardNavigationGuard';
+import { setDashboardIntent } from '@/lib/auth/navigationIntent';
 
 export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
     const checkSession = async () => {
+      // Execute route restoration ONLY if currently on exact root path /
+      if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+        return;
+      }
+
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        router.push('/dashboard');
+      if (session?.user) {
+        setDashboardIntent('exact-root-default');
+        const target = resolveTargetRoute(session.user.id, '/dashboard');
+        navigateToDashboard(router, 'exact-root-entry', target);
       } else {
-        router.push('/login');
+        router.replace('/login');
       }
     };
     checkSession();
