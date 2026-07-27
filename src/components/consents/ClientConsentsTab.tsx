@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { ClientConsentRow } from '@/lib/consents/types';
 import { deleteConsentDraft, listClientConsents } from '@/lib/consents/request-service';
+import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate } from '@/utils/dateUtils';
 import ConsentPreview from './ConsentPreview';
 import ConsentStatusBadge from './ConsentStatusBadge';
@@ -94,6 +95,54 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
       reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not delete the draft.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSendEmail = async (row: ClientConsentRow) => {
+    setBusyId(row.id);
+    setError(null);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        throw new Error('Your session has expired. Sign in again.');
+      }
+
+      const response = await fetch(
+        `/api/signature-requests/${encodeURIComponent(row.id)}/send-email`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      const result = (await response.json()) as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error ?? 'The email could not be sent.');
+      }
+
+      flash(result.message ?? 'Consent sent by email.');
+      reload();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'The email could not be sent.'
+      );
     } finally {
       setBusyId(null);
     }
@@ -293,6 +342,7 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
                           busy={busyId === row.id}
                           confirming={confirmDelete === row.id}
                           onOpen={() => openRow(row)}
+                          onSendEmail={() => handleSendEmail(row)}
                           onAskDelete={() => setConfirmDelete(row.id)}
                           onCancelDelete={() => setConfirmDelete(null)}
                           onConfirmDelete={() => handleDelete(row)}
@@ -335,6 +385,7 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
                       busy={busyId === row.id}
                       confirming={confirmDelete === row.id}
                       onOpen={() => openRow(row)}
+                      onSendEmail={() => handleSendEmail(row)}
                       onAskDelete={() => setConfirmDelete(row.id)}
                       onCancelDelete={() => setConfirmDelete(null)}
                       onConfirmDelete={() => handleDelete(row)}
@@ -364,6 +415,7 @@ function RowActions({
   busy,
   confirming,
   onOpen,
+  onSendEmail,
   onAskDelete,
   onCancelDelete,
   onConfirmDelete,
@@ -372,6 +424,7 @@ function RowActions({
   busy: boolean;
   confirming: boolean;
   onOpen: () => void;
+  onSendEmail: () => void;
   onAskDelete: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
@@ -411,6 +464,23 @@ function RowActions({
       >
         {isDraft ? 'Continue Draft' : 'View'}
       </button>
+      {(row.status === 'draft' ||
+  row.status === 'pending' ||
+  row.status === 'failed') && (
+  <button
+    type="button"
+    onClick={onSendEmail}
+    disabled={busy || !row.signer_email?.trim()}
+    title={
+      row.signer_email?.trim()
+        ? 'Send this consent by email'
+        : 'This signer has no email address.'
+    }
+    className="px-2.5 py-1 border border-blue-200 hover:border-blue-400 hover:bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+  >
+    {busy ? 'Sending…' : 'Send by Email'}
+  </button>
+)}
       {isDraft && (
         <button
           type="button"
