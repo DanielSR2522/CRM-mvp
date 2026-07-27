@@ -50,19 +50,17 @@ export class EmailDeliveryAdapter implements DeliveryAdapter {
   readonly label = 'Email';
 
   isReady(): ReadinessResult {
-    // Two independent blockers; report the one the agent can act on first.
-    const links = linkIssuanceReady();
-    if (!links.ready) return links;
+  const links = linkIssuanceReady();
+  if (!links.ready) return links;
 
-    if (transport === null) {
-      return {
-        ready: false,
-        reason: `${EMAIL_NOT_CONFIGURED} No mail service is connected to this CRM, so consents cannot be emailed. Use WhatsApp, SMS or Copy Link instead.`,
-      };
-    }
-    return { ready: true };
-  }
-
+  /*
+   * Email is delivered through the authenticated server route:
+   * /api/signature-requests/[requestId]/send-email
+   *
+   * The browser never receives the Resend API key.
+   */
+  return { ready: true };
+}
   validate(ctx: DeliveryContext): ReadinessResult {
     if (!ctx.signerEmail?.trim()) {
       return { ready: false, reason: 'This signer has no email address on file.' };
