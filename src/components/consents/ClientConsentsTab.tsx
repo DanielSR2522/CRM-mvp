@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import type { ClientConsentRow } from '@/lib/consents/types';
+import type { ClientConsentRow, DashboardConsentRow } from '@/lib/consents/types';
 import { deleteConsentDraft, listClientConsents } from '@/lib/consents/request-service';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate } from '@/utils/dateUtils';
 import ConsentPreview from './ConsentPreview';
 import ConsentStatusBadge from './ConsentStatusBadge';
 import NewConsentFlow from './NewConsentFlow';
-
+import ConsentDocumentActions from './ConsentDocumentActions';
 /**
  * The Consents & Signatures tab inside a client profile.
  *
@@ -218,6 +218,62 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
           publicTitle={previewing.title}
           consentText={previewing.merge_data_snapshot?.rendered_consent_text ?? ''}
         />
+        {previewing.status === 'signed' && (
+  <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
+    <div>
+      <h4 className="text-sm font-extrabold text-slate-900">
+        Signed Document
+      </h4>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+        <div className="bg-slate-50 rounded-xl px-4 py-3">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            Signed by
+          </p>
+
+          <p className="text-sm font-bold text-slate-800 mt-1">
+            {previewing.signer_name ?? 'Unknown signer'}
+          </p>
+
+          {previewing.signer_email && (
+            <p className="text-xs text-slate-500 mt-0.5">
+              {previewing.signer_email}
+            </p>
+          )}
+        </div>
+
+        <div className="bg-slate-50 rounded-xl px-4 py-3">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            Signed date and time
+          </p>
+
+          <p className="text-sm font-bold text-slate-800 mt-1">
+            {previewing.signed_at
+              ? formatIsoToUsDateTime(previewing.signed_at)
+              : 'Not recorded'}
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <ConsentDocumentActions
+      row={previewing as unknown as DashboardConsentRow}
+      onChanged={reload}
+    />
+
+    {previewing.final_document_hash && (
+      <div className="border-t border-slate-100 pt-3">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          Signed document SHA-256
+        </p>
+
+        <p className="text-[10px] font-mono text-slate-500 break-all mt-1">
+          {previewing.final_document_hash}
+        </p>
+      </div>
+    )}
+  </div>
+)}
       </div>
     );
   }
@@ -481,6 +537,7 @@ function RowActions({
     {busy ? 'Sending…' : 'Send by Email'}
   </button>
 )}
+      
       {isDraft && (
         <button
           type="button"
@@ -536,4 +593,23 @@ function MobileMeta({ label, value }: { label: string; value: string }) {
       <dd className="text-xs text-slate-600 font-semibold">{value}</dd>
     </div>
   );
+}
+
+
+function formatIsoToUsDateTime(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Invalid date';
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short',
+  }).format(date);
 }
