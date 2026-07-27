@@ -478,7 +478,7 @@ export async function signDocument(
     .from('signature_requests')
     .update({ status: 'signed', signed_at: now })
     .eq('id', request.id)
-    .in('status', ['sent', 'viewed']);
+    .in('status', ['pending', 'sent', 'viewed']);
 
   if (statusError) {
     // The signature is recorded and safe. Leave it; report the inconsistency
@@ -549,7 +549,7 @@ export async function declineDocument(
     .from('signature_requests')
     .update({ status: 'declined', declined_at: now })
     .eq('id', request.id)
-    .in('status', ['sent', 'viewed']);
+    .in('status', ['pending', 'sent', 'viewed']);
 
   await recordEvent(request.id, signer.id, 'document_declined', meta, {
     // Trimmed: a reason box is a free-text field on a public endpoint.
