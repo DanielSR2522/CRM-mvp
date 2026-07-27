@@ -127,13 +127,75 @@ async function recordAttempt(
 export async function deliverConsent(
   row: DashboardConsentRow,
   channel: DeliveryChannel,
-  options: { agencyName?: string | null; agentName?: string | null; language?: 'en' | 'es' } = {}
+  options: {
+    agencyName?: string | null;
+    agentName?: string | null;
+    language?: 'en' | 'es';
+  } = {}
 ): Promise<DeliveryResult> {
   const adapter = adapterFor(channel);
 
+  if (channel === 'email') {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const accessToken = session?.access_token;
+
+    if (!accessToken) {
+      throw new Error('Your session has expired. Sign in again.');
+    }
+
+    const response = await fetch(
+      `/api/signature-requests/${encodeURIComponent(row.id)}/send-email`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    const payload = (await response.json()) as {
+      success?: boolean;
+      message?: string;
+      providerReference?: string;
+      signingUrl?: string;
+      expiresAt?: string;
+      error?: string;
+    };
+
+    if (
+      !response.ok ||
+      !payload.success ||
+      !payload.signingUrl ||
+      !payload.expiresAt
+    ) {
+      throw new Error(payload.error ?? 'The email could not be sent.');
+    }
+
+    return {
+      status: 'sent',
+      eventType: 'email_sent',
+      maskedDestination: null,
+      nextRequestStatus: 'sent',
+      message: payload.message ?? 'Email sent.',
+      providerReference: payload.providerReference,
+      metadata: {
+        sent_at: new Date().toISOString(),
+        handled_by_server: true,
+      },
+      signingUrl: payload.signingUrl,
+      expiresAt: new Date(payload.expiresAt),
+    };
+  }
+
   const readiness = adapter.isReady();
+
   if (!readiness.ready) {
-    throw new Error(readiness.reason ?? `${adapter.label} is not available.`);
+    throw new Error(
+      readiness.reason ?? `${adapter.label} is not available.`
+    );
   }
 
   const ctx = await buildContext(
@@ -144,11 +206,11 @@ export async function deliverConsent(
   );
 
   const valid = adapter.validate(ctx);
+
   if (!valid.ready) {
-    // The link was already minted, which is harmless — it simply goes unused and
-    // dies at its expiry. Better than validating after the fact and leaving the
-    // caller unsure whether anything happened.
-    throw new Error(valid.reason ?? `Cannot deliver via ${adapter.label}.`);
+    throw new Error(
+      valid.reason ?? `Cannot deliver via ${adapter.label}.`
+    );
   }
 
   const outcome = await adapter.deliver(ctx);
@@ -156,12 +218,12 @@ export async function deliverConsent(
   try {
     await recordAttempt(ctx, channel, outcome);
   } catch (err) {
-    // Swallowed deliberately — see recordAttempt.
-    console.warn('Delivery attempt could not be recorded:', err instanceof Error ? err.message : err);
+    console.warn(
+      'Delivery attempt could not be recorded:',
+      err instanceof Error ? err.message : err
+    );
   }
 
-  // Remember which channel was used, whatever the outcome: the agent asked for
-  // this one, and the panel's Channel column should say so.
   await supabase
     .from('signature_requests')
     .update({ selected_delivery_channel: channel })
@@ -169,15 +231,22 @@ export async function deliverConsent(
 
   if (outcome.nextRequestStatus) {
     try {
-      await setConsentStatus(row.id, outcome.nextRequestStatus, { reason: `delivered_via_${channel}` });
+      await setConsentStatus(row.id, outcome.nextRequestStatus, {
+        reason: `delivered_via_${channel}`,
+      });
     } catch (err) {
-      // The transition failing does not undo the send. Report it rather than
-      // pretending the whole thing failed.
-      console.warn('Status could not be advanced:', err instanceof Error ? err.message : err);
+      console.warn(
+        'Status could not be advanced:',
+        err instanceof Error ? err.message : err
+      );
     }
   }
 
-  return { ...outcome, signingUrl: ctx.signingUrl, expiresAt: ctx.expiresAt };
+  return {
+    ...outcome,
+    signingUrl: ctx.signingUrl,
+    expiresAt: ctx.expiresAt,
+  };
 }
 
 /**
