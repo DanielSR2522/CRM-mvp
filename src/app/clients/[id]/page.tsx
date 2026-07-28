@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, use, useRef } from 'react';
+import React, { useState, useEffect, use, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -133,7 +133,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   };
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'overview' | 'personal-info' | 'policies' | 'consents' | 'timeline' | 'health'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health'>('overview');
 
   // Policies Search and Filters States
   const [policiesSearch, setPoliciesSearch] = useState('');
@@ -182,6 +182,55 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
   const [timelineFilter, setTimelineFilter] = useState<'all' | 'policies' | 'notes' | 'documents' | 'consents'>('all');
   const [noteCounts, setNoteCounts] = useState<{ [policyId: string]: number }>({});
   const [docCounts, setDocCounts] = useState<{ [policyId: string]: number }>({});
+  // Client Documents & Notes States
+  const [clientDocDisplayName, setClientDocDisplayName] = useState('');
+  const [clientDocType, setClientDocType] = useState('Identification');
+  const [clientDocDescription, setClientDocDescription] = useState('');
+  const [clientDocFile, setClientDocFile] = useState<File | null>(null);
+  const [clientDocUploading, setClientDocUploading] = useState(false);
+  const [clientDocError, setClientDocError] = useState<string | null>(null);
+  const [clientDocsList, setClientDocsList] = useState<any[]>([]);
+  const [clientDocsLoading, setClientDocsLoading] = useState(false);
+
+  const [clientNoteBody, setClientNoteBody] = useState('');
+  const [clientNoteFiles, setClientNoteFiles] = useState<File[]>([]);
+  const [clientNotePasted, setClientNotePasted] = useState<{ id: string; file: File; previewUrl: string }[]>([]);
+  const [clientNotePosting, setClientNotePosting] = useState(false);
+  const [clientNotesList, setClientNotesList] = useState<any[]>([]);
+  const [clientNotesLoading, setClientNotesLoading] = useState(false);
+
+  const [replyingNoteId, setReplyingNoteId] = useState<string | null>(null);
+  const [clientReplyBody, setClientReplyBody] = useState('');
+  const [clientReplyFiles, setClientReplyFiles] = useState<File[]>([]);
+
+  const loadClientDocuments = useCallback(async () => {
+    try {
+      setClientDocsLoading(true);
+      const { data } = await supabase.from('client_documents').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
+      setClientDocsList(data || []);
+    } catch {
+      setClientDocsList([]);
+    } finally {
+      setClientDocsLoading(false);
+    }
+  }, [clientId]);
+
+  const loadClientNotes = useCallback(async () => {
+    try {
+      setClientNotesLoading(true);
+      const { data } = await supabase.from('client_notes').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
+      setClientNotesList(data || []);
+    } catch {
+      setClientNotesList([]);
+    } finally {
+      setClientNotesLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (activeTab === 'documents') loadClientDocuments();
+    if (activeTab === 'notes') loadClientNotes();
+  }, [activeTab, loadClientDocuments, loadClientNotes]);
 
   // Personal Information States
   const [personalInfo, setPersonalInfo] = useState<ClientPersonalInformation | null>(null);
@@ -1963,6 +2012,26 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     Health
                   </button>
                   <button
+                    onClick={() => setActiveTab('documents')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                      activeTab === 'documents'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
+                    }`}
+                  >
+                    Documents
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('notes')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                      activeTab === 'notes'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
+                    }`}
+                  >
+                    Notes
+                  </button>
+                  <button
                     onClick={() => setActiveTab('consents')}
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'consents'
@@ -3306,6 +3375,380 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* CLIENT DOCUMENTS TAB CONTENT WITH VISIBLE FILEDROPZONE */}
+              {activeTab === 'documents' && (
+                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
+                  <div className="border-b border-slate-100 pb-4">
+                    <h3 className="text-lg font-extrabold text-slate-900">Client Documents</h3>
+                    <p className="text-xs text-slate-500 mt-1">Upload and manage files attached to this client profile.</p>
+                  </div>
+
+                  {/* Upload Form with Visible FileDropzone */}
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!clientDocFile) return;
+                      try {
+                        setClientDocUploading(true);
+                        setClientDocError(null);
+                        const { data: { user } } = await supabase.auth.getUser();
+                        if (!user) throw new Error('Not authenticated');
+
+                        const cleanName = clientDocFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                        const storagePath = `${user.id}/${clientId}/documents/${Date.now()}-${cleanName}`;
+
+                        const { error: uploadErr } = await supabase.storage
+                          .from('client-documents')
+                          .upload(storagePath, clientDocFile, { upsert: false });
+
+                        if (uploadErr) throw uploadErr;
+
+                        const docTitle = clientDocDisplayName.trim() || clientDocFile.name;
+                        await supabase
+                          .from('client_documents')
+                          .insert({
+                            client_id: clientId,
+                            agent_id: user.id,
+                            display_name: docTitle,
+                            document_type: clientDocType,
+                            description: clientDocDescription.trim() || null,
+                            original_filename: clientDocFile.name,
+                            storage_path: storagePath,
+                            mime_type: clientDocFile.type || null,
+                            size_bytes: clientDocFile.size,
+                          });
+
+                        setClientDocDisplayName('');
+                        setClientDocDescription('');
+                        setClientDocFile(null);
+                        loadClientDocuments();
+                      } catch (err: any) {
+                        console.error('Upload error:', err);
+                        setClientDocError(err?.message || 'Failed to upload document.');
+                      } finally {
+                        setClientDocUploading(false);
+                      }
+                    }}
+                    className="bg-slate-50 border border-slate-200/80 rounded-xl p-5 space-y-4"
+                  >
+                    <h4 className="text-sm font-bold text-slate-800">Upload New Client Document</h4>
+                    {clientDocError && (
+                      <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-600 font-medium">
+                        {clientDocError}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">Display Name</label>
+                        <input
+                          type="text"
+                          value={clientDocDisplayName}
+                          onChange={(e) => setClientDocDisplayName(e.target.value)}
+                          placeholder="e.g. Drivers License"
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-700 mb-1">Document Type</label>
+                        <select
+                          value={clientDocType}
+                          onChange={(e) => setClientDocType(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500"
+                        >
+                          <option value="Identification">Identification</option>
+                          <option value="Application">Application</option>
+                          <option value="Proof of Income">Proof of Income</option>
+                          <option value="Correspondence">Correspondence</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Description (Optional)</label>
+                      <textarea
+                        rows={2}
+                        value={clientDocDescription}
+                        onChange={(e) => setClientDocDescription(e.target.value)}
+                        placeholder="Add context or notes..."
+                        className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-800 outline-none focus:border-blue-500"
+                      />
+                    </div>
+
+                    {/* Visible FileDropzone in Client Documents Upload Form */}
+                    <div className="pt-1">
+                      <FileDropzone
+                        label="Drag files here or click to select"
+                        multiple={false}
+                        disabled={clientDocUploading}
+                        selectedFiles={clientDocFile ? [clientDocFile] : []}
+                        onFilesSelected={(files) => {
+                          if (files.length > 0) {
+                            setClientDocFile(files[0]);
+                            if (!clientDocDisplayName) {
+                              setClientDocDisplayName(files[0].name.replace(/\.[^/.]+$/, ''));
+                            }
+                          }
+                        }}
+                        onRemoveFile={() => setClientDocFile(null)}
+                      />
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <button
+                        type="submit"
+                        disabled={clientDocUploading || !clientDocFile}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow transition-all disabled:opacity-50"
+                      >
+                        {clientDocUploading ? 'Uploading...' : 'Upload Document'}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Client Documents List */}
+                  {clientDocsLoading ? (
+                    <div className="text-center py-8 text-xs text-slate-400">Loading documents...</div>
+                  ) : clientDocsList.length === 0 ? (
+                    <div className="text-center py-12 border border-dashed border-slate-200 rounded-xl text-slate-400 text-xs">
+                      No documents uploaded for this client yet.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {clientDocsList.map((doc) => (
+                        <div key={doc.id} className="py-3 flex items-center justify-between gap-4">
+                          <div>
+                            <h5 className="font-bold text-slate-800 text-sm">{doc.display_name}</h5>
+                            <p className="text-xs text-slate-400 mt-0.5">{doc.original_filename} • {doc.document_type}</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={async () => {
+                                const { data } = await supabase.storage.from('client-documents').createSignedUrl(doc.storage_path, 3600);
+                                if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+                              }}
+                              className="text-xs font-bold text-blue-600 hover:underline"
+                            >
+                              Download
+                            </button>
+                            <button
+                              onClick={async () => {
+                                await supabase.storage.from('client-documents').remove([doc.storage_path]);
+                                await supabase.from('client_documents').delete().eq('id', doc.id);
+                                loadClientDocuments();
+                              }}
+                              className="text-xs font-bold text-rose-500 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* CLIENT NOTES TAB CONTENT WITH VISIBLE FILEDROPZONE */}
+              {activeTab === 'notes' && (
+                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
+                  <div className="border-b border-slate-100 pb-4">
+                    <h3 className="text-lg font-extrabold text-slate-900">Client Notes & Attachments</h3>
+                    <p className="text-xs text-slate-500 mt-1">Post notes, thread replies, and attach images or documents.</p>
+                  </div>
+
+                  {/* Top-level Note Composer with Visible FileDropzone */}
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!clientNoteBody.trim() && clientNoteFiles.length === 0 && clientNotePasted.length === 0) return;
+                      try {
+                        setClientNotePosting(true);
+                        const { data: { user } } = await supabase.auth.getUser();
+                        if (!user) throw new Error('Not authenticated');
+
+                        const { data: noteRec } = await supabase
+                          .from('client_notes')
+                          .insert({
+                            client_id: clientId,
+                            author_id: user.id,
+                            content: clientNoteBody.trim(),
+                          })
+                          .select()
+                          .single();
+
+                        const allFiles = [...clientNoteFiles, ...clientNotePasted.map(p => p.file)];
+                        for (const f of allFiles) {
+                          const cleanName = f.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                          const storagePath = `${user.id}/${clientId}/notes/${Date.now()}-${cleanName}`;
+                          await supabase.storage.from('client-documents').upload(storagePath, f);
+                        }
+
+                        setClientNoteBody('');
+                        setClientNoteFiles([]);
+                        setClientNotePasted([]);
+                        loadClientNotes();
+                      } catch (err: any) {
+                        console.error('Note post error:', err);
+                      } finally {
+                        setClientNotePosting(false);
+                      }
+                    }}
+                    className="bg-slate-50 border border-slate-200/80 rounded-xl p-5 space-y-4"
+                  >
+                    <textarea
+                      rows={3}
+                      value={clientNoteBody}
+                      onChange={(e) => setClientNoteBody(e.target.value)}
+                      onPaste={(e) => {
+                        const items = e.clipboardData?.items;
+                        if (!items) return;
+                        for (let i = 0; i < items.length; i++) {
+                          if (items[i].type.startsWith('image/')) {
+                            const file = items[i].getAsFile();
+                            if (file) {
+                              const previewUrl = URL.createObjectURL(file);
+                              setClientNotePasted(prev => [...prev, { id: crypto.randomUUID(), file, previewUrl }]);
+                            }
+                          }
+                        }
+                      }}
+                      placeholder="Type a note... (You can paste screenshots here with Ctrl+V)"
+                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-800 outline-none focus:border-blue-500 resize-none font-sans"
+                    />
+
+                    {/* Pasted Screenshot Previews */}
+                    {clientNotePasted.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {clientNotePasted.map(p => (
+                          <div key={p.id} className="relative bg-white border border-blue-200 rounded-xl p-1 flex items-center gap-2">
+                            <img src={p.previewUrl} alt="pasted screenshot" className="w-10 h-10 object-cover rounded-lg" />
+                            <span className="text-[10px] font-bold text-blue-600">Pasted Image</span>
+                            <button
+                              type="button"
+                              onClick={() => setClientNotePasted(prev => prev.filter(x => x.id !== p.id))}
+                              className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center ml-1"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Visible FileDropzone under top-level note textarea */}
+                    <div className="pt-1">
+                      <FileDropzone
+                        label="Drag attachments here or click to select"
+                        multiple={true}
+                        disabled={clientNotePosting}
+                        selectedFiles={clientNoteFiles}
+                        onFilesSelected={(newFiles) => setClientNoteFiles(prev => [...prev, ...newFiles])}
+                        onRemoveFile={(index) => setClientNoteFiles(prev => prev.filter((_, i) => i !== index))}
+                      />
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <button
+                        type="submit"
+                        disabled={clientNotePosting || (!clientNoteBody.trim() && clientNoteFiles.length === 0 && clientNotePasted.length === 0)}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow transition-all disabled:opacity-50"
+                      >
+                        {clientNotePosting ? 'Posting...' : 'Post Note'}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Client Notes List with Threaded Reply Composer featuring FileDropzone */}
+                  {clientNotesLoading ? (
+                    <div className="text-center py-8 text-xs text-slate-400">Loading notes...</div>
+                  ) : clientNotesList.length === 0 ? (
+                    <div className="text-center py-12 border border-dashed border-slate-200 rounded-xl text-slate-400 text-xs">
+                      No notes posted for this client yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {clientNotesList.map(note => (
+                        <div key={note.id} className="bg-slate-50/70 border border-slate-150 rounded-xl p-4 space-y-3">
+                          <div className="flex items-center justify-between text-xs text-slate-400">
+                            <span className="font-bold text-slate-700">{note.author_name || 'Agent'}</span>
+                            <span>{new Date(note.created_at).toLocaleString('en-US')}</span>
+                          </div>
+                          <p className="text-xs text-slate-800 whitespace-pre-wrap font-sans">{note.content}</p>
+
+                          {/* Reply Toggle & Reply Composer */}
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() => setReplyingNoteId(replyingNoteId === note.id ? null : note.id)}
+                              className="text-xs font-bold text-blue-600 hover:underline"
+                            >
+                              Reply
+                            </button>
+
+                            {replyingNoteId === note.id && (
+                              <div className="mt-3 pl-4 border-l-2 border-blue-200 space-y-3">
+                                <textarea
+                                  rows={2}
+                                  value={clientReplyBody}
+                                  onChange={(e) => setClientReplyBody(e.target.value)}
+                                  placeholder="Write a reply..."
+                                  className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 resize-none font-sans"
+                                />
+
+                                {/* Visible FileDropzone under reply textarea */}
+                                <FileDropzone
+                                  label="Drag reply attachments here or click to select"
+                                  multiple={true}
+                                  disabled={clientNotePosting}
+                                  selectedFiles={clientReplyFiles}
+                                  onFilesSelected={(newFiles) => setClientReplyFiles(prev => [...prev, ...newFiles])}
+                                  onRemoveFile={(index) => setClientReplyFiles(prev => prev.filter((_, i) => i !== index))}
+                                />
+
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setReplyingNoteId(null);
+                                      setClientReplyBody('');
+                                      setClientReplyFiles([]);
+                                    }}
+                                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (!clientReplyBody.trim() && clientReplyFiles.length === 0) return;
+                                      const { data: { user } } = await supabase.auth.getUser();
+                                      if (!user) return;
+                                      await supabase.from('client_notes').insert({
+                                        client_id: clientId,
+                                        author_id: user.id,
+                                        parent_note_id: note.id,
+                                        content: clientReplyBody.trim(),
+                                      });
+                                      setReplyingNoteId(null);
+                                      setClientReplyBody('');
+                                      setClientReplyFiles([]);
+                                      loadClientNotes();
+                                    }}
+                                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg"
+                                  >
+                                    Post Reply
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

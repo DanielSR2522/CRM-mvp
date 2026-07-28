@@ -153,10 +153,10 @@ export default function FileDropzone({
         role="button"
         aria-label={label}
         aria-disabled={disabled || loading}
-        className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+        className={`min-h-[120px] border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex flex-col items-center justify-center ${
           isDragOver
-            ? 'border-blue-500 bg-blue-50/70 scale-[1.01]'
-            : 'border-slate-300 hover:border-slate-400 bg-slate-50/50 hover:bg-slate-50'
+            ? 'border-blue-500 bg-blue-100/80 dark:bg-blue-900/50 scale-[1.01] shadow-md'
+            : 'border-blue-400/50 hover:border-blue-500 bg-slate-100/80 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800/90'
         } ${disabled || loading ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         <input
@@ -170,14 +170,14 @@ export default function FileDropzone({
         />
 
         <div className="flex flex-col items-center justify-center space-y-2">
-          <div className="w-12 h-12 rounded-xl bg-blue-100/80 text-blue-600 flex items-center justify-center">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shadow-xs">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
           </div>
           <div>
-            <p className="text-sm font-bold text-slate-800">{label}</p>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{label}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Supports PDF, Word, Excel, Images, and TXT (Max 15MB)
             </p>
           </div>

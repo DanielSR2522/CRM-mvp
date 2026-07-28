@@ -1026,8 +1026,10 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
   };
 
   // Upload documents (validating format, max 20MB limit, starting path with auth.uid() folder root, rolling back storage if metadata insert fails)
-  const handleFileUpload = async (sectionId: string, filesList: FileList | null) => {
-    if (!filesList || filesList.length === 0) return;
+  const handleFileUpload = async (sectionId: string, filesList: File[] | FileList | null) => {
+    if (!filesList) return;
+    const filesArray = Array.isArray(filesList) ? filesList : Array.from(filesList);
+    if (filesArray.length === 0) return;
 
     const allowedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'jpg', 'jpeg', 'png', 'webp'];
     const maxSizeBytes = 20 * 1024 * 1024; // 20 MB
@@ -1041,8 +1043,8 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
       if (!session?.user) throw new Error('You must be logged in.');
       const uploaderId = session.user.id;
 
-      for (let i = 0; i < filesList.length; i++) {
-        const file = filesList[i];
+      for (let i = 0; i < filesArray.length; i++) {
+        const file = filesArray[i];
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
 
         if (!allowedExtensions.includes(ext)) {
@@ -1935,7 +1937,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                     {sections.map(section => {
                       const sectionDocs = documents.filter(d => d.section_id === section.id);
                       const isRenaming = renamingSectionId === section.id;
-                      const isUploading = uploadingFiles[section.id];
+                      const isUploading = !!uploadingFiles[section.id];
 
                       return (
                         <div key={section.id} className="border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
@@ -1999,32 +2001,14 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
 
                           {/* Section Body */}
                           <div className="p-5 space-y-4">
-                            {/* Upload Area */}
-                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-slate-50 pb-4">
-                              <span className="text-xs text-slate-400 font-sans">
-                                Allowed formats: PDF, Word, Excel, CSV, TXT, Images (Max 20MB)
-                              </span>
-                              <div className="relative">
-                                <input
-                                  type="file"
-                                  id={`file-upload-${section.id}`}
-                                  multiple
-                                  disabled={isUploading}
-                                  onChange={e => handleFileUpload(section.id, e.target.files)}
-                                  className="hidden"
-                                />
-                                <label
-                                  htmlFor={`file-upload-${section.id}`}
-                                  className={`inline-flex items-center justify-center gap-2 bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-bold px-4 py-2.5 rounded-xl transition-all cursor-pointer ${
-                                    isUploading ? 'opacity-50 cursor-not-allowed' : ''
-                                  }`}
-                                >
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                                  </svg>
-                                  {isUploading ? 'Uploading...' : 'Upload Documents'}
-                                </label>
-                              </div>
+                            {/* Upload Area with Visible Dropzone */}
+                            <div className="pb-2">
+                              <FileDropzone
+                                label="Drag files here or click to select"
+                                onFilesSelected={(files) => handleFileUpload(section.id, files)}
+                                disabled={isUploading}
+                                multiple={true}
+                              />
                             </div>
 
                             {/* Upload Progress Bar */}
@@ -2367,28 +2351,21 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                     </div>
                   )}
 
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <input
-                        type="file"
-                        ref={noteImageInputRef}
-                        onChange={handleAttachImageSelect}
-                        accept="image/png, image/jpeg, image/webp"
-                        multiple
-                        className="hidden"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => noteImageInputRef.current?.click()}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-200 hover:border-slate-350 hover:bg-slate-50 rounded-xl text-slate-600 text-xs font-bold transition-all active:scale-[0.98]"
-                      >
-                        <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        Attach Image
-                      </button>
-                    </div>
+                  <div className="pt-2">
+                    <FileDropzone
+                      label="Drag files here or click to select"
+                      onFilesSelected={(files) => {
+                        files.forEach((f) => {
+                          const previewUrl = URL.createObjectURL(f);
+                          setPendingAttachments((prev) => [...prev, { file: f, displayName: f.name, previewUrl }]);
+                        });
+                      }}
+                      disabled={savingNote}
+                      multiple={true}
+                    />
+                  </div>
 
+                  <div className="flex justify-end pt-2">
                     <button
                       type="submit"
                       disabled={savingNote || (!newNoteContent.trim() && pendingAttachments.length === 0)}
