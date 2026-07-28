@@ -13,6 +13,7 @@ import {
   extractUsDateAnd12hTime,
 } from '@/utils/dateUtils';
 import ConvertLeadModal from '@/components/leads/ConvertLeadModal';
+import DatePicker from '@/components/ui/DatePicker';
 
 const DEFAULT_FILTERS: LeadFiltersState = {
   searchQuery: '',
@@ -679,14 +680,18 @@ export default function LeadsPage() {
 
             {/* Created From */}
             <div>
-              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Created From</label>
-              <input
-                type="text"
-                placeholder="MM/DD/YYYY"
-                maxLength={10}
+              <DatePicker
+                label="Created From"
+                optional
                 value={filters.createdFromUs}
-                onChange={(e) => setFilters({ ...filters, createdFromUs: formatAsDateInput(e.target.value) })}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500/50 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none"
+                onChange={(iso) => {
+                  if (iso) {
+                    const parts = iso.split('-');
+                    setFilters({ ...filters, createdFromUs: `${parts[1]}/${parts[2]}/${parts[0]}` });
+                  } else {
+                    setFilters({ ...filters, createdFromUs: '' });
+                  }
+                }}
               />
             </div>
           </div>

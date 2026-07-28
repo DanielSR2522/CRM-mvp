@@ -7,6 +7,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { supabase } from '@/lib/supabaseClient';
 import { LINES_OF_BUSINESS } from '@/constants/linesOfBusiness';
 import { usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
+import DatePicker from '@/components/ui/DatePicker';
 
 export default function NewPolicyPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
@@ -246,26 +247,34 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Effective Date</label>
-                  <input
-                    type="text"
-                    value={effectiveDate}
-                    onChange={e => setEffectiveDate(formatAsDateInput(e.target.value))}
-                    placeholder="MM/DD/YYYY"
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                  <DatePicker
+                    label="Effective Date"
                     required
+                    value={effectiveDate}
+                    onChange={(iso) => {
+                      if (iso) {
+                        const parts = iso.split('-');
+                        setEffectiveDate(`${parts[1]}/${parts[2]}/${parts[0]}`);
+                      } else {
+                        setEffectiveDate('');
+                      }
+                    }}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
-                  <input
-                    type="text"
-                    value={expirationDate}
-                    onChange={e => setExpirationDate(formatAsDateInput(e.target.value))}
-                    placeholder="MM/DD/YYYY"
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                  <DatePicker
+                    label="Expiration Date"
                     required
+                    value={expirationDate}
+                    onChange={(iso) => {
+                      if (iso) {
+                        const parts = iso.split('-');
+                        setExpirationDate(`${parts[1]}/${parts[2]}/${parts[0]}`);
+                      } else {
+                        setExpirationDate('');
+                      }
+                    }}
                   />
                 </div>
 

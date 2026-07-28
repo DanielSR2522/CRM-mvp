@@ -17,6 +17,7 @@ import ConvertLeadModal from '@/components/leads/ConvertLeadModal';
 import LeadNotesTab from '@/components/leads/LeadNotesTab';
 import LeadDocumentsTab from '@/components/leads/LeadDocumentsTab';
 import LeadTimelineTab from '@/components/leads/LeadTimelineTab';
+import DatePicker from '@/components/ui/DatePicker';
 
 interface LeadProfilePageProps {
   params: Promise<{ id: string }>;
@@ -712,16 +713,17 @@ export default function LeadProfilePage({ params }: LeadProfilePageProps) {
                   {enableFollowUp && (
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                          Date (MM/DD/YYYY)
-                        </label>
-                        <input
-                          type="text"
-                          maxLength={10}
-                          placeholder="MM/DD/YYYY"
+                        <DatePicker
+                          label="Follow-up Date"
                           value={followUpDateUs}
-                          onChange={(e) => setFollowUpDateUs(formatAsDateInput(e.target.value))}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 outline-none"
+                          onChange={(iso) => {
+                            if (iso) {
+                              const parts = iso.split('-');
+                              setFollowUpDateUs(`${parts[1]}/${parts[2]}/${parts[0]}`);
+                            } else {
+                              setFollowUpDateUs('');
+                            }
+                          }}
                         />
                       </div>
                       <div>

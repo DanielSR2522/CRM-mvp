@@ -10,6 +10,7 @@ import {
   saveSidebarTheme,
   DEFAULT_SIDEBAR_THEME,
 } from '@/lib/theme/sidebarTheme';
+import DatePicker from '@/components/ui/DatePicker';
 
 interface ProfileData {
   name: string;
@@ -416,13 +417,11 @@ export default function PersonalInformationPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Date of Birth</label>
-                    <input
-                      type="date"
-                      value={profile.dob}
-                      onChange={e => setProfile({ ...profile, dob: e.target.value })}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/50 rounded-xl px-4 py-3 text-white text-sm transition-all outline-none"
+                    <DatePicker
+                      label="Date of Birth"
                       required
+                      value={profile.dob}
+                      onChange={(iso) => setProfile({ ...profile, dob: iso || '' })}
                     />
                   </div>
                   <div>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -17,19 +17,17 @@ import type {
 } from '@/lib/calendar/types';
 import {
   formatIsoToUsDate,
-  formatAsDateInput,
   usDateToIso,
   parseUsDateAnd12hTimeToDate,
   extractUsDateAnd12hTime,
 } from '@/utils/dateUtils';
+import DateTimePicker from '@/components/ui/DateTimePicker';
+import DatePicker from '@/components/ui/DatePicker';
 
 interface ClientOption {
   id: string;
   full_name: string;
 }
-
-const HOURS_12 = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
-const MINUTES = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'];
 
 /** Formats ISO timestamp to US format: MM/DD/YYYY, hh:mm AM/PM */
 const formatTimestampToUsDateTime = (isoStr: string | null | undefined): string => {
@@ -56,6 +54,12 @@ export default function CalendarPage() {
   const [policyError, setPolicyError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Dynamic FullCalendar Requested Visible Range
+  const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date }>({
+    start: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    end: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0),
+  });
+
   // Events & Client List
   const [events, setEvents] = useState<any[]>([]);
   const [clients, setClients] = useState<ClientOption[]>([]);
@@ -63,10 +67,15 @@ export default function CalendarPage() {
   // Modal States
   const [isNewAppointmentOpen, setIsNewAppointmentOpen] = useState(false);
   const [selectedExpiration, setSelectedExpiration] = useState<ExtendedCalendarEventProps | null>(null);
-  const [selectedAppointment, setSelectedAppointment] = useState<ExtendedCalendarEventProps | null>(null);
+  const [selectedAppointment, setSelectedAppointment] = useState<any | null>(null);
 
-  // New/Edit Appointment Form State (Separate Controlled Date & 12h Time Inputs)
+  // Recurrence Edit & Delete Choice Dialog States
+  const [showRecurrenceEditDialog, setShowRecurrenceEditDialog] = useState(false);
+  const [showRecurrenceDeleteDialog, setShowRecurrenceDeleteDialog] = useState(false);
+
+  // Form State
   const [formAppointmentId, setFormAppointmentId] = useState<string | null>(null);
+  const [formSeriesId, setFormSeriesId] = useState<string | null>(null);
   const [formTitle, setFormTitle] = useState('');
   const [formClientId, setFormClientId] = useState('');
   
@@ -83,6 +92,15 @@ export default function CalendarPage() {
   const [formLocation, setFormLocation] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formStatus, setFormStatus] = useState<AppointmentStatus>('scheduled');
+
+  // Recurrence Form Fields
+  const [formIsRecurring, setFormIsRecurring] = useState(false);
+  const [formFrequency, setFormFrequency] = useState<'weekly' | 'monthly' | 'yearly'>('weekly');
+  const [formIntervalCount, setFormIntervalCount] = useState(1);
+  const [formEndType, setFormEndType] = useState<'never' | 'on_date' | 'after_count'>('never');
+  const [formEndsOnDateUs, setFormEndsOnDateUs] = useState<string | null>(null);
+  const [formOccurrenceCount, setFormOccurrenceCount] = useState<number>(12);
+
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -101,19 +119,12 @@ export default function CalendarPage() {
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        console.log('[NavTrace]', {
-          source: 'CalendarPage loadCalendarData',
-          event: 'USER_NULL',
-          currentPath: typeof window !== 'undefined' ? window.location.pathname : '/calendar',
-          target: 'none',
-          reason: 'User null during calendar load; skipping router.push to prevent tab-switch redirect',
-        });
         setLoading(false);
         return;
       }
       setCurrentUser(user);
 
-      // Fetch Clients for dropdown & client lookup map
+      // Fetch Clients
       const clientMap = new Map<string, any>();
       try {
         const { data: clientsData, error: clientsErr } = await supabase
@@ -132,50 +143,51 @@ export default function CalendarPage() {
 
       let fetchedExpirations: any[] = [];
       let fetchedAppointments: any[] = [];
+      let fetchedRecurringSeries: any[] = [];
+      const exceptionMap = new Map<string, boolean>();
 
-      // 1. INDEPENDENT QUERY: Policy Expirations
+      // 1. Policy Expirations
       try {
         const { data: policiesData, error: policiesErr } = await supabase
           .from('policies')
           .select('id, client_id, policy_number, policy_type, company_name, writing_company, expiration_date')
           .not('expiration_date', 'is', null);
 
-        if (policiesErr) throw policiesErr;
+        if (!policiesErr && policiesData) {
+          fetchedExpirations = policiesData
+            .filter((pol: any) => Boolean(pol.expiration_date))
+            .map((pol: any) => {
+              const client = clientMap.get(pol.client_id);
+              const clientName = client?.full_name || 'Client';
+              const company = pol.company_name || pol.writing_company || 'N/A';
+              const cleanExpDate = String(pol.expiration_date).split('T')[0];
 
-        fetchedExpirations = (policiesData || [])
-          .filter((pol: any) => Boolean(pol.expiration_date))
-          .map((pol: any) => {
-            const client = clientMap.get(pol.client_id);
-            const clientName = client?.full_name || 'Client';
-            const company = pol.company_name || pol.writing_company || 'N/A';
-            const cleanExpDate = String(pol.expiration_date).split('T')[0];
-
-            return {
-              id: `expiration-${pol.id}`,
-              title: `Expires: ${clientName} — ${pol.policy_type}`,
-              start: cleanExpDate,
-              allDay: true,
-              backgroundColor: '#ef4444',
-              borderColor: '#dc2626',
-              textColor: '#ffffff',
-              extendedProps: {
-                eventType: 'policy_expiration',
-                policyId: pol.id,
-                clientId: pol.client_id,
-                clientName,
-                policyType: pol.policy_type,
-                policyNumber: pol.policy_number || 'N/A',
-                company,
-                expirationDate: cleanExpDate,
-              } as ExtendedCalendarEventProps,
-            };
-          });
+              return {
+                id: `expiration-${pol.id}`,
+                title: `Expires: ${clientName} — ${pol.policy_type}`,
+                start: cleanExpDate,
+                allDay: true,
+                backgroundColor: '#ef4444',
+                borderColor: '#dc2626',
+                textColor: '#ffffff',
+                extendedProps: {
+                  eventType: 'policy_expiration',
+                  policyId: pol.id,
+                  clientId: pol.client_id,
+                  clientName,
+                  policyType: pol.policy_type,
+                  policyNumber: pol.policy_number || 'N/A',
+                  company,
+                  expirationDate: cleanExpDate,
+                } as ExtendedCalendarEventProps,
+              };
+            });
+        }
       } catch (err: any) {
-        console.error('Error loading policy expirations:', err);
         setPolicyError('Could not load policy expirations: ' + (err?.message || 'Database query failed.'));
       }
 
-      // 2. INDEPENDENT QUERY: Calendar Appointments
+      // 2. Calendar Appointments (Includes Exceptions)
       try {
         const { data: apptData, error: apptErr } = await supabase
           .from('calendar_appointments')
@@ -183,72 +195,172 @@ export default function CalendarPage() {
           .eq('agent_id', user.id)
           .order('starts_at', { ascending: true });
 
-        if (apptErr) throw apptErr;
+        if (!apptErr && apptData) {
+          fetchedAppointments = apptData.map((appt: any) => {
+            const clientName = appt.client?.full_name || clientMap.get(appt.client_id)?.full_name || null;
+            const isCancelled = appt.status === 'cancelled';
+            const isCompleted = appt.status === 'completed';
 
-        fetchedAppointments = (apptData || []).map((appt: any) => {
-          const clientName = appt.client?.full_name || clientMap.get(appt.client_id)?.full_name || null;
-          const isCancelled = appt.status === 'cancelled';
-          const isCompleted = appt.status === 'completed';
+            if (appt.recurrence_series_id && appt.recurrence_original_start) {
+              const excKey = `${appt.recurrence_series_id}_${appt.recurrence_original_start.split('T')[0]}`;
+              exceptionMap.set(excKey, true);
+            }
 
-          let bg = '#3b82f6';
-          let border = '#2563eb';
-          if (isCancelled) {
-            bg = '#94a3b8';
-            border = '#64748b';
-          } else if (isCompleted) {
-            bg = '#10b981';
-            border = '#059669';
-          }
+            let bg = '#3b82f6';
+            let border = '#2563eb';
+            if (isCancelled) {
+              bg = '#94a3b8';
+              border = '#64748b';
+            } else if (isCompleted) {
+              bg = '#10b981';
+              border = '#059669';
+            }
 
-          return {
-            id: `appointment-${appt.id}`,
-            title: clientName ? `${appt.title} (${clientName})` : appt.title,
-            start: appt.starts_at,
-            end: appt.ends_at,
-            allDay: false,
-            backgroundColor: bg,
-            borderColor: border,
-            textColor: '#ffffff',
-            className: isCancelled ? 'opacity-60 line-through' : '',
-            extendedProps: {
-              eventType: 'appointment',
-              appointmentId: appt.id,
-              clientId: appt.client_id,
-              clientName,
-              description: appt.description,
-              location: appt.location,
-              startsAt: appt.starts_at,
-              endsAt: appt.ends_at,
-              status: appt.status,
-            } as ExtendedCalendarEventProps,
-          };
-        });
+            return {
+              id: `appointment-${appt.id}`,
+              title: clientName ? `${appt.title} (${clientName})` : appt.title,
+              start: appt.starts_at,
+              end: appt.ends_at,
+              allDay: false,
+              backgroundColor: bg,
+              borderColor: border,
+              textColor: '#ffffff',
+              className: isCancelled ? 'opacity-60 line-through' : '',
+              extendedProps: {
+                eventType: 'appointment',
+                appointmentId: appt.id,
+                seriesId: appt.recurrence_series_id || null,
+                clientId: appt.client_id,
+                clientName,
+                description: appt.description,
+                location: appt.location,
+                startsAt: appt.starts_at,
+                endsAt: appt.ends_at,
+                status: appt.status,
+                isException: appt.is_recurrence_exception || false,
+              },
+            };
+          });
+        }
       } catch (err: any) {
-        console.error('Error loading appointments:', err);
         setAppointmentError('Could not load appointments: ' + (err?.message || 'Database query failed.'));
       }
 
-      setEvents([...fetchedExpirations, ...fetchedAppointments]);
+      // 3. Calendar Recurrence Series (Expanded dynamically for requested FullCalendar Range with 7d buffer)
+      try {
+        const { data: seriesData } = await supabase
+          .from('calendar_recurrence_series')
+          .select('*')
+          .eq('agent_id', user.id);
+
+        if (seriesData && seriesData.length > 0) {
+          // Range buffer: -7 days before visible start, +7 days after visible end
+          const rangeStartBuffer = new Date(visibleRange.start.getTime() - 7 * 24 * 60 * 60 * 1000);
+          const rangeEndBuffer = new Date(visibleRange.end.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+          seriesData.forEach((series: any) => {
+            const clientName = clientMap.get(series.client_id)?.full_name || null;
+            const [sYear, sMonth, sDay] = series.start_date.split('-').map(Number);
+            const [sHour, sMin] = (series.start_time || '09:00:00').split(':').map(Number);
+
+            let currDate = new Date(sYear, sMonth - 1, sDay, sHour, sMin, 0);
+            let count = 0;
+            const maxOccurrences = series.end_type === 'after_count' ? (series.occurrence_count || 12) : 500;
+
+            while (currDate <= rangeEndBuffer && count < maxOccurrences) {
+              count++;
+              const dateIsoStr = currDate.toISOString();
+              const dateOnlyStr = dateIsoStr.split('T')[0];
+              const endDate = new Date(currDate.getTime() + (series.duration_minutes || 60) * 60 * 1000);
+
+              // Check if end_type is on_date
+              if (series.end_type === 'on_date' && series.ends_on) {
+                const endsOn = new Date(series.ends_on + 'T23:59:59');
+                if (currDate > endsOn) break;
+              }
+
+              // Include occurrence if within requested range AND not suppressed by an exception row
+              const excKey = `${series.id}_${dateOnlyStr}`;
+              if (currDate >= rangeStartBuffer && !exceptionMap.has(excKey)) {
+                fetchedRecurringSeries.push({
+                  id: `series-${series.id}-${dateOnlyStr}`,
+                  title: clientName ? `🔄 ${series.title} (${clientName})` : `🔄 ${series.title}`,
+                  start: dateIsoStr,
+                  end: endDate.toISOString(),
+                  allDay: false,
+                  backgroundColor: '#8b5cf6',
+                  borderColor: '#7c3aed',
+                  textColor: '#ffffff',
+                  extendedProps: {
+                    eventType: 'appointment',
+                    seriesId: series.id,
+                    isRecurringSeries: true,
+                    originalStart: dateIsoStr,
+                    clientId: series.client_id,
+                    clientName,
+                    title: series.title,
+                    description: series.description,
+                    location: series.location,
+                    startsAt: dateIsoStr,
+                    endsAt: endDate.toISOString(),
+                    status: series.status,
+                    frequency: series.frequency,
+                  },
+                });
+              }
+
+              // Increment step based on frequency
+              if (series.frequency === 'weekly') {
+                currDate = new Date(currDate.setDate(currDate.getDate() + 7 * (series.interval_count || 1)));
+              } else if (series.frequency === 'monthly') {
+                // Short-month clamping anchored to original sDay (e.g. Jan 31 -> Feb 28/29 -> Mar 31)
+                const targetMonth = currDate.getMonth() + (series.interval_count || 1);
+                const targetYear = currDate.getFullYear() + Math.floor(targetMonth / 12);
+                const normMonth = targetMonth % 12;
+                const lastDayOfTargetMonth = new Date(targetYear, normMonth + 1, 0).getDate();
+                const clampedDay = Math.min(sDay, lastDayOfTargetMonth);
+                currDate = new Date(targetYear, normMonth, clampedDay, sHour, sMin, 0);
+              } else if (series.frequency === 'yearly') {
+                currDate = new Date(currDate.setFullYear(currDate.getFullYear() + (series.interval_count || 1)));
+              } else {
+                break;
+              }
+            }
+          });
+        }
+      } catch (_) {
+        // Soft fallback
+      }
+
+      setEvents([...fetchedExpirations, ...fetchedAppointments, ...fetchedRecurringSeries]);
     } catch (err: any) {
-      console.error('Error initializing calendar:', err);
       setError(err?.message || 'Failed to initialize calendar.');
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [visibleRange, router]);
 
   useEffect(() => {
     loadCalendarData();
   }, [loadCalendarData]);
 
+  // Open New Appointment Modal
   const handleOpenNewAppointment = (defaultStart?: Date) => {
     setFormError(null);
     setFormAppointmentId(null);
+    setFormSeriesId(null);
     setFormTitle('');
     setFormClientId('');
     setFormLocation('');
     setFormDescription('');
     setFormStatus('scheduled');
+
+    setFormIsRecurring(false);
+    setFormFrequency('weekly');
+    setFormIntervalCount(1);
+    setFormEndType('never');
+    setFormEndsOnDateUs(null);
+    setFormOccurrenceCount(12);
 
     const start = defaultStart || new Date();
     const end = new Date(start.getTime() + 60 * 60 * 1000);
@@ -269,10 +381,12 @@ export default function CalendarPage() {
     setIsNewAppointmentOpen(true);
   };
 
-  const handleOpenEditAppointment = (props: ExtendedCalendarEventProps) => {
-    setFormError(null);
-    setFormAppointmentId(props.appointmentId || null);
-    setFormTitle(props.clientName ? props.clientName : '');
+  // Duplicate Event Action
+  const handleDuplicateAppointment = (props: any) => {
+    setSelectedAppointment(null);
+    handleOpenNewAppointment();
+
+    setFormTitle(`${props.title || props.clientName || 'Appointment'} (Copy)`);
     setFormClientId(props.clientId || '');
     setFormLocation(props.location || '');
     setFormDescription(props.description || '');
@@ -285,7 +399,6 @@ export default function CalendarPage() {
       setFormStartMinute(startExt.minute);
       setFormStartAmPm(startExt.ampm);
     }
-
     if (props.endsAt) {
       const endExt = extractUsDateAnd12hTime(props.endsAt);
       setFormEndDateUs(endExt.dateUs);
@@ -293,11 +406,9 @@ export default function CalendarPage() {
       setFormEndMinute(endExt.minute);
       setFormEndAmPm(endExt.ampm);
     }
-
-    setSelectedAppointment(null);
-    setIsNewAppointmentOpen(true);
   };
 
+  // Save Appointment Form
   const handleSaveAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -307,7 +418,6 @@ export default function CalendarPage() {
       return;
     }
 
-    // Validate and parse Start Date & Time
     const startDate = parseUsDateAnd12hTimeToDate(
       formStartDateUs,
       formStartHour,
@@ -316,11 +426,10 @@ export default function CalendarPage() {
     );
 
     if (!startDate) {
-      setFormError('Start Date is invalid. Please enter a valid date in MM/DD/YYYY format (e.g. 07/27/2026).');
+      setFormError('Start Date is invalid. Please enter a valid MM/DD/YYYY date.');
       return;
     }
 
-    // Validate and parse End Date & Time
     const endDate = parseUsDateAnd12hTimeToDate(
       formEndDateUs,
       formEndHour,
@@ -329,7 +438,7 @@ export default function CalendarPage() {
     );
 
     if (!endDate) {
-      setFormError('End Date is invalid. Please enter a valid date in MM/DD/YYYY format (e.g. 07/27/2026).');
+      setFormError('End Date is invalid. Please enter a valid MM/DD/YYYY date.');
       return;
     }
 
@@ -340,36 +449,64 @@ export default function CalendarPage() {
 
     setFormSaving(true);
     try {
-      const payload: any = {
-        agent_id: currentUser.id,
-        client_id: formClientId.trim() ? formClientId : null,
-        title: formTitle.trim(),
-        description: formDescription.trim() || null,
-        location: formLocation.trim() || null,
-        starts_at: startDate.toISOString(),
-        ends_at: endDate.toISOString(),
-        status: formStatus,
-      };
+      if (formIsRecurring) {
+        const durationMinutes = Math.max(15, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
+        const isoStartDate = usDateToIso(formStartDateUs) || startDate.toISOString().split('T')[0];
+        const timeStr = `${formStartHour}:${formStartMinute}:00`;
 
-      if (formAppointmentId) {
-        const { error: updateErr } = await supabase
-          .from('calendar_appointments')
-          .update({
-            ...payload,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', formAppointmentId)
-          .eq('agent_id', currentUser.id);
+        const seriesPayload = {
+          agent_id: currentUser.id,
+          client_id: formClientId.trim() ? formClientId : null,
+          title: formTitle.trim(),
+          description: formDescription.trim() || null,
+          location: formLocation.trim() || null,
+          status: formStatus,
+          start_date: isoStartDate,
+          start_time: timeStr,
+          duration_minutes: durationMinutes,
+          frequency: formFrequency,
+          interval_count: formIntervalCount,
+          day_of_month: startDate.getDate(),
+          end_type: formEndType,
+          ends_on: formEndsOnDateUs ? usDateToIso(formEndsOnDateUs) : null,
+          occurrence_count: formOccurrenceCount,
+        };
 
-        if (updateErr) throw updateErr;
-        flashNotice('Appointment updated successfully.');
+        const { error: seriesErr } = await supabase
+          .from('calendar_recurrence_series')
+          .insert(seriesPayload);
+
+        if (seriesErr) throw seriesErr;
+        flashNotice('Recurring appointment series created successfully.');
       } else {
-        const { error: insertErr } = await supabase
-          .from('calendar_appointments')
-          .insert(payload);
+        const payload: any = {
+          agent_id: currentUser.id,
+          client_id: formClientId.trim() ? formClientId : null,
+          title: formTitle.trim(),
+          description: formDescription.trim() || null,
+          location: formLocation.trim() || null,
+          starts_at: startDate.toISOString(),
+          ends_at: endDate.toISOString(),
+          status: formStatus,
+        };
 
-        if (insertErr) throw insertErr;
-        flashNotice('New appointment created successfully.');
+        if (formAppointmentId) {
+          const { error: updateErr } = await supabase
+            .from('calendar_appointments')
+            .update({ ...payload, updated_at: new Date().toISOString() })
+            .eq('id', formAppointmentId)
+            .eq('agent_id', currentUser.id);
+
+          if (updateErr) throw updateErr;
+          flashNotice('Appointment updated successfully.');
+        } else {
+          const { error: insertErr } = await supabase
+            .from('calendar_appointments')
+            .insert(payload);
+
+          if (insertErr) throw insertErr;
+          flashNotice('New appointment created successfully.');
+        }
       }
 
       setIsNewAppointmentOpen(false);
@@ -382,9 +519,8 @@ export default function CalendarPage() {
     }
   };
 
+  // Delete Single Occurrence vs Series
   const handleDeleteAppointment = async (appointmentId: string) => {
-    if (!confirm('Are you sure you want to delete this appointment?')) return;
-
     try {
       const { error: delErr } = await supabase
         .from('calendar_appointments')
@@ -398,593 +534,435 @@ export default function CalendarPage() {
       flashNotice('Appointment deleted successfully.');
       await loadCalendarData();
     } catch (err: any) {
-      console.error('Error deleting appointment:', err);
       setError(err?.message || 'Failed to delete appointment.');
     }
   };
 
-  const handleEventClick = (info: any) => {
-    const props = info.event.extendedProps as ExtendedCalendarEventProps;
+  const handleDeleteSeries = async (seriesId: string) => {
+    try {
+      const { error: delErr } = await supabase
+        .from('calendar_recurrence_series')
+        .delete()
+        .eq('id', seriesId)
+        .eq('agent_id', currentUser.id);
 
-    if (props.eventType === 'policy_expiration') {
-      setSelectedExpiration(props);
-    } else if (props.eventType === 'appointment') {
-      setSelectedAppointment(props);
+      if (delErr) throw delErr;
+
+      setSelectedAppointment(null);
+      setShowRecurrenceDeleteDialog(false);
+      flashNotice('Entire recurring series deleted successfully.');
+      await loadCalendarData();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to delete recurring series.');
     }
   };
 
-  const handleDateSelect = (selectInfo: any) => {
-    handleOpenNewAppointment(selectInfo.start);
+  const handleEventClick = (info: any) => {
+    const props = info.event.extendedProps;
+    if (props.eventType === 'policy_expiration') {
+      setSelectedExpiration(props as ExtendedCalendarEventProps);
+    } else {
+      setSelectedAppointment(props);
+    }
   };
 
   return (
     <DashboardLayout>
       <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
-        {/* Flash Notification Banner */}
+        {/* Notice & Error Banners */}
         {notice && (
-          <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 font-medium text-sm flex items-center justify-between shadow-sm animate-fadeIn">
+          <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium text-sm flex items-center justify-between shadow-sm">
             <span>{notice}</span>
-            <button
-              onClick={() => setNotice(null)}
-              className="text-emerald-500 hover:text-emerald-700 font-bold ml-4"
-            >
-              ✕
-            </button>
+            <button onClick={() => setNotice(null)} className="font-bold text-emerald-600">✕</button>
           </div>
         )}
 
-        {/* Global Error Banner */}
         {error && (
-          <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 font-medium text-sm flex items-center justify-between shadow-sm">
+          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-medium text-sm flex items-center justify-between shadow-sm">
             <span>{error}</span>
-            <button
-              onClick={() => setError(null)}
-              className="text-rose-500 hover:text-rose-700 font-bold ml-4"
-            >
-              ✕
-            </button>
+            <button onClick={() => setError(null)} className="font-bold text-rose-600">✕</button>
           </div>
         )}
 
-        {/* Source-specific Error Banners */}
-        {policyError && (
-          <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 font-medium text-sm flex items-center justify-between shadow-sm">
-            <span>⚠️ {policyError}</span>
-            <button
-              onClick={() => setPolicyError(null)}
-              className="text-amber-600 hover:text-amber-800 font-bold ml-4"
-            >
-              ✕
-            </button>
+        {/* Calendar Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div>
+            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Calendar & Schedule</h1>
+            <p className="text-xs text-slate-500 font-medium mt-1">Manage appointments, client meetings, and policy expirations</p>
           </div>
-        )}
-
-        {appointmentError && (
-          <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 font-medium text-sm flex items-center justify-between shadow-sm">
-            <span>⚠️ {appointmentError}</span>
-            <button
-              onClick={() => setAppointmentError(null)}
-              className="text-amber-600 hover:text-amber-800 font-bold ml-4"
-            >
-              ✕
-            </button>
-          </div>
-        )}
-
-        {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Calendar</h1>
-              <p className="text-sm text-slate-500">Manage your appointments and policy expirations</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => handleOpenNewAppointment()}
-              className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-medium text-sm transition-all duration-200 shadow-md shadow-blue-500/20 active:scale-[0.98]"
-            >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-              </svg>
-              New Appointment
-            </button>
-          </div>
+          <button
+            onClick={() => handleOpenNewAppointment()}
+            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-all shadow-sm flex items-center gap-2"
+          >
+            <span>+</span> New Appointment
+          </button>
         </div>
 
-        {/* Legend Banner */}
-        <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-100/80 px-5 py-3 rounded-xl border border-slate-200 text-xs font-medium text-slate-600">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-blue-500 inline-block shadow-sm"></span>
-              <span>Appointments</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-red-500 inline-block shadow-sm"></span>
-              <span>Policy Expirations</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block shadow-sm"></span>
-              <span>Completed</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-slate-400 inline-block shadow-sm"></span>
-              <span className="line-through text-slate-400">Cancelled</span>
-            </div>
-          </div>
-          <span className="text-slate-400 italic">Click on any date to schedule an appointment</span>
-        </div>
-
-        {/* Calendar Body Container */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 sm:p-6 min-h-[650px]">
+        {/* FullCalendar Mounting Area */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-sm">
           {loading ? (
-            <div className="h-[600px] flex flex-col items-center justify-center space-y-3">
-              <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-              <p className="text-sm font-medium text-slate-500">Loading calendar appointments and expirations...</p>
-            </div>
+            <div className="p-12 text-center text-xs font-semibold text-slate-400">Loading schedule...</div>
           ) : (
-            <div className="fullcalendar-wrapper">
-              <FullCalendar
-                plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
-                initialView="dayGridMonth"
-                headerToolbar={{
-                  left: 'prev,next today',
-                  center: 'title',
-                  right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
-                }}
-                buttonText={{
-                  today: 'Hoy',
-                  month: 'Mes',
-                  week: 'Semana',
-                  day: 'Día',
-                  list: 'Agenda',
-                }}
-                locales={[esLocale]}
-                locale="es"
-                firstDay={0}
-                selectable={true}
-                select={handleDateSelect}
-                events={events}
-                eventClick={handleEventClick}
-                eventTimeFormat={{
-                  hour: 'numeric',
-                  minute: '2-digit',
-                  meridiem: 'short',
-                  hour12: true,
-                }}
-                slotLabelFormat={{
-                  hour: 'numeric',
-                  minute: '2-digit',
-                  meridiem: 'short',
-                  hour12: true,
-                }}
-                height="auto"
-                aspectRatio={1.6}
-              />
-            </div>
+            <FullCalendar
+              plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
+              initialView="dayGridMonth"
+              locale={esLocale}
+              headerToolbar={{
+                left: 'prev,next today',
+                center: 'title',
+                right: 'dayGridMonth,timeGridWeek,timeGridDay,listMonth',
+              }}
+              events={events}
+              eventClick={handleEventClick}
+              selectable={true}
+              select={(sel) => handleOpenNewAppointment(sel.start)}
+              datesSet={(dateInfo) => {
+                setVisibleRange({ start: dateInfo.start, end: dateInfo.end });
+              }}
+              height="auto"
+            />
           )}
         </div>
-      </div>
 
-      {/* ========================================================================= */}
-      {/* 1. NEW / EDIT APPOINTMENT MODAL                                           */}
-      {/* ========================================================================= */}
-      {isNewAppointmentOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden border border-slate-100 animate-scaleIn">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <h3 className="font-bold text-slate-900 text-lg">
-                {formAppointmentId ? 'Edit Appointment' : 'New Appointment'}
-              </h3>
-              <button
-                onClick={() => setIsNewAppointmentOpen(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold p-1 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
+        {/* NEW / EDIT APPOINTMENT MODAL */}
+        {isNewAppointmentOpen && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white border border-slate-200 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-base font-extrabold text-slate-900">
+                  {formAppointmentId ? 'Edit Appointment' : 'New Appointment / Reminder'}
+                </h3>
+                <button onClick={() => setIsNewAppointmentOpen(false)} className="text-slate-400 font-bold">✕</button>
+              </div>
 
-            <form onSubmit={handleSaveAppointment} className="p-6 space-y-4">
               {formError && (
-                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 text-xs font-medium">
-                  {formError}
-                </div>
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">{formError}</div>
               )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Title <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
+              <form onSubmit={handleSaveAppointment} className="space-y-4 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">Title *</label>
+                  <input
+                    type="text"
+                    required
+                    value={formTitle}
+                    onChange={(e) => setFormTitle(e.target.value)}
+                    placeholder="e.g. Annual Policy Review Meeting"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-900 font-medium focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">Linked Client (Optional)</label>
+                    <select
+                      value={formClientId}
+                      onChange={(e) => setFormClientId(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-900 font-medium"
+                    >
+                      <option value="">None / Independent</option>
+                      {clients.map((c) => (
+                        <option key={c.id} value={c.id}>{c.full_name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">Status</label>
+                    <select
+                      value={formStatus}
+                      onChange={(e) => setFormStatus(e.target.value as AppointmentStatus)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-900 font-medium"
+                    >
+                      <option value="scheduled">Scheduled</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* START & END DATE-TIME PICKERS */}
+                <DateTimePicker
+                  label="Start Date & Time"
                   required
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  placeholder="e.g. Policy Review Meeting"
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm text-slate-900 outline-none transition-all"
+                  dateValue={formStartDateUs}
+                  hourValue={formStartHour}
+                  minuteValue={formStartMinute}
+                  ampmValue={formStartAmPm}
+                  onChangeDate={(d) => setFormStartDateUs(d || '')}
+                  onChangeHour={setFormStartHour}
+                  onChangeMinute={setFormStartMinute}
+                  onChangeAmPm={setFormStartAmPm}
                 />
-              </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Client <span className="text-slate-400 font-normal">(Optional)</span>
-                </label>
-                <select
-                  value={formClientId}
-                  onChange={(e) => setFormClientId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm text-slate-900 outline-none transition-all"
-                >
-                  <option value="">-- No Client Linked --</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.full_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                <DateTimePicker
+                  label="End Date & Time"
+                  required
+                  dateValue={formEndDateUs}
+                  hourValue={formEndHour}
+                  minuteValue={formEndMinute}
+                  ampmValue={formEndAmPm}
+                  onChangeDate={(d) => setFormEndDateUs(d || '')}
+                  onChangeHour={setFormEndHour}
+                  onChangeMinute={setFormEndMinute}
+                  onChangeAmPm={setFormEndAmPm}
+                />
 
-              {/* Start Date & Start Time Controls */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                    Start Date <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="MM/DD/YYYY"
-                    maxLength={10}
-                    value={formStartDateUs}
-                    onChange={(e) => setFormStartDateUs(formatAsDateInput(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm text-slate-900 outline-none transition-all font-mono"
-                  />
-                </div>
+                {/* RECURRENCE CONTROLS */}
+                {!formAppointmentId && (
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                    <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800">
+                      <input
+                        type="checkbox"
+                        checked={formIsRecurring}
+                        onChange={(e) => setFormIsRecurring(e.target.checked)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>Repeat this appointment (Recurrence Series)</span>
+                    </label>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                    Start Time <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <select
-                      value={formStartHour}
-                      onChange={(e) => setFormStartHour(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-2 py-2.5 text-xs text-slate-900 outline-none transition-all"
-                    >
-                      {HOURS_12.map((h) => (
-                        <option key={h} value={h}>
-                          {h}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={formStartMinute}
-                      onChange={(e) => setFormStartMinute(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-2 py-2.5 text-xs text-slate-900 outline-none transition-all"
-                    >
-                      {MINUTES.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={formStartAmPm}
-                      onChange={(e) => setFormStartAmPm(e.target.value as 'AM' | 'PM')}
-                      className="bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-2 py-2.5 text-xs font-semibold text-slate-900 outline-none transition-all"
-                    >
-                      <option value="AM">AM</option>
-                      <option value="PM">PM</option>
-                    </select>
+                    {formIsRecurring && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                        <div>
+                          <label className="block font-bold text-slate-600 mb-1">Frequency</label>
+                          <select
+                            value={formFrequency}
+                            onChange={(e) => setFormFrequency(e.target.value as any)}
+                            className="w-full p-2 rounded-lg border border-slate-200 bg-white"
+                          >
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="yearly">Yearly</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-slate-600 mb-1">End Option</label>
+                          <select
+                            value={formEndType}
+                            onChange={(e) => setFormEndType(e.target.value as any)}
+                            className="w-full p-2 rounded-lg border border-slate-200 bg-white"
+                          >
+                            <option value="never">Never</option>
+                            <option value="on_date">On Specific Date</option>
+                            <option value="after_count">After N Occurrences</option>
+                          </select>
+                        </div>
+
+                        {formEndType === 'on_date' && (
+                          <div className="sm:col-span-2">
+                            <DatePicker
+                              label="Recurrence End Date"
+                              value={formEndsOnDateUs}
+                              onChange={setFormEndsOnDateUs}
+                            />
+                          </div>
+                        )}
+
+                        {formEndType === 'after_count' && (
+                          <div>
+                            <label className="block font-bold text-slate-600 mb-1">Occurrences Count</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={100}
+                              value={formOccurrenceCount}
+                              onChange={(e) => setFormOccurrenceCount(Number(e.target.value))}
+                              className="w-full p-2 rounded-lg border border-slate-200 bg-white"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
-              </div>
-
-              {/* End Date & End Time Controls */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                    End Date <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="MM/DD/YYYY"
-                    maxLength={10}
-                    value={formEndDateUs}
-                    onChange={(e) => setFormEndDateUs(formatAsDateInput(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm text-slate-900 outline-none transition-all font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                    End Time <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <select
-                      value={formEndHour}
-                      onChange={(e) => setFormEndHour(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-2 py-2.5 text-xs text-slate-900 outline-none transition-all"
-                    >
-                      {HOURS_12.map((h) => (
-                        <option key={h} value={h}>
-                          {h}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={formEndMinute}
-                      onChange={(e) => setFormEndMinute(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-2 py-2.5 text-xs text-slate-900 outline-none transition-all"
-                    >
-                      {MINUTES.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={formEndAmPm}
-                      onChange={(e) => setFormEndAmPm(e.target.value as 'AM' | 'PM')}
-                      className="bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-2 py-2.5 text-xs font-semibold text-slate-900 outline-none transition-all"
-                    >
-                      <option value="AM">AM</option>
-                      <option value="PM">PM</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Status
-                </label>
-                <select
-                  value={formStatus}
-                  onChange={(e) => setFormStatus(e.target.value as AppointmentStatus)}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm text-slate-900 outline-none transition-all"
-                >
-                  <option value="scheduled">Scheduled</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Location <span className="text-slate-400 font-normal">(Optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={formLocation}
-                  onChange={(e) => setFormLocation(e.target.value)}
-                  placeholder="e.g. Office / Zoom / Phone"
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm text-slate-900 outline-none transition-all"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Description / Notes <span className="text-slate-400 font-normal">(Optional)</span>
-                </label>
-                <textarea
-                  rows={3}
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Add details, agenda, or internal notes..."
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl px-3.5 py-2.5 text-sm text-slate-900 outline-none transition-all resize-none"
-                />
-              </div>
-
-              <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsNewAppointmentOpen(false)}
-                  className="px-4 py-2.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={formSaving}
-                  className="px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.98] rounded-xl transition-all shadow-md shadow-blue-500/20 disabled:opacity-50"
-                >
-                  {formSaving ? 'Saving...' : formAppointmentId ? 'Update Appointment' : 'Create Appointment'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 2. POLICY EXPIRATION DETAIL MODAL                                         */}
-      {/* ========================================================================= */}
-      {selectedExpiration && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-100 animate-scaleIn">
-            <div className="px-6 py-4 bg-red-600 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping inline-block"></span>
-                <h3 className="font-bold text-base">Policy Expiration Details</h3>
-              </div>
-              <button
-                onClick={() => setSelectedExpiration(null)}
-                className="text-white/80 hover:text-white font-bold p-1 rounded-lg hover:bg-red-700 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 text-sm text-slate-700">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2.5">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                  <span className="text-xs uppercase font-semibold text-slate-500">Client</span>
-                  <span className="font-semibold text-slate-900">{selectedExpiration.clientName}</span>
-                </div>
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                  <span className="text-xs uppercase font-semibold text-slate-500">Policy Type</span>
-                  <span className="font-semibold text-blue-600">{selectedExpiration.policyType}</span>
-                </div>
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                  <span className="text-xs uppercase font-semibold text-slate-500">Policy Number</span>
-                  <span className="font-mono text-slate-800">{selectedExpiration.policyNumber || 'N/A'}</span>
-                </div>
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                  <span className="text-xs uppercase font-semibold text-slate-500">Carrier / Company</span>
-                  <span className="text-slate-800">{selectedExpiration.company || 'N/A'}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs uppercase font-semibold text-slate-500">Expiration Date</span>
-                  <span className="font-bold text-red-600 font-mono">
-                    {selectedExpiration.expirationDate
-                      ? formatIsoToUsDate(selectedExpiration.expirationDate)
-                      : 'N/A'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedExpiration(null)}
-                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
-                >
-                  Close
-                </button>
-
-                {selectedExpiration.clientId && selectedExpiration.policyId && (
-                  <Link
-                    href={`/clients/${selectedExpiration.clientId}/policies/${selectedExpiration.policyId}`}
-                    className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md shadow-blue-500/20 transition-all"
-                  >
-                    View Policy Details
-                    <svg className="w-4 h-4 ml-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                    </svg>
-                  </Link>
                 )}
-              </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">Location (Optional)</label>
+                  <input
+                    type="text"
+                    value={formLocation}
+                    onChange={(e) => setFormLocation(e.target.value)}
+                    placeholder="e.g. Office / Zoom Call"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">Description (Optional)</label>
+                  <textarea
+                    rows={2}
+                    value={formDescription}
+                    onChange={(e) => setFormDescription(e.target.value)}
+                    placeholder="Add meeting notes or agenda..."
+                    className="w-full p-3 rounded-xl border border-slate-200 text-slate-900"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsNewAppointmentOpen(false)}
+                    className="px-4 py-2.5 rounded-xl border border-slate-200 font-bold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={formSaving}
+                    className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold transition-all shadow-sm"
+                  >
+                    {formSaving ? 'Saving...' : 'Save Appointment'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ========================================================================= */}
-      {/* 3. APPOINTMENT DETAIL MODAL                                                */}
-      {/* ========================================================================= */}
-      {selectedAppointment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-100 animate-scaleIn">
-            <div className="px-6 py-4 bg-blue-600 text-white flex items-center justify-between">
-              <h3 className="font-bold text-base">Appointment Details</h3>
-              <button
-                onClick={() => setSelectedAppointment(null)}
-                className="text-white/80 hover:text-white font-bold p-1 rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
+        {/* APPOINTMENT DETAILS MODAL */}
+        {selectedAppointment && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-extrabold text-slate-900">Appointment Details</h3>
+                  {selectedAppointment.seriesId && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                      🔄 Recurring
+                    </span>
+                  )}
+                </div>
+                <button onClick={() => setSelectedAppointment(null)} className="text-slate-400 font-bold">✕</button>
+              </div>
 
-            <div className="p-6 space-y-4 text-sm text-slate-700">
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2.5">
+              <div className="space-y-3 text-xs text-slate-700">
+                <div>
+                  <span className="font-bold text-slate-400 uppercase tracking-wider block text-[10px]">Title</span>
+                  <span className="font-extrabold text-slate-900 text-sm">{selectedAppointment.title}</span>
+                </div>
                 {selectedAppointment.clientName && (
-                  <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                    <span className="text-xs uppercase font-semibold text-slate-500">Client</span>
-                    <Link
-                      href={`/clients/${selectedAppointment.clientId}`}
-                      className="font-semibold text-blue-600 hover:underline"
-                    >
-                      {selectedAppointment.clientName}
-                    </Link>
+                  <div>
+                    <span className="font-bold text-slate-400 uppercase tracking-wider block text-[10px]">Client</span>
+                    <span className="font-bold text-blue-600">{selectedAppointment.clientName}</span>
                   </div>
                 )}
-
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                  <span className="text-xs uppercase font-semibold text-slate-500">Status</span>
-                  <span
-                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                      selectedAppointment.status === 'completed'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : selectedAppointment.status === 'cancelled'
-                        ? 'bg-slate-200 text-slate-600'
-                        : 'bg-blue-100 text-blue-800'
-                    }`}
-                  >
-                    {selectedAppointment.status}
-                  </span>
+                <div>
+                  <span className="font-bold text-slate-400 uppercase tracking-wider block text-[10px]">Time</span>
+                  <span className="font-medium">{formatTimestampToUsDateTime(selectedAppointment.startsAt)}</span>
                 </div>
-
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                  <span className="text-xs uppercase font-semibold text-slate-500">Start Time</span>
-                  <span className="font-medium text-slate-800 font-mono">
-                    {formatTimestampToUsDateTime(selectedAppointment.startsAt)}
-                  </span>
-                </div>
-
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                  <span className="text-xs uppercase font-semibold text-slate-500">End Time</span>
-                  <span className="font-medium text-slate-800 font-mono">
-                    {formatTimestampToUsDateTime(selectedAppointment.endsAt)}
-                  </span>
-                </div>
-
                 {selectedAppointment.location && (
-                  <div className="flex justify-between items-center pb-2 border-b border-slate-200/60">
-                    <span className="text-xs uppercase font-semibold text-slate-500">Location</span>
-                    <span className="text-slate-800">{selectedAppointment.location}</span>
+                  <div>
+                    <span className="font-bold text-slate-400 uppercase tracking-wider block text-[10px]">Location</span>
+                    <span className="font-medium">{selectedAppointment.location}</span>
                   </div>
                 )}
-
                 {selectedAppointment.description && (
-                  <div className="pt-1">
-                    <span className="text-xs uppercase font-semibold text-slate-500 block mb-1">Description</span>
-                    <p className="text-xs text-slate-600 bg-white p-2.5 rounded-lg border border-slate-200/80 whitespace-pre-wrap">
-                      {selectedAppointment.description}
-                    </p>
+                  <div>
+                    <span className="font-bold text-slate-400 uppercase tracking-wider block text-[10px]">Description</span>
+                    <p className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 font-medium">{selectedAppointment.description}</p>
                   </div>
                 )}
               </div>
 
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() =>
-                    selectedAppointment.appointmentId &&
-                    handleDeleteAppointment(selectedAppointment.appointmentId)
-                  }
-                  className="px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+                  onClick={() => handleDuplicateAppointment(selectedAppointment)}
+                  className="px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold border border-purple-200 transition-colors"
                 >
-                  Delete Appointment
+                  Duplicate Event
                 </button>
 
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setSelectedAppointment(null)}
-                    className="px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                    onClick={() => {
+                      if (selectedAppointment.seriesId) {
+                        setShowRecurrenceDeleteDialog(true);
+                      } else {
+                        handleDeleteAppointment(selectedAppointment.appointmentId);
+                      }
+                    }}
+                    className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-200 transition-colors"
                   >
-                    Close
+                    Delete
                   </button>
+
                   <button
                     type="button"
-                    onClick={() => handleOpenEditAppointment(selectedAppointment)}
-                    className="px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md shadow-blue-500/20 transition-all"
+                    onClick={() => {
+                      const sel = selectedAppointment;
+                      setSelectedAppointment(null);
+                      handleOpenNewAppointment();
+                      setFormAppointmentId(sel.appointmentId || null);
+                      setFormTitle(sel.title || '');
+                      setFormClientId(sel.clientId || '');
+                      setFormLocation(sel.location || '');
+                      setFormDescription(sel.description || '');
+                      setFormStatus(sel.status || 'scheduled');
+                    }}
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-sm"
                   >
-                    Edit Appointment
+                    Edit
                   </button>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* RECURRENCE DELETE CHOICE DIALOG */}
+        {showRecurrenceDeleteDialog && selectedAppointment && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
+              <h3 className="text-base font-extrabold text-slate-900">Delete Recurring Event</h3>
+              <p className="text-xs text-slate-600">This event is part of a recurring series. What would you like to delete?</p>
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    handleDeleteAppointment(selectedAppointment.appointmentId || selectedAppointment.seriesId);
+                    setShowRecurrenceDeleteDialog(false);
+                  }}
+                  className="w-full py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-800 font-bold text-xs text-left px-4"
+                >
+                  Delete this event only
+                </button>
+                <button
+                  onClick={() => handleDeleteSeries(selectedAppointment.seriesId)}
+                  className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs text-left px-4"
+                >
+                  Delete entire series
+                </button>
+              </div>
+              <div className="pt-2 text-right">
+                <button onClick={() => setShowRecurrenceDeleteDialog(false)} className="text-xs font-bold text-slate-500 hover:underline">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* POLICY EXPIRATION DETAILS MODAL (READ-ONLY) */}
+        {selectedExpiration && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-base font-extrabold text-slate-900">Policy Expiration (Read-Only)</h3>
+                <button onClick={() => setSelectedExpiration(null)} className="text-slate-400 font-bold">✕</button>
+              </div>
+              <div className="space-y-2 text-xs text-slate-700">
+                <div><span className="font-bold text-slate-400 block text-[10px]">Client</span><span className="font-extrabold text-slate-900">{selectedExpiration.clientName}</span></div>
+                <div><span className="font-bold text-slate-400 block text-[10px]">Policy Type</span><span className="font-bold text-blue-600">{selectedExpiration.policyType}</span></div>
+                <div><span className="font-bold text-slate-400 block text-[10px]">Expiration Date</span><span className="font-bold text-rose-600">{formatIsoToUsDate(selectedExpiration.expirationDate)}</span></div>
+              </div>
+              <div className="pt-3 border-t border-slate-100 flex justify-end">
+                <Link href={`/clients/${selectedExpiration.clientId}`} className="px-4 py-2 rounded-xl bg-slate-900 text-white font-bold text-xs">View Client</Link>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
     </DashboardLayout>
   );
 }

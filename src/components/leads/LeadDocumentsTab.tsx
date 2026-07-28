@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { Lead, LeadDocument } from '@/lib/leads/types';
 import { validateLeadFile, formatBytes, getLeadFileSignedUrl, logTimelineEvent } from '@/lib/leads/fileUtils';
 import { formatIsoToUsDate } from '@/utils/dateUtils';
+import FileDropzone from '@/components/ui/FileDropzone';
 
 interface LeadDocumentsTabProps {
   lead: Lead;
@@ -317,39 +318,26 @@ export default function LeadDocumentsTab({ lead, onActivityLogged }: LeadDocumen
             />
           </div>
 
-          <div className="sm:col-span-2 flex items-center justify-between border-t border-slate-800/80 pt-4">
-            <div className="flex items-center gap-3">
-              <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors">
-                <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                </svg>
-                {selectedFile ? 'Change File' : 'Choose File'}
-                <input
-                  type="file"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      const err = validateLeadFile(file);
-                      if (err) {
-                        setError(err);
-                        return;
-                      }
-                      setSelectedFile(file);
-                      if (!displayName) {
-                        setDisplayName(file.name.replace(/\.[^/.]+$/, ''));
-                      }
-                    }
-                  }}
-                />
-              </label>
-              {selectedFile && (
-                <span className="text-xs text-slate-300 font-medium">
-                  {selectedFile.name} <span className="text-slate-500">({formatBytes(selectedFile.size)})</span>
-                </span>
-              )}
-            </div>
+          <div className="sm:col-span-2 space-y-2">
+            <label className="block text-xs font-semibold text-slate-300">File Attachment</label>
+            <FileDropzone
+              onFilesSelected={(files) => {
+                if (files.length > 0) {
+                  const file = files[0];
+                  setSelectedFile(file);
+                  if (!displayName) {
+                    setDisplayName(file.name.replace(/\.[^/.]+$/, ''));
+                  }
+                }
+              }}
+              multiple={false}
+              disabled={uploading}
+              selectedFiles={selectedFile ? [selectedFile] : []}
+              onRemoveFile={() => setSelectedFile(null)}
+            />
+          </div>
 
+          <div className="sm:col-span-2 flex justify-end border-t border-slate-800/80 pt-4">
             <button
               type="submit"
               disabled={uploading || !selectedFile}
