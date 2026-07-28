@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { formatDateTimeToUs } from '@/utils/dateUtils';
 
 interface HealthTimelineProps {
   clientId: string;
@@ -128,7 +129,7 @@ export default function HealthTimeline({
                   {getEventText(evt)}
                 </span>
                 <span className="text-[10px] text-slate-400 block">
-                  {new Date(evt.created_at).toLocaleString()}
+                  {formatDateTimeToUs(evt.created_at)}
                 </span>
               </div>
             </div>

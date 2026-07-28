@@ -4,12 +4,40 @@
  */
 export const formatIsoToUsDate = (isoStr: string | null | undefined): string => {
   if (!isoStr) return 'Not provided';
-  const parts = isoStr.split('T')[0].split('-');
+  const clean = isoStr.trim().split('T')[0].split(' ')[0];
+  const parts = clean.split('-');
   if (parts.length === 3) {
     const [year, month, day] = parts;
-    return `${month}/${day}/${year}`;
+    if (year.length === 4 && month.length <= 2 && day.length <= 2) {
+      return `${month.padStart(2, '0')}/${day.padStart(2, '0')}/${year}`;
+    }
   }
   return isoStr;
+};
+
+/**
+ * Formats a full ISO timestamp string into US date and time format: MM/DD/YYYY, hh:mm AM/PM.
+ * Uses explicit 'en-US' locale to avoid browser language defaults.
+ */
+export const formatDateTimeToUs = (isoStr: string | null | undefined): string => {
+  if (!isoStr) return 'Not provided';
+  try {
+    const date = new Date(isoStr);
+    if (isNaN(date.getTime())) return isoStr;
+    const datePart = date.toLocaleDateString('en-US', {
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric'
+    });
+    const timePart = date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+    return `${datePart}, ${timePart}`;
+  } catch {
+    return isoStr;
+  }
 };
 
 /**

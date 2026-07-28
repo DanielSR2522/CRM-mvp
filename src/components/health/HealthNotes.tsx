@@ -1,8 +1,8 @@
-/* eslint-disable @next/next/no-img-element */
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { HealthPolicyNote, HealthPolicyNoteAttachment } from '@/lib/health/types';
 import { fetchHealthNotes } from '@/lib/health/health-service';
+import { formatDateTimeToUs } from '@/utils/dateUtils';
 
 interface HealthNotesProps {
   clientId: string;
@@ -391,7 +391,7 @@ export default function HealthNotes({
           notes.map(note => {
             const isAuthor = currentUserId !== null && note.author_id === currentUserId;
             const authorName = note.profiles?.name || note.profiles?.email || 'Agent';
-            const formattedDate = new Date(note.created_at).toLocaleString();
+            const formattedDate = formatDateTimeToUs(note.created_at);
             const noteAtts = savedAttachments[note.id] || [];
 
             return (

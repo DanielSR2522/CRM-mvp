@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { HealthPolicy } from '@/lib/health/types';
 import HealthSensitiveField from './HealthSensitiveField';
 import { saveHealthPolicy, saveHealthSecret } from '@/lib/health/health-service';
+import { formatIsoToUsDate } from '@/utils/dateUtils';
 
 // Empty per guidelines. To be populated later.
 const COMPANY_2026_OPTIONS: string[] = [];
@@ -84,7 +85,8 @@ export default function HealthPolicyForm({
         setNoMembership(initialPolicy.no_membership || '');
         setPlanCost(Number(initialPolicy.plan_cost || 0));
         setTaxCredit(Number(initialPolicy.tax_credit || 0));
-        setEffectiveDate(initialPolicy.effective_date ? new Date(initialPolicy.effective_date).toISOString().split('T')[0] : '');
+        setEffectiveDate(initialPolicy.effective_date ? initialPolicy.effective_date.split('T')[0].split(' ')[0] : '');
+        setCoverageMembersCount(Number(initialPolicy.coverage_members_count || 1));
         setCoverageMembersCount(Number(initialPolicy.coverage_members_count || 1));
 
         setPrimaryDoctor(initialPolicy.primary_doctor || '');
@@ -452,13 +454,21 @@ export default function HealthPolicyForm({
               </div>
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Effective Date</label>
-                <input
-                  type="date"
-                  value={effectiveDate}
-                  disabled={!isEditing}
-                  onChange={e => setEffectiveDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                />
+                {isEditing ? (
+                  <input
+                    type="date"
+                    value={effectiveDate}
+                    onChange={e => setEffectiveDate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={effectiveDate ? formatIsoToUsDate(effectiveDate) : 'Not provided'}
+                    disabled
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-sm font-semibold outline-none cursor-not-allowed"
+                  />
+                )}
               </div>
             </div>
 
