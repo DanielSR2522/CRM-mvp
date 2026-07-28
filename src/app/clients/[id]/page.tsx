@@ -8,6 +8,8 @@ import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
+import FileDropzone from '@/components/ui/FileDropzone';
+import DatePicker from '@/components/ui/DatePicker';
 
 declare global {
   interface Window {

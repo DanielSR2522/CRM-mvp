@@ -32,15 +32,18 @@ export default function DatePicker({
   const [isOpen, setIsOpen] = useState(false);
   const [inputText, setInputText] = useState('');
   
-  // Popover calendar navigation state
-  const [viewYear, setViewYear] = useState<number>(new Date().getFullYear());
-  const [viewMonth, setViewMonth] = useState<number>(new Date().getMonth()); // 0-indexed
+  // Popover calendar navigation state (Stabilized for SSR hydration)
+  const [viewYear, setViewYear] = useState<number>(2026);
+  const [viewMonth, setViewMonth] = useState<number>(6); // 0-indexed
 
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Sync value from parent
   useEffect(() => {
     if (!value) {
+      const now = new Date();
+      setViewYear(now.getFullYear());
+      setViewMonth(now.getMonth());
       setInputText('');
       return;
     }

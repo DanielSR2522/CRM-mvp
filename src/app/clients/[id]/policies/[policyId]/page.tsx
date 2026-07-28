@@ -12,6 +12,8 @@ import {
   calculateTermDuration,
   formatAsDateInput,
 } from '@/utils/dateUtils';
+import FileDropzone from '@/components/ui/FileDropzone';
+import DatePicker from '@/components/ui/DatePicker';
 
 interface Policy {
   id: string;
