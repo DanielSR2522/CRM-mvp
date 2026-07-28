@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, use, useRef, useCallback } from 'react';
+import React, { useState, useEffect, use, useRef, useCallback, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
@@ -125,15 +125,68 @@ interface ClientIncomeInformation {
 }
 
 export default function ClientProfilePage({ params }: { params: Promise<{ id: string }> }) {
+  return (
+    <Suspense fallback={
+      <DashboardLayout>
+        <div className="flex justify-center items-center py-20">
+          <div className="h-8 w-8 rounded-full border-4 border-blue-600 border-t-transparent animate-spin" />
+        </div>
+      </DashboardLayout>
+    }>
+      <ClientProfileContent params={params} />
+    </Suspense>
+  );
+}
+
+function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { id: clientId } = use(params);
 
   const isValidUuid = (uuid: string) => {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid);
   };
 
-  // Tab State
-  const [activeTab, setActiveTab] = useState<'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health'>('overview');
+  // Section mapping & URL-driven tab state
+  const rawSection = searchParams.get('section');
+  const validSections = ['overview', 'personal-information', 'personal-info', 'policies', 'documents', 'notes', 'consents', 'timeline', 'health'];
+  const normalizedSection = validSections.includes(rawSection || '')
+    ? (rawSection === 'personal-info' ? 'personal-information' : rawSection!)
+    : 'overview';
+
+  const activeTab = (normalizedSection === 'personal-information' ? 'personal-info' : normalizedSection) as 'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health';
+
+  const handleTabChange = useCallback((tab: string) => {
+    const targetSection = tab === 'personal-info' ? 'personal-information' : tab;
+    const currentSectionInUrl = searchParams.get('section');
+    if (currentSectionInUrl !== targetSection) {
+      const paramsObj = new URLSearchParams(searchParams.toString());
+      paramsObj.set('section', targetSection);
+      router.push(`/clients/${clientId}?${paramsObj.toString()}`);
+    }
+  }, [clientId, router, searchParams]);
+
+  // Client Sidebar Collapse Preference
+  const [isClientSidebarCollapsed, setIsClientSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('smartrack:client-sidebar-collapsed') === 'true';
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  });
+
+  const toggleClientSidebar = useCallback(() => {
+    setIsClientSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('smartrack:client-sidebar-collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  }, []);
 
   // Policies Search and Filters States
   const [policiesSearch, setPoliciesSearch] = useState('');
@@ -1710,11 +1763,40 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
           <div className="flex flex-col lg:flex-row gap-6 items-start">
             
             {/* Left Sidebar Summary */}
-            <aside className="w-full lg:w-[280px] bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 flex-shrink-0 lg:sticky lg:top-6">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client Profile</span>
-                <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">{personalInfo?.full_name || client?.full_name || '-'}</h2>
-              </div>
+            {isClientSidebarCollapsed ? (
+              <aside className="hidden lg:flex flex-col items-center bg-white border border-slate-100 rounded-2xl p-3 shadow-xs space-y-4 flex-shrink-0 lg:sticky lg:top-6">
+                <button
+                  type="button"
+                  onClick={toggleClientSidebar}
+                  title="Expand client details sidebar"
+                  className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                  </svg>
+                </button>
+                <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-extrabold flex items-center justify-center text-xs">
+                  {client?.full_name?.charAt(0) || 'C'}
+                </div>
+              </aside>
+            ) : (
+              <aside className="w-full lg:w-[280px] bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 flex-shrink-0 lg:sticky lg:top-6 relative">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client Profile</span>
+                    <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">{personalInfo?.full_name || client?.full_name || '-'}</h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleClientSidebar}
+                    title="Collapse sidebar"
+                    className="hidden lg:block p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                    </svg>
+                  </button>
+                </div>
 
               <div className="border-t border-slate-100 pt-5 space-y-4">
                 <div>
@@ -1964,6 +2046,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                 )}
               </div>
             </aside>
+          )}
 
             {/* Main Area */}
             <div className="flex-1 w-full space-y-6">
@@ -1972,7 +2055,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
               <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div className="flex border-b sm:border-b-0 border-slate-100 pb-2 sm:pb-0">
                   <button
-                    onClick={() => setActiveTab('overview')}
+                    onClick={() => handleTabChange('overview')}
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'overview'
                         ? 'border-b-2 border-blue-600 text-blue-600'
@@ -1982,7 +2065,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     Overview
                   </button>
                   <button
-                    onClick={() => setActiveTab('personal-info')}
+                    onClick={() => handleTabChange('personal-info')}
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'personal-info'
                         ? 'border-b-2 border-blue-600 text-blue-600'
@@ -1992,7 +2075,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     Personal Info
                   </button>
                   <button
-                    onClick={() => setActiveTab('policies')}
+                    onClick={() => handleTabChange('policies')}
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'policies'
                         ? 'border-b-2 border-blue-600 text-blue-600'
@@ -2002,7 +2085,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     Property & Casualty
                   </button>
                   <button
-                    onClick={() => setActiveTab('health')}
+                    onClick={() => handleTabChange('health')}
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'health'
                         ? 'border-b-2 border-blue-600 text-blue-600'
@@ -2012,7 +2095,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     Health
                   </button>
                   <button
-                    onClick={() => setActiveTab('documents')}
+                    onClick={() => handleTabChange('documents')}
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'documents'
                         ? 'border-b-2 border-blue-600 text-blue-600'
@@ -2022,7 +2105,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     Documents
                   </button>
                   <button
-                    onClick={() => setActiveTab('notes')}
+                    onClick={() => handleTabChange('notes')}
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'notes'
                         ? 'border-b-2 border-blue-600 text-blue-600'
@@ -2032,7 +2115,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     Notes
                   </button>
                   <button
-                    onClick={() => setActiveTab('consents')}
+                    onClick={() => handleTabChange('consents')}
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'consents'
                         ? 'border-b-2 border-blue-600 text-blue-600'
@@ -2042,7 +2125,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                     Consents
                   </button>
                   <button
-                    onClick={() => setActiveTab('timeline')}
+                    onClick={() => handleTabChange('timeline')}
                     className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'timeline'
                         ? 'border-b-2 border-blue-600 text-blue-600'
@@ -2127,7 +2210,7 @@ export default function ClientProfilePage({ params }: { params: Promise<{ id: st
                         <div className="flex items-center justify-between border-b border-slate-50 pb-4">
                           <h4 className="text-base font-extrabold text-slate-900">Recent Policies</h4>
                           <button
-                            onClick={() => setActiveTab('policies')}
+                            onClick={() => handleTabChange('policies')}
                             className="text-xs font-bold text-blue-650 hover:text-blue-850 transition-colors flex items-center gap-1"
                           >
                             View All Policies

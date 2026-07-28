@@ -4,14 +4,16 @@ import React from 'react';
 import type { DeliveryChannel, RequestStatus } from '@/lib/consents/types';
 import { REQUEST_STATUSES } from '@/lib/consents/types';
 import { CHANNEL_LABELS } from '@/lib/consents/status';
+import DatePicker from '@/components/ui/DatePicker';
+import { formatIsoToUsDate, usDateToIso } from '@/utils/dateUtils';
 
 export interface FilterState {
   clientSearch: string;
   status: RequestStatus | '';
   templateId: string;
   channel: DeliveryChannel | '';
-  dateFrom: string;
-  dateTo: string;
+  dateFrom: string; // YYYY-MM-DD
+  dateTo: string;   // YYYY-MM-DD
 }
 
 export const EMPTY_FILTERS: FilterState = {
@@ -46,20 +48,17 @@ export default function ConsentFilters({
     onChange({ ...value, [key]: v });
 
   const active = hasActiveFilters(value);
-
-  // A backwards range returns nothing and looks like a bug in the app rather
-  // than a typo, so it is called out explicitly.
   const rangeInvalid = Boolean(value.dateFrom && value.dateTo && value.dateFrom > value.dateTo);
 
   return (
-    <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+    <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 shadow-xs">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
         <Field id="f-client" label="Client">
           <input
             id="f-client"
             value={value.clientSearch}
             onChange={(e) => set('clientSearch', e.target.value)}
-            placeholder="Client name"
+            placeholder="Client name..."
             className={inputClass}
           />
         </Field>
@@ -112,23 +111,21 @@ export default function ConsentFilters({
           </select>
         </Field>
 
-        <Field id="f-from" label="Created from">
-          <input
-            id="f-from"
-            type="date"
-            value={value.dateFrom}
-            onChange={(e) => set('dateFrom', e.target.value)}
-            className={rangeInvalid ? inputErrorClass : inputClass}
+        <Field id="f-from" label="Created From">
+          <DatePicker
+            label=""
+            optional
+            value={value.dateFrom ? formatIsoToUsDate(value.dateFrom) : ''}
+            onChange={(iso) => set('dateFrom', iso || '')}
           />
         </Field>
 
-        <Field id="f-to" label="Created to">
-          <input
-            id="f-to"
-            type="date"
-            value={value.dateTo}
-            onChange={(e) => set('dateTo', e.target.value)}
-            className={rangeInvalid ? inputErrorClass : inputClass}
+        <Field id="f-to" label="Created To">
+          <DatePicker
+            label=""
+            optional
+            value={value.dateTo ? formatIsoToUsDate(value.dateTo) : ''}
+            onChange={(iso) => set('dateTo', iso || '')}
           />
         </Field>
       </div>
@@ -140,14 +137,14 @@ export default function ConsentFilters({
       )}
 
       {active && (
-        <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-50">
-          <span className="text-xs text-slate-500">
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
             {loading ? 'Searching…' : `${resultCount} result${resultCount === 1 ? '' : 's'}`}
           </span>
           <button
             type="button"
             onClick={() => onChange(EMPTY_FILTERS)}
-            className="text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors"
+            className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline transition-colors"
           >
             Clear filters
           </button>
@@ -158,16 +155,16 @@ export default function ConsentFilters({
 }
 
 const inputClass =
-  'w-full text-sm text-slate-800 border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
-const inputErrorClass =
-  'w-full text-sm text-slate-800 border border-rose-300 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-rose-500';
+  'w-full text-xs text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
 
 function Field({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label htmlFor={id} className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-        {label}
-      </label>
+      {label && (
+        <label htmlFor={id} className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+          {label}
+        </label>
+      )}
       {children}
     </div>
   );

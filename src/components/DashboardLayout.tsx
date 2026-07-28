@@ -18,6 +18,12 @@ import {
   SIDEBAR_THEMES,
   SidebarThemeConfig,
 } from '@/lib/theme/sidebarTheme';
+import {
+  getStoredThemeSettings,
+  applyThemeSettings,
+  subscribeThemeSystemChange,
+} from '@/lib/theme/themeSystem';
+import ThemeSelectorModal from '@/components/theme/ThemeSelectorModal';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -32,18 +38,24 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   // Theme state
   const [theme, setTheme] = useState<SidebarThemeConfig>(SIDEBAR_THEMES.navy);
+  const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
 
   // State to track whether the sidebar is collapsed (completely hidden on desktop)
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // Load session collapse state safely on client mount
+  // Load session collapse state and theme settings safely on client mount
   useEffect(() => {
     setMounted(true);
+    applyThemeSettings(getStoredThemeSettings());
+    const unsubThemeSystem = subscribeThemeSystemChange((newSettings) => {
+      applyThemeSettings(newSettings);
+    });
     const saved = localStorage.getItem('smartrack:sidebar-collapsed');
     if (saved !== null) {
       setIsCollapsed(saved === 'true');
     }
+    return () => unsubThemeSystem();
   }, []);
 
   // Update theme when userId or theme changes in localStorage
@@ -300,7 +312,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       )}
 
       {/* Desktop Sidebar */}
-      <aside className={`hidden md:flex flex-col justify-between transition-all duration-300 ${theme.sidebarBgClass} ${theme.textPrimaryClass} border-r ${theme.sidebarBorderClass} sticky top-0 h-screen z-40 overflow-hidden ${
+      <aside className={`hidden md:flex flex-col justify-between transition-all duration-300 bg-[var(--sidebar-bg)] text-[var(--sidebar-fg)] border-r border-white/10 sticky top-0 h-screen z-40 overflow-hidden ${
         isCollapsed && mounted ? 'w-0 p-0 border-r-0' : 'w-60 p-4'
       }`}>
         <div className="w-[208px] flex-shrink-0 flex flex-col h-full justify-between">
@@ -308,10 +320,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             {/* Logo / Header area */}
             <div className="flex items-center mb-8 px-1 justify-between">
               <div className="flex items-center gap-3 overflow-hidden">
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-blue-600 to-cyan-500 flex items-center justify-center font-bold text-white shadow-md flex-shrink-0">
+                <div className="w-9 h-9 rounded-lg bg-[var(--accent)] flex items-center justify-center font-bold text-white shadow-md flex-shrink-0">
                   C
                 </div>
-                <span className="font-extrabold text-sm tracking-tight truncate">
+                <span className="font-extrabold text-sm tracking-tight truncate text-white">
                   SmarTrack CRM
                 </span>
               </div>
@@ -319,7 +331,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <button
                 onClick={handleToggleSidebar}
                 aria-label="Collapse sidebar"
-                className={`p-1.5 rounded-lg transition-colors focus:ring-2 focus:ring-white focus:outline-none ${theme.textSecondaryClass} ${theme.hoverBgClass}`}
+                className="p-1.5 rounded-lg transition-colors focus:ring-2 focus:ring-white focus:outline-none text-[var(--sidebar-muted)] hover:text-white hover:bg-white/10"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
@@ -342,11 +354,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                     }}
                     className={`flex items-center rounded-xl border transition-all duration-200 group focus:ring-2 focus:ring-white focus:outline-none px-4 py-2.5 gap-3 w-full ${
                       isActive
-                        ? `${theme.activeBgClass} ${theme.activeTextClass} shadow-md`
-                        : `border-transparent ${theme.textSecondaryClass} ${theme.hoverBgClass}`
+                        ? 'bg-[var(--sidebar-active-bg)] text-[var(--sidebar-active-fg)] font-bold shadow-md border-transparent'
+                        : 'border-transparent text-[var(--sidebar-muted)] hover:text-white hover:bg-white/10'
                     }`}
                   >
-                    <span className={`transition-transform duration-200 group-hover:scale-105 flex-shrink-0 ${isActive ? theme.iconColorClass : 'opacity-80 group-hover:opacity-100'}`}>
+                    <span className={`transition-transform duration-200 group-hover:scale-105 flex-shrink-0 ${isActive ? 'text-white' : 'opacity-80 group-hover:opacity-100'}`}>
                       {item.icon}
                     </span>
                     <span className="text-sm truncate font-medium">{item.name}</span>
@@ -369,6 +381,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
 
             <button
+              type="button"
+              onClick={() => setIsThemeModalOpen(true)}
+              className={`flex items-center justify-center border border-white/10 rounded-xl font-semibold transition-all duration-200 text-xs hover:bg-white/10 text-slate-200 focus:ring-2 focus:ring-white focus:outline-none w-full gap-2 px-3 py-2`}
+            >
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-23" />
+              </svg>
+              <span className="truncate">Theme & Appearance</span>
+            </button>
+
+            <button
               onClick={handleLogout}
               aria-label="Sign Out"
               className={`flex items-center justify-center border rounded-xl font-semibold transition-all duration-200 text-sm active:scale-[0.98] focus:ring-2 focus:ring-white focus:outline-none w-full gap-3 px-4 py-2.5 ${theme.signOutBtnClass}`}
@@ -383,11 +406,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col min-w-0 bg-slate-50 relative overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 bg-[var(--background)] relative overflow-hidden transition-colors">
         <div className="flex-1 overflow-y-auto px-6 py-8 md:py-10 relative z-10 transition-all duration-300 md:px-10">
           {children}
         </div>
       </main>
+
+      {/* Global Theme & Appearance Selector Modal */}
+      <ThemeSelectorModal isOpen={isThemeModalOpen} onClose={() => setIsThemeModalOpen(false)} />
     </div>
   );
 }

@@ -1557,8 +1557,8 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
 
       if (deleteError) throw deleteError;
 
-      // 4. Redirect to client dashboard
-      router.push(`/clients/${id}`);
+      // 4. Redirect to client policies section
+      router.push(`/clients/${id}?section=policies`);
     } catch (err: any) {
       console.error('Error deleting policy:', {
         message: err?.message,
@@ -1689,7 +1689,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Link href="/clients" className="hover:text-blue-600 transition-colors">Clients</Link>
           <span>/</span>
-          <Link href={`/clients/${id}`} className="hover:text-blue-600 transition-colors font-medium">
+          <Link href={`/clients/${id}?section=policies`} className="hover:text-blue-600 transition-colors font-medium">
             {clientName || 'Client Profile'}
           </Link>
           <span>/</span>

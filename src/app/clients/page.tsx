@@ -261,10 +261,18 @@ export default function ClientsPage() {
                   {filteredClients.map((client) => (
                     <tr
                       key={client.id}
-                      onClick={() => router.push(`/clients/${client.id}`)}
+                      onClick={() => router.push(`/clients/${client.id}?section=overview`)}
                       className="hover:bg-slate-50/50 cursor-pointer transition-colors"
                     >
-                      <td className="px-6 py-4 font-semibold text-slate-900">{client.full_name}</td>
+                      <td className="px-6 py-4 font-semibold text-slate-900">
+                        <Link
+                          href={`/clients/${client.id}?section=overview`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="hover:text-blue-600 transition-colors font-bold"
+                        >
+                          {client.full_name}
+                        </Link>
+                      </td>
                       <td className="px-6 py-4 text-slate-600">{client.email || '-'}</td>
                       <td className="px-6 py-4 text-slate-600">{client.phone || '-'}</td>
                       <td className="px-6 py-4 text-center">
@@ -288,9 +296,18 @@ export default function ClientsPage() {
                         >
                           Edit
                         </button>
+                        <a
+                          href={`/clients/${client.id}?section=overview`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-slate-400 hover:text-slate-600 text-xs font-medium transition-colors"
+                          title="Open client profile in a new browser tab"
+                        >
+                          Open in new tab ↗
+                        </a>
                         <Link
-                          href={`/clients/${client.id}`}
-                          className="text-slate-600 hover:text-slate-900 font-semibold transition-colors"
+                          href={`/clients/${client.id}?section=overview`}
+                          className="text-slate-700 hover:text-slate-900 font-bold transition-colors"
                         >
                           Profile →
                         </Link>
