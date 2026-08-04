@@ -9,9 +9,12 @@ import { LINES_OF_BUSINESS } from '@/constants/linesOfBusiness';
 import { usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
 import DatePicker from '@/components/ui/DatePicker';
 
+import { useBusinessLines } from '@/contexts/BusinessLinesContext';
+
 export default function NewPolicyPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { id } = use(params);
+  const { isLineEnabled } = useBusinessLines();
 
   // States
   const [clientName, setClientName] = useState('');
@@ -52,6 +55,34 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
     };
     fetchClient();
   }, [id]);
+
+  if (!isLineEnabled('property_casualty')) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-4xl mx-auto py-12">
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-4 font-sans">
+            <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-white">Module Access Restricted</h3>
+            <p className="text-sm text-slate-300 max-w-md mx-auto">
+              The <strong>Property & Casualty</strong> business line is currently disabled for your agent profile. You can enable it in Agent Information settings.
+            </p>
+            <div className="pt-2">
+              <Link
+                href="/personal-information"
+                className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm transition-all"
+              >
+                Go to Agent Information
+              </Link>
+            </div>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

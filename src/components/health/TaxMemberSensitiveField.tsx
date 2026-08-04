@@ -1,29 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { revealHealthSecret } from '@/lib/health/health-service';
+import { revealTaxMemberSecret } from '@/lib/health/health-service';
+import { formatSsnInput, isValidSsn, normalizeSsn, maskSsn } from '@/utils/ssnUtils';
 
-interface HealthSensitiveFieldProps {
+interface TaxMemberSensitiveFieldProps {
   label: string;
   healthPolicyId: string | undefined;
-  fieldName: string;
+  memberNumber: number;
+  fieldName: 'ssn' | 'immigration_card_number' | 'immigration_uscis_number' | 'immigration_alien_number';
   hasValue: boolean;
-  disabled?: boolean;
+  disabled: boolean;
   value: string;
   onChange: (val: string) => void;
-  type?: 'text' | 'password';
+  placeholder?: string;
   onInlineSave?: () => void;
 }
 
-export default function HealthSensitiveField({
+export default function TaxMemberSensitiveField({
   label,
   healthPolicyId,
+  memberNumber,
   fieldName,
   hasValue,
   disabled,
   value,
   onChange,
-  type = 'text',
+  placeholder,
   onInlineSave
-}: HealthSensitiveFieldProps) {
+}: TaxMemberSensitiveFieldProps) {
   const [revealed, setRevealed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,19 +56,39 @@ export default function HealthSensitiveField({
     setLoading(true);
     setError(null);
     try {
-      const plaintext = await revealHealthSecret(healthPolicyId, fieldName);
-      onChange(plaintext);
-      setDraftValue(plaintext);
+      const plaintext = await revealTaxMemberSecret(healthPolicyId, memberNumber, fieldName);
+      const formatted = fieldName === 'ssn' ? formatSsnInput(plaintext) : plaintext;
+      onChange(formatted);
+      setDraftValue(formatted);
       setRevealed(true);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to reveal';
+      const message = err instanceof Error ? err.message : 'Failed to reveal secret';
       setError(message);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (fieldName === 'ssn') {
+      const formatted = formatSsnInput(raw);
+      setDraftValue(formatted);
+      onChange(formatted);
+    } else {
+      setDraftValue(raw);
+      onChange(raw);
+    }
+    setError(null);
+  };
+
   const handleSave = () => {
+    if (fieldName === 'ssn' && draftValue.trim()) {
+      if (!isValidSsn(draftValue, false)) {
+        setError('SSN must be exactly 9 digits');
+        return;
+      }
+    }
     setError(null);
     setIsInlineEditing(false);
     if (onInlineSave) onInlineSave();
@@ -78,12 +101,16 @@ export default function HealthSensitiveField({
     setIsInlineEditing(false);
   };
 
+  // Display Text Logic
   const getDisplayText = () => {
     if (!hasValue && !value && !draftValue) {
       return '—';
     }
     if (revealed || (value && !hasValue)) {
-      return value;
+      return fieldName === 'ssn' ? formatSsnInput(value) : value;
+    }
+    if (hasValue && fieldName === 'ssn') {
+      return '•••-••-••••';
     }
     return '••••••••';
   };
@@ -95,13 +122,10 @@ export default function HealthSensitiveField({
       {isInlineEditing ? (
         <div className="flex items-center gap-2">
           <input
-            type={type === 'password' ? 'password' : 'text'}
+            type="text"
             value={draftValue}
-            onChange={e => {
-              setDraftValue(e.target.value);
-              onChange(e.target.value);
-            }}
-            placeholder={hasValue ? '•••••••• (Type to overwrite)' : `Enter ${label}...`}
+            onChange={handleInputChange}
+            placeholder={placeholder || (fieldName === 'ssn' ? '123-45-6789' : `Enter ${label}...`)}
             className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
             autoFocus
             onKeyDown={e => {

@@ -16,6 +16,66 @@ export const formatIsoToUsDate = (isoStr: string | null | undefined): string => 
 };
 
 /**
+ * Standardized helper to format any date value for display as MM/DD/YYYY.
+ * Returns '—' if empty or invalid.
+ */
+export const formatDateForDisplay = (value: string | null | undefined): string => {
+  if (!value || !value.trim() || value === 'Not provided' || value === '—') return '—';
+  const clean = value.trim().split('T')[0].split(' ')[0];
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(clean)) return clean;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    const [y, m, d] = clean.split('-');
+    return `${m}/${d}/${y}`;
+  }
+  return formatIsoToUsDate(clean) || '—';
+};
+
+/**
+ * Standardized helper to parse MM/DD/YYYY or YYYY-MM-DD display date to YYYY-MM-DD for DB storage.
+ * Validates real calendar date (rejects 02/31/2026).
+ */
+export const parseDisplayDate = (value: string | null | undefined): string | null => {
+  if (!value || !value.trim()) return null;
+  const clean = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    const [y, m, d] = clean.split('-').map(Number);
+    const test = new Date(y, m - 1, d);
+    if (test.getFullYear() === y && test.getMonth() === m - 1 && test.getDate() === d) {
+      return clean;
+    }
+    return null;
+  }
+  return usDateToIso(clean);
+};
+
+/**
+ * Returns true if the provided string is a valid calendar date (MM/DD/YYYY or YYYY-MM-DD).
+ */
+export const isValidDisplayDate = (value: string | null | undefined): boolean => {
+  return parseDisplayDate(value) !== null;
+};
+
+/**
+ * Calculates readable age dynamically using date-only arithmetic without timezone shifts.
+ */
+export const calculateAgeFromDateOnly = (dobStr: string | null | undefined): number | null => {
+  if (!dobStr) return null;
+  const iso = dobStr.includes('/') ? parseDisplayDate(dobStr) : dobStr.split('T')[0];
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+
+  const [y, m, d] = iso.split('-').map(Number);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - y;
+  const monthDiff = (today.getMonth() + 1) - m;
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < d)) {
+    age--;
+  }
+  return age >= 0 ? age : null;
+};
+
+/**
  * Formats a full ISO timestamp string into US date and time format: MM/DD/YYYY, hh:mm AM/PM.
  * Uses explicit 'en-US' locale to avoid browser language defaults.
  */

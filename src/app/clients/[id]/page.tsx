@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
 import FileDropzone from '@/components/ui/FileDropzone';
 import DatePicker from '@/components/ui/DatePicker';
+import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 
 declare global {
   interface Window {
@@ -142,6 +143,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { id: clientId } = use(params);
+  const { isLineEnabled } = useBusinessLines();
 
   const isValidUuid = (uuid: string) => {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid);
@@ -2052,84 +2054,88 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             <div className="flex-1 w-full space-y-6">
               
               {/* Tabs and Actions bar */}
-              <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="flex border-b sm:border-b-0 border-slate-100 pb-2 sm:pb-0">
+              <div className="crm-card p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-1 border-b sm:border-b-0 border-[#E8ECF2] pb-2 sm:pb-0">
                   <button
                     onClick={() => handleTabChange('overview')}
-                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                       activeTab === 'overview'
-                        ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-550 hover:text-blue-600'
+                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
                     }`}
                   >
                     Overview
                   </button>
                   <button
                     onClick={() => handleTabChange('personal-info')}
-                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                       activeTab === 'personal-info'
-                        ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-550 hover:text-blue-600'
+                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
                     }`}
                   >
                     Personal Info
                   </button>
-                  <button
-                    onClick={() => handleTabChange('policies')}
-                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
-                      activeTab === 'policies'
-                        ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-550 hover:text-blue-600'
-                    }`}
-                  >
-                    Property & Casualty
-                  </button>
-                  <button
-                    onClick={() => handleTabChange('health')}
-                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
-                      activeTab === 'health'
-                        ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-550 hover:text-blue-600'
-                    }`}
-                  >
-                    Health
-                  </button>
+                  {isLineEnabled('property_casualty') && (
+                    <button
+                      onClick={() => handleTabChange('policies')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        activeTab === 'policies'
+                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                      }`}
+                    >
+                      Property & Casualty
+                    </button>
+                  )}
+                  {isLineEnabled('health') && (
+                    <button
+                      onClick={() => handleTabChange('health')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        activeTab === 'health'
+                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                      }`}
+                    >
+                      Health
+                    </button>
+                  )}
                   <button
                     onClick={() => handleTabChange('documents')}
-                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                       activeTab === 'documents'
-                        ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-550 hover:text-blue-600'
+                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
                     }`}
                   >
                     Documents
                   </button>
                   <button
                     onClick={() => handleTabChange('notes')}
-                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                       activeTab === 'notes'
-                        ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-550 hover:text-blue-600'
+                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
                     }`}
                   >
                     Notes
                   </button>
                   <button
                     onClick={() => handleTabChange('consents')}
-                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                       activeTab === 'consents'
-                        ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-550 hover:text-blue-600'
+                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
                     }`}
                   >
                     Consents
                   </button>
                   <button
                     onClick={() => handleTabChange('timeline')}
-                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                       activeTab === 'timeline'
-                        ? 'border-b-2 border-blue-600 text-blue-600'
-                        : 'text-slate-550 hover:text-blue-600'
+                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
                     }`}
                   >
                     Timeline
@@ -2137,10 +2143,10 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
                 
                 {activeTab === 'policies' && policies.length > 0 && (
-                  <div className="flex justify-end gap-3">
+                  <div className="flex justify-end gap-2">
                     <Link
                       href={`/clients/${clientId}/policies/new`}
-                      className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10"
+                      className="crm-btn-primary text-xs px-3 py-1.5"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
@@ -2407,6 +2413,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
               {/* POLICIES TAB CONTENT (Functional list, edit/delete actions, search/filters, details table) */}
               {activeTab === 'policies' && (
+                !isLineEnabled('property_casualty') ? (
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
+                    <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
+                    <p className="text-sm text-slate-300">The <strong>Property & Casualty</strong> module is disabled for your agent profile.</p>
+                  </div>
+                ) : (
                 <div className="space-y-6">
 
                   {/* Policies Search and Filter Section */}
@@ -2619,6 +2631,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                     </div>
                   )}
                 </div>
+                )
               )}
 
               {/* PERSONAL INFO TAB CONTENT */}
@@ -4036,12 +4049,19 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       })()}
 
       {activeTab === 'health' && client && (
-        <HealthPolicyTab
-          clientId={clientId}
-          agentName={getAgentDisplayName()}
-          currentUserId={currentUserId}
-          formatIsoToUsDate={formatIsoToUsDate}
-        />
+        !isLineEnabled('health') ? (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
+            <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
+            <p className="text-sm text-slate-300">The <strong>Health</strong> module is disabled for your agent profile.</p>
+          </div>
+        ) : (
+          <HealthPolicyTab
+            clientId={clientId}
+            agentName={getAgentDisplayName()}
+            currentUserId={currentUserId}
+            formatIsoToUsDate={formatIsoToUsDate}
+          />
+        )
       )}
             </div>
           </div>

@@ -26,6 +26,7 @@ export interface HealthPolicy {
   tax_credit: number;
   effective_date: string | null;
   coverage_members_count: number | null;
+  number_of_people_on_tax_return?: number | null;
   primary_doctor: string | null;
   primary_doctor_address: string | null;
   primary_doctor_phone: string | null;
@@ -93,4 +94,38 @@ export interface EncryptedSecretField {
   ciphertext: string;
   iv: string;
   authTag: string;
+}
+
+export interface HealthTaxHouseholdMember {
+  id?: string;
+  health_policy_id: string;
+  member_number: number;
+  coverage: boolean;
+  full_name: string;
+  date_of_birth: string | null;
+  relationship_to_applicant: 'Spouse' | 'Son' | 'Daughter' | 'Child' | 'Stepchild' | 'Parent' | 'Sibling' | 'Domestic Partner' | 'Other Dependent' | 'Other' | string;
+  gender?: 'Male' | 'Female' | 'Other' | '' | string;
+  us_citizen?: boolean;
+  uses_tobacco?: boolean;
+  annual_income?: number | null;
+  income_type?: string | null;
+  employer_name?: string | null;
+  employer_phone?: string | null;
+  immigration_status: 'Resident' | 'Work Permit' | 'Citizen' | 'Other' | '' | string;
+  immigration_category?: string | null;
+  immigration_expiration_date?: string | null;
+  
+  ssn_encrypted?: string | null;
+  immigration_card_number_encrypted?: string | null;
+  immigration_uscis_number_encrypted?: string | null;
+  immigration_alien_number_encrypted?: string | null;
+
+  // Mask / secret flags
+  has_ssn?: boolean;
+  has_card_number?: boolean;
+  has_uscis_number?: boolean;
+  has_alien_number?: boolean;
+
+  created_at?: string;
+  updated_at?: string;
 }
