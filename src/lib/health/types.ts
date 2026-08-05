@@ -96,6 +96,32 @@ export interface EncryptedSecretField {
   authTag: string;
 }
 
+export interface HealthPrimaryApplicant {
+  clientId: string;
+  fullName: string | null;
+  dateOfBirth: string | null;
+  email: string | null;
+  phone: string | null;
+  gender: string | null;
+  maritalStatus: string | null;
+  bornInUsa: boolean | null;
+  usCitizen: boolean | null;
+  immigrationStatus: string | null;
+  immigrationCategory: string | null;
+  immigrationExpirationDate: string | null;
+  alienNumber?: string | null;
+  cardNumber?: string | null;
+  uscisNumber?: string | null;
+  ssn?: string | null;
+  hasSsn: boolean;
+  hasCardNumber: boolean;
+  hasUscisNumber: boolean;
+  hasAlienNumber: boolean;
+  coverage: boolean;
+  usesTobacco?: boolean | null;
+  annualIncome?: number | null;
+}
+
 export interface HealthTaxHouseholdMember {
   id?: string;
   health_policy_id: string;

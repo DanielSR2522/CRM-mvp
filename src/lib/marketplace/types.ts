@@ -8,6 +8,27 @@ export interface MarketplaceHouseholdPerson {
   relationship?: 'Self' | 'Spouse' | 'Child' | string;
 }
 
+export interface MarketplaceClientContext {
+  coverageYear: number | null;
+  zipCode: string | null;
+  state: string | null;
+  countyName: string | null;
+  countyFips: string | null;
+  householdIncome: number | null;
+  householdSize: number;
+  coveredApplicants: number;
+  people: Array<{
+    member_number: number;
+    age: number;
+    relationship: string;
+    applying_for_coverage: boolean;
+    gender?: string;
+    uses_tobacco?: boolean;
+    annual_income?: number;
+  }>;
+  validationErrors: string[];
+}
+
 export interface MarketplaceSearchPayload {
   planId: string;
   coverageYear: number;
@@ -24,7 +45,7 @@ export interface NormalizedBenefit {
   copayAmount: number | null;
   coinsurancePercentage: number | null;
   deductibleApplies: boolean;
-  coverageStatus: string; // e.g. "Covered", "Not Covered", "Not Provided"
+  coverageStatus: string; // e.g. "Covered", "Not covered", "Cost sharing not specified", "Not provided by Marketplace API"
   individualValue: string;
   familyValue: string;
   limitations: string;
@@ -32,6 +53,10 @@ export interface NormalizedBenefit {
   sourceText: string;
   sourceUrl: string;
   sortOrder: number;
+  networkTier?: string;
+  secondaryDisplay?: string;
+  rawName?: string;
+  isUnmapped?: boolean;
 }
 
 export interface MarketplacePlanPreview {
@@ -48,6 +73,8 @@ export interface MarketplacePlanPreview {
   premiumAnnual: number; // Final annual premium
   deductibleIndividual: number | null;
   deductibleFamily: number | null;
+  isCombinedDeductible?: boolean;
+  deductibleType?: string;
   drugDeductibleIndividual: number | null;
   drugDeductibleFamily: number | null;
   oopMaxIndividual: number | null;
@@ -59,6 +86,15 @@ export interface MarketplacePlanPreview {
   networkUrl?: string;
   benefits: NormalizedBenefit[];
   rawPlan: any;
+  audit?: {
+    planId: string;
+    rawBenefitCount: number;
+    mappedBenefitCount: number;
+    unmappedBenefitCount: number;
+    unmappedBenefitNames: string[];
+    benefitsWithoutCostSharing: string[];
+    benefitsWithMultipleNetworkTiers: string[];
+  };
 }
 
 export interface MarketplacePlanSnapshot {

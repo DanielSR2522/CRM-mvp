@@ -904,6 +904,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
       if (error) throw error;
       setIncomeList(data || []);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('income-updated', { detail: { clientId } }));
+      }
     } catch (err: any) {
       console.error('Error fetching income info:', err);
     } finally {
@@ -3470,6 +3473,23 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         ))}
                       </div>
                     )}
+
+                    {/* READ-ONLY TOTAL INCOME SUMMARY ROW */}
+                    {(() => {
+                      const calculatedTotalIncome = incomeList.reduce((sum, item) => {
+                        const val = Number(item.income);
+                        return sum + (!isNaN(val) && val > 0 ? val : 0);
+                      }, 0);
+
+                      return (
+                        <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between px-4 py-3 bg-slate-50 border border-slate-200/70 rounded-xl font-sans">
+                          <span className="text-xs font-extrabold uppercase tracking-wider text-slate-600">Total Income</span>
+                          <span className="text-sm font-extrabold text-slate-900 font-mono">
+                            {formatCurrency(calculatedTotalIncome)}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               )}

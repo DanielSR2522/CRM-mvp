@@ -1,15 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { MarketplacePlanPreview, NormalizedBenefit } from '@/lib/marketplace/types';
+import { MarketplacePlanPreview, MarketplaceClientContext } from '@/lib/marketplace/types';
+import { buildMarketplaceFingerprint } from '@/lib/marketplace/people-helper';
 import { formatCurrency } from '@/lib/marketplace/normalizer';
 
 interface MarketplacePlanLookupPanelProps {
   initialPlanId?: string;
-  initialYear?: string;
-  initialZip?: string;
-  initialCounty?: string;
-  initialState?: string;
-  householdIncome?: number;
-  peopleCount?: number;
+  context: MarketplaceClientContext;
   isEditing: boolean;
   onApplyPlan: (plan: MarketplacePlanPreview) => void;
   appliedPlan: MarketplacePlanPreview | null;
@@ -18,54 +14,80 @@ interface MarketplacePlanLookupPanelProps {
 
 export default function MarketplacePlanLookupPanel({
   initialPlanId = '',
-  initialYear = '2026',
-  initialZip = '',
-  initialCounty = '',
-  initialState = '',
-  householdIncome = 45000,
-  peopleCount = 1,
+  context,
   isEditing,
   onApplyPlan,
   appliedPlan,
   addToast
 }: MarketplacePlanLookupPanelProps) {
   const [planIdInput, setPlanIdInput] = useState(initialPlanId);
-  const [yearInput, setYearInput] = useState(initialYear || '2026');
-  const [zipInput, setZipInput] = useState(initialZip);
-  const [countyInput, setCountyInput] = useState(initialCounty);
-  const [stateInput, setStateInput] = useState(initialState);
-
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [foundPlan, setFoundPlan] = useState<MarketplacePlanPreview | null>(null);
+  const [relatedVariants, setRelatedVariants] = useState<Array<{ id: string; name: string; issuerName: string; metalLevel: string }>>([]);
+  const [resolvedSearchArea, setResolvedSearchArea] = useState<{ countyName?: string; countyFips?: string; state?: string; zipCode?: string } | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isBenefitsCollapsed, setIsBenefitsCollapsed] = useState(true);
+  const [lastFingerprint, setLastFingerprint] = useState<string | null>(null);
 
-  // Sync initial props into inputs
+  // Sync initial plan ID if passed
   useEffect(() => {
     if (initialPlanId && !planIdInput) setPlanIdInput(initialPlanId);
-    if (initialYear && (!yearInput || yearInput === '2026')) setYearInput(initialYear);
-    if (initialZip && !zipInput) setZipInput(initialZip);
-    if (initialCounty && !countyInput) setCountyInput(initialCounty);
-    if (initialState && !stateInput) setStateInput(initialState);
-  }, [initialPlanId, initialYear, initialZip, initialCounty, initialState]);
+  }, [initialPlanId]);
 
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  // Stale data prevention: clear search results when Plan ID or Context changes
+  useEffect(() => {
+    const currentFingerprint = buildMarketplaceFingerprint({
+      planId: planIdInput,
+      coverageYear: context.coverageYear,
+      zipCode: context.zipCode,
+      state: context.state,
+      countyFips: context.countyFips,
+      householdIncome: context.householdIncome,
+      householdSize: context.householdSize,
+      people: context.people
+    });
+
+    if (lastFingerprint && currentFingerprint !== lastFingerprint) {
+      setFoundPlan(null);
+      setErrorMsg(null);
+      setRelatedVariants([]);
+      setLastFingerprint(null);
+    }
+  }, [planIdInput, context, lastFingerprint]);
+
+  const handleSearch = async (e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setErrorMsg(null);
     setFoundPlan(null);
+    setRelatedVariants([]);
 
     const cleanPlanId = planIdInput.trim().toUpperCase();
-    const cleanZip = zipInput.trim();
 
     if (!cleanPlanId) {
-      setErrorMsg('Please enter a Plan ID to search (e.g. 21525FL0020016).');
+      setErrorMsg('Please enter a Plan ID to search (e.g. 30252FL0070065).');
       return;
     }
-    if (!cleanZip || !/^\d{5}$/.test(cleanZip)) {
-      setErrorMsg('Please enter a valid 5-digit ZIP code.');
+
+    // Missing-data validation before calling API
+    if (context.validationErrors && context.validationErrors.length > 0) {
+      setErrorMsg(context.validationErrors.join(' • '));
       return;
     }
+
+    const currentFingerprint = buildMarketplaceFingerprint({
+      planId: cleanPlanId,
+      coverageYear: context.coverageYear,
+      zipCode: context.zipCode,
+      state: context.state,
+      countyFips: context.countyFips,
+      householdIncome: context.householdIncome,
+      householdSize: context.householdSize,
+      people: context.people
+    });
 
     setLoading(true);
     try {
@@ -74,20 +96,59 @@ export default function MarketplacePlanLookupPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           planId: cleanPlanId,
-          coverageYear: yearInput || '2026',
-          zipCode: cleanZip,
-          countyFips: countyInput,
-          state: stateInput,
-          householdIncome: householdIncome || 45000,
-          people: [{ age: 35, gender: 'Male', uses_tobacco: false }]
+          coverageYear: context.coverageYear,
+          zipCode: context.zipCode,
+          countyFips: context.countyFips,
+          state: context.state,
+          householdIncome: context.householdIncome,
+          people: context.people.map(p => ({
+            age: p.age,
+            gender: p.gender || 'Male',
+            uses_tobacco: !!p.uses_tobacco,
+            relationship: p.relationship,
+            applying_for_coverage: p.applying_for_coverage
+          }))
         })
       });
 
       const data = await res.json();
+
+      if (data.searchArea) {
+        setResolvedSearchArea(data.searchArea);
+      }
+
+      // Development Audit Log
+      const auditObject = {
+        enteredPlanId: cleanPlanId,
+        year: context.coverageYear,
+        zip: context.zipCode,
+        state: context.state,
+        countyName: data?.searchArea?.countyName || context.countyName || 'Broward County',
+        countyFips: data?.searchArea?.countyFips || context.countyFips || '12011',
+        householdIncome: context.householdIncome,
+        householdSize: context.householdSize,
+        coveredCount: context.coveredApplicants,
+        people: context.people.map(p => ({
+          age: p.age,
+          relationship: p.relationship,
+          coverage: p.applying_for_coverage,
+          genderPresent: !!p.gender,
+          tobaccoPresent: p.uses_tobacco !== undefined
+        }))
+      };
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[MARKETPLACE_BROWSER_REQUEST_AUDIT]', auditObject);
+      }
+
       if (!res.ok || !data.found) {
         setErrorMsg(data.message || 'Plan not found for this year and service area.');
+        if (data.relatedVariants) {
+          setRelatedVariants(data.relatedVariants);
+        }
       } else {
         setFoundPlan(data.plan);
+        setRelatedVariants([]);
+        setLastFingerprint(currentFingerprint);
       }
     } catch (err: any) {
       console.error('Marketplace search request failed:', err);
@@ -97,391 +158,475 @@ export default function MarketplacePlanLookupPanel({
     }
   };
 
-  const handleClear = () => {
+  const handleClear = (e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setPlanIdInput('');
     setErrorMsg(null);
     setFoundPlan(null);
+    setRelatedVariants([]);
+    setLastFingerprint(null);
   };
 
-  const handleCancelPreview = () => {
+  const handleCancelPreview = (e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setFoundPlan(null);
     setErrorMsg(null);
   };
 
-  const handleConfirmApply = () => {
+  const handleConfirmApply = (e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (foundPlan) {
       onApplyPlan(foundPlan);
       setShowConfirmModal(false);
-      setIsBenefitsCollapsed(false); // Auto-expand once on successful apply
+      setIsBenefitsCollapsed(false);
       addToast({
         title: 'Marketplace Plan Applied',
-        description: `Applied ${foundPlan.planName} (${foundPlan.id}). Remember to click Save Changes to persist your policy.`,
+        description: `Applied ${foundPlan.planName} (${foundPlan.id}). Remember to click Save Policy to persist changes.`,
         type: 'success'
       });
     }
   };
 
-  const activePlanToDisplay = appliedPlan || foundPlan;
+  const activePlanToDisplay = foundPlan || appliedPlan;
+  const isAppliedView = !foundPlan && !!appliedPlan;
 
   return (
-    <div className="bg-white border border-[#DCE2EA] rounded-md p-5 shadow-2xs space-y-5 text-xs text-[#172033] font-sans h-full flex flex-col justify-between">
-      
-      <div>
+    <div className="space-y-4 font-sans text-xs">
+      {/* SEARCH CARD */}
+      <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4">
         {/* Header */}
-        <div className="border-b border-[#E8ECF2] pb-3 flex items-center justify-between">
+        <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-[#172033]">Marketplace Plan Lookup</h3>
-            <p className="text-[11px] text-[#556176] mt-0.5">
-              Verify official Healthcare.gov carrier benefits, deductibles, and tax credit estimates.
+            <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
+              Marketplace Plan Lookup
+            </h3>
+            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+              Automated carrier lookup using current client & health policy data.
             </p>
           </div>
           {activePlanToDisplay && (
-            <span className="crm-badge crm-badge-info text-[10px]">
-              {appliedPlan ? 'Plan Applied' : 'Preview Ready'}
+            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+              foundPlan ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+            }`}>
+              {foundPlan ? 'Preview Ready' : 'Plan Applied'}
             </span>
           )}
         </div>
 
-        {/* Input Fields */}
-        <div className="space-y-3.5 mt-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-medium text-[#172033] mb-1">
-                Plan ID *
-              </label>
-              <input
-                type="text"
-                value={planIdInput}
-                onChange={(e) => setPlanIdInput(e.target.value)}
-                placeholder="e.g. 21525FL0020016"
-                disabled={loading}
-                className="crm-input w-full font-mono text-xs uppercase"
-              />
-            </div>
+        {/* COMPACT READ-ONLY CLIENT DATA SUMMARY */}
+        <div className="bg-slate-50 border border-slate-200/70 rounded-xl p-3 space-y-2 text-xs">
+          <div className="flex items-center justify-between font-bold text-slate-700 text-[10px] uppercase tracking-wider border-b border-slate-200/60 pb-1.5">
+            <span>Using Client Data</span>
+            <span className="text-[10px] text-blue-700 font-semibold lowercase bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+              {context.householdSize} member{context.householdSize > 1 ? 's' : ''} ({context.coveredApplicants} covered)
+            </span>
+          </div>
 
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-600 font-medium">
             <div>
-              <label className="block font-medium text-[#172033] mb-1">
-                Coverage Year *
-              </label>
-              <select
-                value={yearInput}
-                onChange={(e) => setYearInput(e.target.value)}
-                disabled={loading}
-                className="crm-input w-full"
-              >
-                <option value="2026">2026</option>
-                <option value="2025">2025</option>
-                <option value="2024">2024</option>
-              </select>
+              <span className="block text-[10px] text-slate-400 uppercase">Coverage Year</span>
+              <span className="text-slate-900 font-bold">{context.coverageYear || '—'}</span>
+            </div>
+            <div>
+              <span className="block text-[10px] text-slate-400 uppercase">ZIP / State</span>
+              <span className="text-slate-900 font-bold">{context.zipCode ? `${context.zipCode}, ${context.state || ''}` : '—'}</span>
+            </div>
+            <div>
+              <span className="block text-[10px] text-slate-400 uppercase">County</span>
+              <span className="text-slate-900 font-bold font-sans">
+                {resolvedSearchArea?.countyName || context.countyName || (context.countyFips ? `FIPS ${context.countyFips}` : 'Resolving...')}
+              </span>
+            </div>
+            <div>
+              <span className="block text-[10px] text-slate-400 uppercase">Household Income</span>
+              <span className="text-slate-900 font-bold">
+                {context.householdIncome !== null && context.householdIncome !== undefined && context.householdIncome > 0
+                  ? `$${Number(context.householdIncome).toLocaleString()}`
+                  : 'Not specified'}
+              </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block font-medium text-[#172033] mb-1">
-                ZIP Code *
-              </label>
-              <input
-                type="text"
-                value={zipInput}
-                onChange={(e) => setZipInput(e.target.value)}
-                placeholder="e.g. 33131"
-                disabled={loading}
-                className="crm-input w-full"
-              />
+          {/* COMPACT PEOPLE SUMMARY LIST */}
+          <div className="space-y-1 pt-1.5 border-t border-slate-200/60">
+            <span className="block text-[10px] font-bold text-slate-400 uppercase">Tax Household Members</span>
+            <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+              {context.people.map(p => (
+                <div key={p.member_number} className="flex items-center justify-between bg-white px-2.5 py-1 rounded border border-slate-100 text-[11px]">
+                  <span className="font-semibold text-slate-800">
+                    {p.member_number === 1 ? 'Applicant' : `Member ${p.member_number}`} — <span className="text-slate-600">{p.relationship}</span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium">Age {p.age}</span>
+                    <span className={`px-1.5 py-0.2 text-[10px] font-bold rounded ${p.applying_for_coverage ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                      Coverage {p.applying_for_coverage ? 'Yes' : 'No'}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
-
-            <div>
-              <label className="block font-medium text-[#172033] mb-1">
-                County
-              </label>
-              <input
-                type="text"
-                value={countyInput}
-                onChange={(e) => setCountyInput(e.target.value)}
-                placeholder="e.g. Miami-Dade"
-                disabled={loading}
-                className="crm-input w-full"
-              />
-            </div>
-
-            <div>
-              <label className="block font-medium text-[#172033] mb-1">
-                State
-              </label>
-              <input
-                type="text"
-                value={stateInput}
-                onChange={(e) => setStateInput(e.target.value.toUpperCase())}
-                placeholder="FL"
-                maxLength={2}
-                disabled={loading}
-                className="crm-input w-full uppercase"
-              />
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={handleClear}
-              disabled={loading}
-              className="crm-btn-secondary text-xs px-3 py-1.5"
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSearch()}
-              disabled={loading}
-              className="crm-btn-primary text-xs px-4 py-1.5"
-            >
-              {loading ? (
-                <span className="flex items-center gap-1.5">
-                  <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Searching...
-                </span>
-              ) : (
-                'Search Marketplace'
-              )}
-            </button>
           </div>
         </div>
 
-        {/* Error State */}
-        {errorMsg && (
-          <div className="mt-4 p-3 rounded-md bg-[#FEF2F2] border border-[#FECACA] text-[#C24141] text-xs font-semibold">
-            {errorMsg}
-          </div>
-        )}
-
-        {/* PLAN FOUND PREVIEW (When search returns a match but not yet applied) */}
-        {foundPlan && !appliedPlan && (
-          <div className="mt-5 border border-[#BFDBFE] bg-[#EEF4FF] rounded-md p-4 space-y-4">
-            <div className="flex items-center justify-between border-b border-[#BFDBFE] pb-2">
-              <h4 className="font-semibold text-[#2563EB] text-xs uppercase tracking-wide">
-                Plan Found in Marketplace
-              </h4>
-              <span className="text-[11px] font-mono bg-white text-[#2563EB] px-2 py-0.5 rounded border border-[#BFDBFE]">
-                {foundPlan.id}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-              <div>
-                <span className="text-[#556176] block text-[11px]">Carrier</span>
-                <span className="font-semibold text-[#172033]">{foundPlan.issuerName}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Plan Name</span>
-                <span className="font-semibold text-[#172033]">{foundPlan.planName}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Metal Level</span>
-                <span className="font-semibold text-[#172033]">{foundPlan.metalLevel}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Plan Type / Network</span>
-                <span className="font-semibold text-[#172033]">{foundPlan.planType}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Full Monthly Premium</span>
-                <span className="font-semibold text-[#172033]">{formatCurrency(foundPlan.premiumFull)}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Estimated Tax Credit</span>
-                <span className="font-semibold text-[#15803D]">{formatCurrency(foundPlan.taxCredit)}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Final Monthly Premium</span>
-                <span className="font-bold text-[#2563EB]">{formatCurrency(foundPlan.premiumNet)}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Final Annual Premium</span>
-                <span className="font-semibold text-[#172033]">{formatCurrency(foundPlan.premiumAnnual)}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Individual Deductible</span>
-                <span className="font-semibold text-[#172033]">{foundPlan.deductibleIndividual !== null ? formatCurrency(foundPlan.deductibleIndividual) : 'N/A'}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Family Deductible</span>
-                <span className="font-semibold text-[#172033]">{foundPlan.deductibleFamily !== null ? formatCurrency(foundPlan.deductibleFamily) : 'N/A'}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Individual OOP Max</span>
-                <span className="font-semibold text-[#172033]">{foundPlan.oopMaxIndividual !== null ? formatCurrency(foundPlan.oopMaxIndividual) : 'N/A'}</span>
-              </div>
-              <div>
-                <span className="text-[#556176] block text-[11px]">Family OOP Max</span>
-                <span className="font-semibold text-[#172033]">{foundPlan.oopMaxFamily !== null ? formatCurrency(foundPlan.oopMaxFamily) : 'N/A'}</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#BFDBFE]">
+        {/* INPUT CONTROLS: ONLY PLAN ID (NOT A NESTED FORM TO PREVENT OUTER FORM SUBMISSION) */}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Plan ID *
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={planIdInput}
+                onChange={e => setPlanIdInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleSearch(e);
+                  }
+                }}
+                placeholder="e.g. 30252FL0070065"
+                disabled={loading}
+                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-900 font-mono text-xs font-semibold uppercase outline-none transition-all"
+              />
               <button
                 type="button"
-                onClick={handleCancelPreview}
-                className="crm-btn-secondary text-xs px-3 py-1.5"
+                onClick={handleSearch}
+                disabled={loading}
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md transition-all whitespace-nowrap flex items-center gap-1.5"
               >
-                Cancel
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Searching...
+                  </>
+                ) : (
+                  'Search Marketplace'
+                )}
               </button>
-              <button
-                type="button"
-                onClick={() => setShowConfirmModal(true)}
-                className="crm-btn-primary text-xs px-4 py-1.5"
-              >
-                Apply This Plan
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* APPROVED PLAN BENEFITS VERTICAL CASCADE (Rendered after Apply This Plan) */}
-        {activePlanToDisplay && (
-          <div className="mt-5 space-y-4 pt-3 border-t border-[#E8ECF2]">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-[#172033] uppercase tracking-wide">
-                Approved Plan Benefits
-              </h4>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-[#556176]">11 Standard Benefit Categories</span>
+              {planIdInput && (
                 <button
                   type="button"
-                  onClick={() => setIsBenefitsCollapsed(!isBenefitsCollapsed)}
-                  className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors bg-blue-50 px-2 py-0.5 rounded border border-blue-100"
+                  onClick={handleClear}
+                  disabled={loading}
+                  className="px-3 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
                 >
-                  {isBenefitsCollapsed ? 'Show' : 'Hide'}
+                  Clear
                 </button>
-              </div>
+              )}
             </div>
+          </div>
+        </div>
 
-            {!isBenefitsCollapsed && (
-              <div className="space-y-4">
-                {/* Section 1: Monthly Cost */}
-                <BenefitSectionCard title="1. Monthly Cost">
-                  <BenefitRow label="Full Monthly Premium" value={formatCurrency(activePlanToDisplay.premiumFull)} />
-                  <BenefitRow label="Tax Credit (APTC)" value={formatCurrency(activePlanToDisplay.taxCredit)} highlightColor="text-[#15803D]" />
-                  <BenefitRow label="Final Monthly Premium" value={formatCurrency(activePlanToDisplay.premiumNet)} highlightColor="text-[#2563EB] font-bold" />
-                  <BenefitRow label="Final Annual Premium" value={formatCurrency(activePlanToDisplay.premiumAnnual)} />
-                </BenefitSectionCard>
+        {/* ERROR DISPLAY */}
+        {errorMsg && (
+          <div className="bg-rose-50 border border-rose-100 text-rose-800 p-3 rounded-xl text-xs font-medium space-y-1">
+            <h5 className="font-extrabold text-[10px] uppercase tracking-wider text-rose-900">Validation / Search Warning</h5>
+            <p>{errorMsg}</p>
+          </div>
+        )}
 
-                {/* Section 2: Deductibles */}
-                <BenefitSectionCard title="2. Deductibles">
-                  <BenefitRow label="Individual Medical Deductible" value={activePlanToDisplay.deductibleIndividual !== null ? formatCurrency(activePlanToDisplay.deductibleIndividual) : 'Not applicable / $0'} />
-                  <BenefitRow label="Family Medical Deductible" value={activePlanToDisplay.deductibleFamily !== null ? formatCurrency(activePlanToDisplay.deductibleFamily) : 'Not applicable / $0'} />
-                  <BenefitRow label="Individual Prescription Drug Deductible" value={activePlanToDisplay.drugDeductibleIndividual !== null ? formatCurrency(activePlanToDisplay.drugDeductibleIndividual) : 'Included in medical deductible'} />
-                  <BenefitRow label="Family Prescription Drug Deductible" value={activePlanToDisplay.drugDeductibleFamily !== null ? formatCurrency(activePlanToDisplay.drugDeductibleFamily) : 'Included in medical deductible'} />
-                </BenefitSectionCard>
-
-                {/* Section 3: Out-of-Pocket Maximum */}
-                <BenefitSectionCard title="3. Out-of-Pocket Maximum">
-                  <BenefitRow label="Individual Maximum" value={activePlanToDisplay.oopMaxIndividual !== null ? formatCurrency(activePlanToDisplay.oopMaxIndividual) : 'Not provided'} />
-                  <BenefitRow label="Family Maximum" value={activePlanToDisplay.oopMaxFamily !== null ? formatCurrency(activePlanToDisplay.oopMaxFamily) : 'Not provided'} />
-                </BenefitSectionCard>
-
-                {/* Section 4: Doctor Visits */}
-                <BenefitSectionCard title="4. Doctor Visits">
-                  {renderCategoryBenefits(activePlanToDisplay.benefits, 'Doctor Visits')}
-                </BenefitSectionCard>
-
-                {/* Section 5: Tests and Diagnostic Services */}
-                <BenefitSectionCard title="5. Tests and Diagnostic Services">
-                  {renderCategoryBenefits(activePlanToDisplay.benefits, 'Tests and Diagnostic Services')}
-                </BenefitSectionCard>
-
-                {/* Section 6: Urgent and Emergency Care */}
-                <BenefitSectionCard title="6. Urgent and Emergency Care">
-                  {renderCategoryBenefits(activePlanToDisplay.benefits, 'Urgent and Emergency Care')}
-                </BenefitSectionCard>
-
-                {/* Section 7: Hospital and Surgery */}
-                <BenefitSectionCard title="7. Hospital and Surgery">
-                  {renderCategoryBenefits(activePlanToDisplay.benefits, 'Hospital and Surgery')}
-                </BenefitSectionCard>
-
-                {/* Section 8: Prescription Drugs */}
-                <BenefitSectionCard title="8. Prescription Drugs">
-                  {renderCategoryBenefits(activePlanToDisplay.benefits, 'Prescription Drugs')}
-                </BenefitSectionCard>
-
-                {/* Section 9: Additional Important Medical Benefits */}
-                <BenefitSectionCard title="9. Additional Important Medical Benefits">
-                  {renderCategoryBenefits(activePlanToDisplay.benefits, 'Additional Important Medical Benefits')}
-                </BenefitSectionCard>
-
-                {/* Section 10: Dental and Vision */}
-                <BenefitSectionCard title="10. Dental and Vision">
-                  {renderCategoryBenefits(activePlanToDisplay.benefits, 'Dental and Vision')}
-                </BenefitSectionCard>
-
-                {/* Section 11: Plan Documents */}
-                <BenefitSectionCard title="11. Plan Documents & Links">
-                  <DocumentLinkRow label="Summary of Benefits and Coverage (SBC)" url={activePlanToDisplay.benefitsUrl} />
-                  <DocumentLinkRow label="Plan Brochure" url={activePlanToDisplay.brochureUrl} />
-                  <DocumentLinkRow label="Drug Formulary" url={activePlanToDisplay.formularyUrl} />
-                  <DocumentLinkRow label="Provider Directory" url={activePlanToDisplay.networkUrl} />
-                  <BenefitRow label="Source" value="Healthcare.gov Official API" />
-                  <BenefitRow label="Last Marketplace Sync" value={new Date().toLocaleDateString('en-US')} />
-                </BenefitSectionCard>
-
-                {/* Additional Plan Details (HSA Eligibility) */}
-                {activePlanToDisplay.hsaEligible !== undefined && (
-                  <BenefitSectionCard title="Additional Plan Details">
-                    <BenefitRow label="HSA Eligible Plan" value={activePlanToDisplay.hsaEligible ? 'Yes' : 'No'} />
-                  </BenefitSectionCard>
-                )}
-              </div>
-            )}
+        {/* RELATED VARIANTS SUGGESTION SECTION */}
+        {relatedVariants.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-4 space-y-3 font-sans text-xs">
+            <div className="flex items-center justify-between">
+              <h5 className="font-extrabold text-amber-900 uppercase tracking-wider text-[11px]">
+                Related Marketplace Variants Available ({relatedVariants.length})
+              </h5>
+            </div>
+            <p className="text-amber-800 text-[11px] leading-relaxed">
+              Exact plan variant not found. Related Marketplace variants are available in this service area. Click any variant below to select and preview:
+            </p>
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {relatedVariants.map(v => (
+                <div key={v.id} className="flex items-center justify-between bg-white p-2.5 rounded-lg border border-amber-200/60 shadow-2xs">
+                  <div>
+                    <span className="font-mono font-bold text-slate-900 text-xs block">{v.id}</span>
+                    <span className="font-semibold text-slate-800 text-xs block">{v.name}</span>
+                    <span className="text-[10px] text-slate-500 font-medium">{v.issuerName} • {v.metalLevel}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setPlanIdInput(v.id);
+                      // Trigger search immediately with selected variant
+                      setTimeout(() => {
+                        const evt = { preventDefault: () => {}, stopPropagation: () => {} } as any;
+                        fetch('/api/marketplace/plan-lookup', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            planId: v.id,
+                            coverageYear: context.coverageYear,
+                            zipCode: context.zipCode,
+                            countyFips: context.countyFips,
+                            state: context.state,
+                            householdIncome: context.householdIncome,
+                            people: context.people.map(p => ({
+                              age: p.age,
+                              gender: p.gender || 'Male',
+                              uses_tobacco: !!p.uses_tobacco,
+                              relationship: p.relationship,
+                              applying_for_coverage: p.applying_for_coverage
+                            }))
+                          })
+                        })
+                        .then(r => r.json())
+                        .then(data => {
+                          if (data.found && data.plan) {
+                            setFoundPlan(data.plan);
+                            setErrorMsg(null);
+                            setRelatedVariants([]);
+                          }
+                        })
+                        .catch(err => console.error(err));
+                      }, 0);
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg transition-all whitespace-nowrap"
+                  >
+                    Select & Search
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
 
-      {/* CONFIRMATION MODAL BEFORE APPLYING PLAN */}
-      {showConfirmModal && foundPlan && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white border border-[#DCE2EA] rounded-lg max-w-md w-full p-5 shadow-lg space-y-4">
-            <h3 className="text-sm font-semibold text-[#172033]">
-              Confirm Applying Marketplace Plan
-            </h3>
-            <p className="text-xs text-[#556176]">
-              Applying this plan will update compatible fields in your Health Information form.
-            </p>
-
-            <div className="bg-[#F8FAFC] border border-[#E8ECF2] rounded-md p-3 text-xs space-y-1.5">
-              <span className="font-semibold text-[#172033] block mb-1">Fields that will update:</span>
-              <div className="grid grid-cols-2 gap-1 text-[11px] text-[#556176]">
-                <div>• Company: <strong>{foundPlan.issuerName}</strong></div>
-                <div>• Type Plan: <strong>{foundPlan.metalLevel}</strong></div>
-                <div>• Plan ID: <strong>{foundPlan.id}</strong></div>
-                <div>• Plan Name: <strong>{foundPlan.planName}</strong></div>
-                <div>• Plan Cost: <strong>{formatCurrency(foundPlan.premiumFull)}</strong></div>
-                <div>• Tax Credit: <strong>{formatCurrency(foundPlan.taxCredit)}</strong></div>
-                <div>• Net Premium: <strong>{formatCurrency(foundPlan.premiumNet)}</strong></div>
-                <div>• Coverage Year: <strong>{foundPlan.coverageYear}</strong></div>
-              </div>
+      {/* SEARCH RESULTS PREVIEW CARD */}
+      {activePlanToDisplay && (
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4">
+          <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+            <div>
+              <span className="text-[10px] font-extrabold text-blue-600 uppercase tracking-wider">
+                {isAppliedView ? 'Applied Policy Plan' : 'Marketplace Search Preview'}
+              </span>
+              <h4 className="text-base font-extrabold text-slate-900 mt-0.5">
+                {activePlanToDisplay.planName}
+              </h4>
+              <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                {activePlanToDisplay.issuerName} • <span className="font-mono">{activePlanToDisplay.id}</span>
+              </p>
             </div>
 
-            <p className="text-[11px] text-[#7C8799] italic">
-              Note: This action updates your local form. You must click "Save Changes" at the bottom of the Health module to persist your policy.
-            </p>
+            <div className="text-right">
+              <span className="text-[10px] font-bold text-slate-400 uppercase block">Metal Level</span>
+              <span className="text-xs font-extrabold text-slate-800 bg-slate-100 px-2 py-0.5 rounded">
+                {activePlanToDisplay.metalLevel}
+              </span>
+            </div>
+          </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E8ECF2]">
+          {/* FINANCIAL ESTIMATES & DEDUCTIBLES GRID */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200/60 text-xs">
+            <div>
+              <span className="block text-[10px] font-bold text-slate-400 uppercase">Plan Cost (Full)</span>
+              <span className="text-slate-900 font-extrabold text-sm">{formatCurrency(activePlanToDisplay.premiumFull)}</span>
+            </div>
+            <div>
+              <span className="block text-[10px] font-bold text-slate-400 uppercase">Tax Credit (APTC)</span>
+              <span className="text-emerald-700 font-extrabold text-sm">
+                {activePlanToDisplay.taxCredit !== null && activePlanToDisplay.taxCredit !== undefined && activePlanToDisplay.taxCredit > 0
+                  ? formatCurrency(activePlanToDisplay.taxCredit)
+                  : 'Not calculated'}
+              </span>
+            </div>
+            <div>
+              <span className="block text-[10px] font-bold text-slate-400 uppercase">Final Monthly</span>
+              <span className="text-blue-700 font-extrabold text-sm">
+                {activePlanToDisplay.taxCredit !== null && activePlanToDisplay.taxCredit !== undefined
+                  ? formatCurrency(activePlanToDisplay.premiumNet)
+                  : 'Not calculated'}
+              </span>
+            </div>
+            <div>
+              <span className="block text-[10px] font-bold text-slate-400 uppercase">
+                {activePlanToDisplay.isCombinedDeductible ? 'Deductible (Ind / Fam)' : 'Deductible (Ind / Fam)'}
+              </span>
+              <span className="text-slate-800 font-extrabold text-sm block">
+                {activePlanToDisplay.deductibleIndividual !== null ? formatCurrency(activePlanToDisplay.deductibleIndividual) : '—'} / {activePlanToDisplay.deductibleFamily !== null ? formatCurrency(activePlanToDisplay.deductibleFamily) : '—'}
+              </span>
+              {activePlanToDisplay.isCombinedDeductible && (
+                <span className="text-[9px] text-slate-500 font-medium">Combined Health & Drug</span>
+              )}
+            </div>
+            <div>
+              <span className="block text-[10px] font-bold text-slate-400 uppercase">OOP Max (Ind / Fam)</span>
+              <span className="text-slate-800 font-extrabold text-sm block">
+                {activePlanToDisplay.oopMaxIndividual !== null ? formatCurrency(activePlanToDisplay.oopMaxIndividual) : '—'} / {activePlanToDisplay.oopMaxFamily !== null ? formatCurrency(activePlanToDisplay.oopMaxFamily) : '—'}
+              </span>
+            </div>
+            <div>
+              <span className="block text-[10px] font-bold text-slate-400 uppercase">Plan Type</span>
+              <span className="text-slate-800 font-extrabold text-sm uppercase">{activePlanToDisplay.planType || 'HMO'}</span>
+            </div>
+          </div>
+
+          {/* PLAN DOCUMENTS LINKS */}
+          {(activePlanToDisplay.benefitsUrl || activePlanToDisplay.brochureUrl || activePlanToDisplay.formularyUrl || activePlanToDisplay.networkUrl) && (
+            <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2 text-[11px] font-semibold">
+              <span className="text-[10px] font-bold text-slate-400 uppercase block w-full mb-0.5">Official Documents</span>
+              {activePlanToDisplay.benefitsUrl ? (
+                <a href={activePlanToDisplay.benefitsUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">
+                  Summary of Benefits (SBC) ↗
+                </a>
+              ) : null}
+              {activePlanToDisplay.brochureUrl ? (
+                <a href={activePlanToDisplay.brochureUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">
+                  Plan Brochure ↗
+                </a>
+              ) : null}
+              {activePlanToDisplay.formularyUrl ? (
+                <a href={activePlanToDisplay.formularyUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">
+                  Drug Formulary ↗
+                </a>
+              ) : null}
+              {activePlanToDisplay.networkUrl ? (
+                <a href={activePlanToDisplay.networkUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">
+                  Provider Directory ↗
+                </a>
+              ) : null}
+            </div>
+          )}
+
+          {/* ACTIONS: APPLY THIS PLAN */}
+          {foundPlan && (
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setShowConfirmModal(false)}
-                className="crm-btn-secondary text-xs px-3 py-1.5"
+                onClick={handleCancelPreview}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
+              >
+                Cancel Preview
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowConfirmModal(true);
+                }}
+                className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition-all flex items-center gap-1.5"
+              >
+                Apply This Plan
+              </button>
+            </div>
+          )}
+
+          {/* BENEFIT SHOW / HIDE COLLAPSIBLE */}
+          {activePlanToDisplay.benefits && activePlanToDisplay.benefits.length > 0 && (
+            <div className="pt-2 border-t border-slate-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                  Plan Benefits & Services ({activePlanToDisplay.benefits.length})
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsBenefitsCollapsed(prev => !prev);
+                  }}
+                  className="text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors"
+                >
+                  {isBenefitsCollapsed ? 'Show Benefits ↓' : 'Hide Benefits ↑'}
+                </button>
+              </div>
+
+              {!isBenefitsCollapsed && (
+                <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden max-h-96 overflow-y-auto">
+                  {activePlanToDisplay.benefits.map((b, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-3 transition-colors flex items-start justify-between gap-4 text-xs ${
+                        b.isUnmapped ? 'bg-slate-50/90 hover:bg-slate-100/90' : 'bg-white hover:bg-slate-50/80'
+                      }`}
+                    >
+                      <div>
+                        <span className={`text-[10px] font-bold uppercase block ${b.isUnmapped ? 'text-amber-700' : 'text-slate-400'}`}>
+                          {b.category}
+                        </span>
+                        <span className="font-extrabold text-slate-800 block mt-0.5">{b.serviceName}</span>
+                        {b.secondaryDisplay && (
+                          <span className="text-[11px] text-slate-500 font-medium block mt-0.5">
+                            {b.secondaryDisplay}
+                          </span>
+                        )}
+                        {b.limitations && (
+                          <p className="text-[11px] text-slate-500 mt-0.5 font-medium">{b.limitations}</p>
+                        )}
+                      </div>
+                      <div className="text-right whitespace-nowrap">
+                        <span className={`font-extrabold block ${
+                          b.coverageStatus === 'Not covered'
+                            ? 'text-rose-600'
+                            : b.coverageStatus === 'Not provided by Marketplace API' || b.coverageStatus === 'Cost sharing not specified'
+                            ? 'text-slate-400 font-normal italic'
+                            : 'text-slate-900'
+                        }`}>
+                          {b.individualValue}
+                        </span>
+                        {b.deductibleApplies && b.coverageStatus === 'Covered' && (
+                          <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded mt-1 inline-block">
+                            Deductible applies
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CONFIRM APPLY MODAL */}
+      {showConfirmModal && foundPlan && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4 font-sans" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-extrabold text-slate-800">
+              Confirm Apply Marketplace Plan
+            </h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to apply <strong className="text-slate-900">{foundPlan.planName}</strong> (<span className="font-mono font-bold text-slate-800">{foundPlan.id}</span>) to this Health Policy?
+            </p>
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1 text-xs font-semibold text-slate-700">
+              <div>Plan Cost: <strong className="text-slate-900">{formatCurrency(foundPlan.premiumFull)}</strong></div>
+              <div>Tax Credit: <strong className="text-emerald-700">{foundPlan.taxCredit ? formatCurrency(foundPlan.taxCredit) : 'Not calculated'}</strong></div>
+              <div>Monthly Premium: <strong className="text-blue-700">{formatCurrency(foundPlan.premiumNet)}</strong></div>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowConfirmModal(false);
+                }}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleConfirmApply}
-                className="crm-btn-primary text-xs px-4 py-1.5"
+                className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition-all"
               >
                 Confirm & Apply
               </button>
@@ -489,62 +634,6 @@ export default function MarketplacePlanLookupPanel({
           </div>
         </div>
       )}
-
     </div>
   );
-}
-
-function BenefitSectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="border border-[#E8ECF2] rounded-md bg-[#F8FAFC] p-3 space-y-2">
-      <h5 className="text-[11px] font-semibold text-[#172033] uppercase tracking-wide border-b border-[#E8ECF2] pb-1.5">
-        {title}
-      </h5>
-      <div className="space-y-1.5">{children}</div>
-    </div>
-  );
-}
-
-function BenefitRow({ label, value, highlightColor }: { label: string; value: string; highlightColor?: string }) {
-  return (
-    <div className="flex items-center justify-between text-xs py-0.5">
-      <span className="text-[#556176]">{label}</span>
-      <span className={`font-medium ${highlightColor || 'text-[#172033]'}`}>{value}</span>
-    </div>
-  );
-}
-
-function DocumentLinkRow({ label, url }: { label: string; url?: string }) {
-  return (
-    <div className="flex items-center justify-between text-xs py-0.5">
-      <span className="text-[#556176]">{label}</span>
-      {url ? (
-        <a href={url} target="_blank" rel="noopener noreferrer" className="text-[#2563EB] hover:underline font-medium">
-          View Document →
-        </a>
-      ) : (
-        <span className="text-[#7C8799] italic">Not provided</span>
-      )}
-    </div>
-  );
-}
-
-function renderCategoryBenefits(benefits: NormalizedBenefit[], categoryName: string) {
-  const catBenefits = benefits.filter((b) => b.category === categoryName);
-  if (catBenefits.length === 0) {
-    return <div className="text-[11px] text-[#7C8799] italic">No benefits provided for this category</div>;
-  }
-  return catBenefits.map((b, i) => (
-    <div key={i} className="flex flex-col py-1 border-b border-[#E8ECF2] last:border-0 text-xs">
-      <div className="flex items-center justify-between">
-        <span className="font-medium text-[#172033]">{b.serviceName}</span>
-        <span className={`font-semibold ${b.coverageStatus === 'Not covered' ? 'text-[#C24141]' : 'text-[#172033]'}`}>
-          {b.individualValue}
-        </span>
-      </div>
-      {b.limitations && (
-        <span className="text-[10px] text-[#7C8799] mt-0.5">{b.limitations}</span>
-      )}
-    </div>
-  ));
 }

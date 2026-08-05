@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { HealthPolicy, HealthTaxHouseholdMember } from '@/lib/health/types';
+import { HealthPolicy, HealthTaxHouseholdMember, HealthPrimaryApplicant } from '@/lib/health/types';
 import HealthSensitiveField from './HealthSensitiveField';
 import TaxMemberSensitiveField from './TaxMemberSensitiveField';
 import {
   saveHealthPolicy,
   saveHealthSecret,
+  fetchPrimaryApplicant,
+  fetchClientResidence,
+  ClientResidenceData,
+  fetchTotalHouseholdIncome,
   fetchTaxHouseholdMembers,
   upsertTaxHouseholdMember,
   deleteTaxHouseholdMembers,
@@ -23,7 +27,8 @@ import {
   formatAsDateInput
 } from '@/utils/dateUtils';
 import MarketplacePlanLookupPanel from './MarketplacePlanLookupPanel';
-import { MarketplacePlanPreview } from '@/lib/marketplace/types';
+import { MarketplacePlanPreview, MarketplaceClientContext } from '@/lib/marketplace/types';
+import { transformHouseholdToMarketplacePeople } from '@/lib/marketplace/people-helper';
 import { saveMarketplacePlanSnapshot, fetchLatestMarketplaceSnapshot } from '@/lib/marketplace/snapshot-service';
 
 // Helper to calculate age dynamically from DOB string without timezone offset
@@ -70,6 +75,12 @@ export default function HealthPolicyForm({
   const [taxCredit, setTaxCredit] = useState<number>(0);
   const [effectiveDate, setEffectiveDate] = useState('');
   const [coverageMembersCount, setCoverageMembersCount] = useState<number>(1);
+
+  // Primary Applicant State (Member 1 - Self) Sourced from Personal Information
+  const [primaryApplicant, setPrimaryApplicant] = useState<HealthPrimaryApplicant | null>(null);
+  const [applicantCoverage, setApplicantCoverage] = useState<boolean>(true);
+  const [clientResidence, setClientResidence] = useState<ClientResidenceData | null>(null);
+  const [totalHouseholdIncome, setTotalHouseholdIncome] = useState<number | null>(null);
 
   // Tax Household Members State
   const [taxMemberCount, setTaxMemberCount] = useState<number>(1);
@@ -131,6 +142,34 @@ export default function HealthPolicyForm({
 
   // Sync Form values with initialPolicy (scheduled asynchronously to satisfy eslint rules)
   useEffect(() => {
+    const loadIncome = () => {
+      if (clientId) {
+        fetchTotalHouseholdIncome(clientId)
+          .then(inc => setTotalHouseholdIncome(inc))
+          .catch(err => console.error('Failed to load total household income:', err));
+      }
+    };
+
+    if (clientId) {
+      fetchPrimaryApplicant(clientId)
+        .then(applicant => setPrimaryApplicant(applicant))
+        .catch(err => console.error('Failed to load primary applicant for health:', err));
+
+      fetchClientResidence(clientId)
+        .then(residence => setClientResidence(residence))
+        .catch(err => console.error('Failed to load client residence for health:', err));
+
+      loadIncome();
+    }
+
+    const handleIncomeUpdated = () => {
+      loadIncome();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('income-updated', handleIncomeUpdated);
+    }
+
     const timer = setTimeout(() => {
       if (initialPolicy) {
         setIsActive(!!initialPolicy.active);
@@ -216,6 +255,15 @@ export default function HealthPolicyForm({
                     immigration_status: ''
                   };
                 }
+              }
+
+              if (process.env.NODE_ENV !== 'production') {
+                console.log('[RELOAD_TAX_MEMBERS_FETCHED]', {
+                  policyId: initialPolicy.id,
+                  savedPolicyCount,
+                  fetchedMemberNumbers: fetched.map(m => m.member_number),
+                  resolvedTargetCount: targetCount
+                });
               }
 
               setTaxMembers(map);
@@ -315,8 +363,13 @@ export default function HealthPolicyForm({
       setDeletedMemberNumbers([]);
     }, 0);
 
-    return () => clearTimeout(timer);
-  }, [initialPolicy, isEditing]);
+    return () => {
+      clearTimeout(timer);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('income-updated', handleIncomeUpdated);
+      }
+    };
+  }, [initialPolicy, isEditing, clientId]);
 
   const handleApplyMarketplacePlan = (plan: MarketplacePlanPreview) => {
     if (plan.issuerName) setCompany2026(plan.issuerName);
@@ -629,6 +682,14 @@ export default function HealthPolicyForm({
       }
 
       // 3. Save Tax Household Members (member_number 2..taxMemberCount)
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[SAVE_POLICY_TAX_MEMBERS_START]', {
+          policyId,
+          taxMemberCount,
+          savingMembers: Array.from({ length: taxMemberCount - 1 }, (_, index) => index + 2)
+        });
+      }
+
       for (let i = 2; i <= taxMemberCount; i++) {
         const member = taxMembers[i] || {
           health_policy_id: policyId,
@@ -1889,6 +1950,232 @@ export default function HealthPolicyForm({
           </div>
         </div>
 
+      {/* SECTION: APPLICANT INFORMATION / TAX HOUSEHOLD MEMBER 1 */}
+      <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 font-sans">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-50 pb-4 gap-2">
+          <div>
+            <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
+              Applicant Information
+            </h4>
+            <p className="text-xs text-slate-400 font-medium mt-0.5">
+              Primary Applicant — Tax Household Member 1
+            </p>
+          </div>
+          <span className="self-start sm:self-auto text-xs font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
+            Relationship: Self
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
+          {/* LEFT COLUMN */}
+          <div className="space-y-0 divide-y divide-slate-100/70">
+            {/* 1. Coverage */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">Coverage</span>
+              {editingHealthField === 'applicantCoverage' ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={applicantCoverage ? 'Yes' : 'No'}
+                    onChange={e => setApplicantCoverage(e.target.value === 'Yes')}
+                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingHealthField(null);
+                      if (e.key === 'Enter') setEditingHealthField(null);
+                    }}
+                  >
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setEditingHealthField(null)}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingHealthField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <span
+                  onClick={() => setEditingHealthField('applicantCoverage')}
+                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit Coverage status"
+                >
+                  {applicantCoverage ? 'Yes' : 'No'}
+                </span>
+              )}
+            </div>
+
+            {/* 2. Applicant Name */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">Applicant Name</span>
+              <span className="text-slate-900 font-semibold flex items-center gap-2">
+                {primaryApplicant?.fullName || '—'}
+                <span className="text-[10px] text-slate-400 font-normal italic">(Personal Info)</span>
+              </span>
+            </div>
+
+            {/* 3. DOB */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">DOB</span>
+              <span className="text-slate-900 font-semibold">
+                {formatDateForDisplay(primaryApplicant?.dateOfBirth)}
+              </span>
+            </div>
+
+            {/* 4. Age */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">Age</span>
+              <span className="text-slate-900 font-semibold">
+                {primaryApplicant?.dateOfBirth ? calculateAgeFromDob(primaryApplicant.dateOfBirth) : '—'}
+              </span>
+            </div>
+
+            {/* 5. SSN */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">SSN</span>
+              <span className="text-slate-900 font-semibold font-mono">
+                {primaryApplicant?.hasSsn ? '••••••••' : '—'}
+              </span>
+            </div>
+
+            {/* 6. Email */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">Email</span>
+              <span className="text-slate-900 font-semibold truncate max-w-[180px]" title={primaryApplicant?.email || ''}>
+                {primaryApplicant?.email || '—'}
+              </span>
+            </div>
+
+            {/* 7. Phone */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">Phone</span>
+              <span className="text-slate-900 font-semibold">
+                {primaryApplicant?.phone || '—'}
+              </span>
+            </div>
+          </div>
+
+          {/* RIGHT COLUMN */}
+          <div className="space-y-0 divide-y divide-slate-100/70">
+            {/* 1. Relationship */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">Relationship</span>
+              <span className="text-slate-900 font-semibold bg-slate-100 px-2 py-0.5 rounded text-[11px]">
+                Self
+              </span>
+            </div>
+
+            {/* 2. Gender */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">Gender</span>
+              <span className="text-slate-900 font-semibold">
+                {primaryApplicant?.gender || '—'}
+              </span>
+            </div>
+
+            {/* 3. Marital Status */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">Marital Status</span>
+              <span className="text-slate-900 font-semibold">
+                {primaryApplicant?.maritalStatus || '—'}
+              </span>
+            </div>
+
+            {/* 4. Born in USA? */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">Born in USA?</span>
+              <span className="text-slate-900 font-semibold">
+                {primaryApplicant?.bornInUsa !== null && primaryApplicant?.bornInUsa !== undefined
+                  ? (primaryApplicant.bornInUsa ? 'Yes' : 'No')
+                  : '—'}
+              </span>
+            </div>
+
+            {/* 5. U.S. Citizen */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">U.S. Citizen</span>
+              <span className="text-slate-900 font-semibold">
+                {primaryApplicant?.usCitizen !== null && primaryApplicant?.usCitizen !== undefined
+                  ? (primaryApplicant.usCitizen ? 'Yes' : 'No')
+                  : '—'}
+              </span>
+            </div>
+
+            {/* 6. Immigration Status */}
+            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+              <span className="text-slate-500 font-medium">Immigration Status</span>
+              <span className="text-slate-900 font-semibold">
+                {primaryApplicant?.immigrationStatus || '—'}
+              </span>
+            </div>
+
+            {/* CONDITIONAL IMMIGRATION FIELDS: Work Permit */}
+            {primaryApplicant?.immigrationStatus === 'Work Permit' && (
+              <>
+                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                  <span className="text-slate-500 font-medium">Card Number</span>
+                  <span className="text-slate-900 font-semibold font-mono">
+                    {primaryApplicant?.hasCardNumber ? '••••••••' : '—'}
+                  </span>
+                </div>
+                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                  <span className="text-slate-500 font-medium">USCIS Number</span>
+                  <span className="text-slate-900 font-semibold font-mono">
+                    {primaryApplicant?.hasUscisNumber ? '••••••••' : '—'}
+                  </span>
+                </div>
+                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                  <span className="text-slate-500 font-medium">Category</span>
+                  <span className="text-slate-900 font-semibold">
+                    {primaryApplicant?.immigrationCategory || '—'}
+                  </span>
+                </div>
+                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                  <span className="text-slate-500 font-medium">Expiration Date</span>
+                  <span className="text-slate-900 font-semibold">
+                    {formatDateForDisplay(primaryApplicant?.immigrationExpirationDate)}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {/* CONDITIONAL IMMIGRATION FIELDS: Resident */}
+            {primaryApplicant?.immigrationStatus === 'Resident' && (
+              <>
+                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                  <span className="text-slate-500 font-medium">Alien Number</span>
+                  <span className="text-slate-900 font-semibold font-mono">
+                    {primaryApplicant?.hasAlienNumber ? '••••••••' : '—'}
+                  </span>
+                </div>
+                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                  <span className="text-slate-500 font-medium">Card Number</span>
+                  <span className="text-slate-900 font-semibold font-mono">
+                    {primaryApplicant?.hasCardNumber ? '••••••••' : '—'}
+                  </span>
+                </div>
+                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                  <span className="text-slate-500 font-medium">Expiration Date</span>
+                  <span className="text-slate-900 font-semibold">
+                    {formatDateForDisplay(primaryApplicant?.immigrationExpirationDate)}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* TAX HOUSEHOLD MEMBERS DYNAMIC SECTIONS */}
         {taxMemberCount > 1 && (
           <div className="space-y-6 pt-6 border-t border-slate-100">
@@ -1920,15 +2207,36 @@ export default function HealthPolicyForm({
                 immigration_status: ''
               };
 
-              const updateMember = (updates: Partial<HealthTaxHouseholdMember>) => {
-                hasLocalTaxChangesRef.current = true;
-                setTaxMembers(prev => ({
-                  ...prev,
-                  [memberNumber]: {
-                    ...(prev[memberNumber] || member),
-                    ...updates
+              const updateMember = async (updates: Partial<HealthTaxHouseholdMember>) => {
+                setTaxMemberFieldError(null);
+                const currentMember = taxMembers[memberNumber] || member;
+                const updatedMember: HealthTaxHouseholdMember = {
+                  ...currentMember,
+                  ...updates,
+                  health_policy_id: initialPolicy?.id || currentMember.health_policy_id,
+                  member_number: memberNumber
+                };
+
+                if (initialPolicy?.id) {
+                  try {
+                    const saved = await upsertTaxHouseholdMember(initialPolicy.id, updatedMember);
+                    setTaxMembers(prev => ({
+                      ...prev,
+                      [memberNumber]: saved
+                    }));
+                    setEditingTaxMemberField(null);
+                  } catch (err: any) {
+                    console.error(`Failed to save Tax Household Member ${memberNumber} field:`, err);
+                    setTaxMemberFieldError(err?.message || `Failed to save Member ${memberNumber}`);
                   }
-                }));
+                } else {
+                  hasLocalTaxChangesRef.current = true;
+                  setTaxMembers(prev => ({
+                    ...prev,
+                    [memberNumber]: updatedMember
+                  }));
+                  setEditingTaxMemberField(null);
+                }
               };
 
                 return (
@@ -2768,19 +3076,49 @@ export default function HealthPolicyForm({
 
         {/* RIGHT COLUMN: Marketplace Plan Lookup & Approved Plan Benefits */}
         <div className="lg:col-span-5">
-          <MarketplacePlanLookupPanel
-            initialPlanId={planId}
-            initialYear={yearRenovation || '2026'}
-            initialZip=""
-            initialCounty=""
-            initialState=""
-            householdIncome={45000}
-            peopleCount={taxMemberCount}
-            isEditing={isEditing}
-            onApplyPlan={handleApplyMarketplacePlan}
-            appliedPlan={appliedMarketplacePlan}
-            addToast={addToast}
-          />
+          {(() => {
+            const activeCoverageYear = yearRenovation ? Number(yearRenovation) : (initialPolicy?.year_renovation || 2026);
+            const activeZip = clientResidence?.zipCode || null;
+            const activeState = clientResidence?.state || null;
+            const activeIncome = totalHouseholdIncome !== null && totalHouseholdIncome !== undefined && totalHouseholdIncome > 0
+              ? totalHouseholdIncome
+              : null;
+
+            const peopleResult = transformHouseholdToMarketplacePeople(
+              primaryApplicant,
+              applicantCoverage,
+              taxMembers,
+              taxMemberCount,
+              activeCoverageYear,
+              activeZip,
+              activeState,
+              activeIncome
+            );
+
+            const marketplaceContext: MarketplaceClientContext = {
+              coverageYear: activeCoverageYear,
+              zipCode: activeZip,
+              state: activeState,
+              countyName: clientResidence?.county || null,
+              countyFips: null,
+              householdIncome: activeIncome,
+              householdSize: peopleResult.householdSize,
+              coveredApplicants: peopleResult.coveredApplicants,
+              people: peopleResult.people,
+              validationErrors: peopleResult.validationErrors
+            };
+
+            return (
+              <MarketplacePlanLookupPanel
+                initialPlanId={planId}
+                context={marketplaceContext}
+                isEditing={isEditing}
+                onApplyPlan={handleApplyMarketplacePlan}
+                appliedPlan={appliedMarketplacePlan}
+                addToast={addToast}
+              />
+            );
+          })()}
         </div>
       </div>
 

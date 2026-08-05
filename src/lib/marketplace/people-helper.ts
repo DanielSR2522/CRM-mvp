@@ -1,115 +1,131 @@
-import { HealthTaxHouseholdMember } from '@/lib/health/types';
+import { HealthTaxHouseholdMember, HealthPrimaryApplicant } from '@/lib/health/types';
+import { calculateAgeFromDateOnly } from '@/utils/dateUtils';
 
 export interface MarketplacePersonRecord {
-  memberId: string;
-  memberNumber: number;
-  relationship: string;
-  dateOfBirth: string;
+  member_number: number;
   age: number;
-  gender: string;
-  usesTobacco: boolean;
-  applyingForCoverage: boolean;
-  annualIncome: number;
-  aptcEligible: boolean;
+  relationship: string;
+  applying_for_coverage: boolean;
+  gender?: string;
+  uses_tobacco?: boolean;
+  annual_income?: number;
 }
 
 export interface TransformationResult {
-  success: boolean;
   people: MarketplacePersonRecord[];
-  errors: string[];
-}
-
-export function calculateAgeFromDob(dobStr: string | null | undefined): number | null {
-  if (!dobStr) return null;
-  const parts = dobStr.split('T')[0].split('-');
-  if (parts.length !== 3) return null;
-  const [y, m, d] = parts.map(Number);
-  if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
-  
-  const today = new Date();
-  let age = today.getFullYear() - y;
-  const monthDiff = (today.getMonth() + 1) - m;
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < d)) {
-    age--;
-  }
-  return age >= 0 ? age : null;
+  householdSize: number;
+  coveredApplicants: number;
+  validationErrors: string[];
 }
 
 export function transformHouseholdToMarketplacePeople(
-  applicant: {
-    dob?: string | null;
-    gender?: string | null;
-    usesTobacco?: boolean | null;
-    annualIncome?: number | null;
-    applyingForCoverage?: boolean | null;
-  },
-  membersMap: { [memberNumber: number]: HealthTaxHouseholdMember }
+  applicant: HealthPrimaryApplicant | null,
+  applicantCoverage: boolean,
+  taxMembers: { [memberNumber: number]: HealthTaxHouseholdMember },
+  taxMemberCount: number = 1,
+  coverageYear?: number | string | null,
+  zipCode?: string | null,
+  state?: string | null,
+  householdIncome?: number | null
 ): TransformationResult {
   const people: MarketplacePersonRecord[] = [];
-  const errors: string[] = [];
+  const validationErrors: string[] = [];
 
-  // Member 1 (Applicant)
-  const appAge = calculateAgeFromDob(applicant.dob);
-  if (appAge === null) {
-    errors.push('Applicant (Member 1): Valid Date of Birth is required to calculate age.');
+  // 1. Context validation
+  if (!coverageYear) {
+    validationErrors.push('Missing Coverage Year');
   }
-  if (!applicant.gender) {
-    errors.push('Applicant (Member 1): Gender is required.');
+  if (!zipCode || !/^\d{5}$/.test(zipCode.trim())) {
+    validationErrors.push('Missing client ZIP Code');
+  }
+  if (!state || !state.trim()) {
+    validationErrors.push('Missing client State');
   }
 
-  people.push({
-    memberId: 'applicant_1',
-    memberNumber: 1,
-    relationship: 'Self',
-    dateOfBirth: applicant.dob ? applicant.dob.split('T')[0] : '',
-    age: appAge || 0,
-    gender: applicant.gender || 'Male',
-    usesTobacco: applicant.usesTobacco ?? false,
-    applyingForCoverage: applicant.applyingForCoverage ?? true,
-    annualIncome: Number(applicant.annualIncome || 0),
-    aptcEligible: true
-  });
+  // 2. Member 1 (Primary Applicant)
+  if (!applicant) {
+    validationErrors.push('Missing Applicant Date of Birth');
+    validationErrors.push('Missing Applicant Gender');
+  } else {
+    const appDob = applicant.dateOfBirth ? applicant.dateOfBirth.split('T')[0] : '';
+    const appAge = calculateAgeFromDateOnly(appDob);
 
-  // Additional Members (Member 2, 3, etc.)
-  const memberNumbers = Object.keys(membersMap).map(Number).sort((a, b) => a - b);
-
-  for (const mNum of memberNumbers) {
-    if (mNum < 2) continue;
-    const m = membersMap[mNum];
-    if (!m) continue;
-
-    const label = `Tax Household Member ${mNum} (${m.full_name || 'Unnamed'})`;
-
-    if (!m.full_name || !m.full_name.trim()) {
-      errors.push(`${label}: Full Name is required.`);
+    if (!appDob || appAge === null) {
+      validationErrors.push('Missing Applicant Date of Birth');
     }
-
-    const age = calculateAgeFromDob(m.date_of_birth);
-    if (age === null) {
-      errors.push(`${label}: Valid Date of Birth is required.`);
-    }
-
-    if (!m.relationship_to_applicant) {
-      errors.push(`${label}: Relationship to Applicant is required.`);
+    if (!applicant.gender) {
+      validationErrors.push('Missing Applicant Gender');
     }
 
     people.push({
-      memberId: m.id || `member_${mNum}`,
-      memberNumber: mNum,
-      relationship: m.relationship_to_applicant || 'Dependent',
-      dateOfBirth: m.date_of_birth ? m.date_of_birth.split('T')[0] : '',
-      age: age || 0,
-      gender: m.gender || 'Male',
-      usesTobacco: !!m.uses_tobacco,
-      applyingForCoverage: !!m.coverage,
-      annualIncome: Number(m.annual_income || 0),
-      aptcEligible: true
+      member_number: 1,
+      relationship: 'Self',
+      age: appAge !== null ? appAge : 0,
+      applying_for_coverage: applicantCoverage !== false,
+      gender: applicant.gender || undefined,
+      uses_tobacco: applicant.usesTobacco ?? false,
+      annual_income: applicant.annualIncome !== null && applicant.annualIncome !== undefined ? Number(applicant.annualIncome) : undefined
     });
   }
 
+  // 3. Members 2..taxMemberCount
+  for (let mNum = 2; mNum <= taxMemberCount; mNum++) {
+    const m = taxMembers[mNum];
+    if (!m) {
+      validationErrors.push(`Missing Date of Birth for Tax Household Member ${mNum}`);
+      validationErrors.push(`Missing Relationship for Tax Household Member ${mNum}`);
+      continue;
+    }
+
+    const mDob = m.date_of_birth ? m.date_of_birth.split('T')[0] : '';
+    const mAge = calculateAgeFromDateOnly(mDob);
+
+    if (!mDob || mAge === null) {
+      validationErrors.push(`Missing Date of Birth for Tax Household Member ${mNum}`);
+    }
+    if (!m.relationship_to_applicant) {
+      validationErrors.push(`Missing Relationship for Tax Household Member ${mNum}`);
+    }
+
+    people.push({
+      member_number: mNum,
+      relationship: m.relationship_to_applicant || 'Other',
+      age: mAge !== null ? mAge : 0,
+      applying_for_coverage: m.coverage !== false,
+      gender: m.gender || undefined,
+      uses_tobacco: m.uses_tobacco ?? false,
+      annual_income: m.annual_income !== null && m.annual_income !== undefined ? Number(m.annual_income) : undefined
+    });
+  }
+
+  // 4. Household Income check
+  if (householdIncome === null || householdIncome === undefined || isNaN(Number(householdIncome)) || Number(householdIncome) <= 0) {
+    validationErrors.push('Missing household income');
+  }
+
+  const householdSize = Math.max(taxMemberCount, people.length);
+  const coveredApplicants = people.filter(p => p.applying_for_coverage).length;
+
   return {
-    success: errors.length === 0,
     people,
-    errors
+    householdSize,
+    coveredApplicants,
+    validationErrors
   };
+}
+
+export function buildMarketplaceFingerprint(ctx: {
+  planId: string;
+  coverageYear: number | string | null;
+  zipCode: string | null;
+  state: string | null;
+  countyFips: string | null;
+  householdIncome: number | null;
+  householdSize: number;
+  people: MarketplacePersonRecord[];
+}): string {
+  const peopleSig = ctx.people
+    .map(p => `${p.member_number}:${p.age}:${p.relationship}:${p.applying_for_coverage}:${p.gender || ''}:${p.uses_tobacco || false}`)
+    .join('|');
+  return `${(ctx.planId || '').trim().toUpperCase()}_${ctx.coverageYear || ''}_${ctx.zipCode || ''}_${ctx.state || ''}_${ctx.countyFips || ''}_${ctx.householdIncome ?? 'null'}_${ctx.householdSize}_[${peopleSig}]`;
 }

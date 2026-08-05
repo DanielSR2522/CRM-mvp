@@ -1,5 +1,121 @@
 import { supabase } from '@/lib/supabaseClient';
-import { HealthPolicy, HealthPolicyNote, HealthPolicyDocumentSection, HealthPolicyDocument, HealthTaxHouseholdMember } from './types';
+import { HealthPolicy, HealthPolicyNote, HealthPolicyDocumentSection, HealthPolicyDocument, HealthTaxHouseholdMember, HealthPrimaryApplicant } from './types';
+
+/**
+ * Fetch the authoritative primary applicant data from client_personal_information and clients.
+ */
+export async function fetchPrimaryApplicant(clientId: string): Promise<HealthPrimaryApplicant> {
+  const { data: client } = await supabase
+    .from('clients')
+    .select('id, full_name, email, phone')
+    .eq('id', clientId)
+    .maybeSingle();
+
+  const { data: personalInfo } = await supabase
+    .from('client_personal_information')
+    .select('*')
+    .eq('client_id', clientId)
+    .maybeSingle();
+
+  return {
+    clientId,
+    fullName: personalInfo?.full_name || client?.full_name || null,
+    dateOfBirth: personalInfo?.date_of_birth || null,
+    email: personalInfo?.email || client?.email || null,
+    phone: personalInfo?.phone || client?.phone || null,
+    gender: personalInfo?.gender || null,
+    maritalStatus: personalInfo?.marital_status || null,
+    bornInUsa: personalInfo?.born_in_usa ?? null,
+    usCitizen: personalInfo?.born_in_usa === true || personalInfo?.immigration_status === 'Citizen',
+    immigrationStatus: personalInfo?.immigration_status || null,
+    immigrationCategory: personalInfo?.immigration_category || null,
+    immigrationExpirationDate: personalInfo?.immigration_expiration_date || null,
+    hasSsn: !!personalInfo?.ssn,
+    hasCardNumber: !!personalInfo?.card_number,
+    hasUscisNumber: !!personalInfo?.uscis_number,
+    hasAlienNumber: !!personalInfo?.alien_number,
+    ssn: personalInfo?.ssn || null,
+    cardNumber: personalInfo?.card_number || null,
+    uscisNumber: personalInfo?.uscis_number || null,
+    alienNumber: personalInfo?.alien_number || null,
+    coverage: true,
+    usesTobacco: false,
+    annualIncome: 0
+  };
+}
+
+export interface ClientResidenceData {
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  county: string | null;
+}
+
+export async function fetchClientResidence(clientId: string): Promise<ClientResidenceData> {
+  const { data: residence } = await supabase
+    .from('client_residence_information')
+    .select('address, city, state, zip_code, county')
+    .eq('client_id', clientId)
+    .maybeSingle();
+
+  if (residence && residence.zip_code) {
+    return {
+      address: residence.address || null,
+      city: residence.city || null,
+      state: residence.state || null,
+      zipCode: residence.zip_code || null,
+      county: residence.county || null
+    };
+  }
+
+  const { data: client } = await supabase
+    .from('clients')
+    .select('address')
+    .eq('id', clientId)
+    .maybeSingle();
+
+  let extractedZip: string | null = null;
+  if (client?.address) {
+    const match = client.address.match(/\b\d{5}\b/);
+    if (match) extractedZip = match[0];
+  }
+
+  return {
+    address: client?.address || null,
+    city: null,
+    state: null,
+    zipCode: extractedZip,
+    county: null
+  };
+}
+
+/**
+ * Fetch total calculated household income from client_income_information records.
+ */
+export async function fetchTotalHouseholdIncome(clientId: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from('client_income_information')
+    .select('income')
+    .eq('client_id', clientId);
+
+  if (error || !data || data.length === 0) return null;
+
+  let total = 0;
+  let hasValidIncome = false;
+
+  for (const row of data) {
+    if (row.income !== null && row.income !== undefined) {
+      const val = Number(row.income);
+      if (!isNaN(val) && val > 0) {
+        total += val;
+        hasValidIncome = true;
+      }
+    }
+  }
+
+  return hasValidIncome ? Math.round(total * 100) / 100 : null;
+}
 
 /**
  * Fetch a single health policy for a client.
@@ -200,13 +316,13 @@ export async function upsertTaxHouseholdMember(
   healthPolicyId: string,
   member: HealthTaxHouseholdMember
 ): Promise<HealthTaxHouseholdMember> {
-  const payload = {
+  const payload: any = {
     health_policy_id: healthPolicyId,
     member_number: member.member_number,
-    coverage: member.coverage,
-    full_name: member.full_name.trim(),
+    coverage: member.coverage !== false,
+    full_name: (member.full_name || '').trim(),
     date_of_birth: member.date_of_birth ? member.date_of_birth.split('T')[0] : null,
-    relationship_to_applicant: member.relationship_to_applicant,
+    relationship_to_applicant: member.relationship_to_applicant || 'Spouse',
     gender: member.gender || 'Male',
     us_citizen: member.us_citizen !== false,
     uses_tobacco: !!member.uses_tobacco,
@@ -220,13 +336,34 @@ export async function upsertTaxHouseholdMember(
     updated_at: new Date().toISOString()
   };
 
+  if (member.id) {
+    payload.id = member.id;
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[TAX_MEMBER_UPSERT_PAYLOAD]', {
+      healthPolicyId,
+      memberNumber: member.member_number,
+      hasId: !!member.id,
+      keys: Object.keys(payload)
+    });
+  }
+
   const { data, error } = await supabase
     .from('health_tax_household_members')
     .upsert(payload, { onConflict: 'health_policy_id,member_number' })
     .select('*')
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error('[TAX_MEMBER_UPSERT_ERROR]', {
+      healthPolicyId,
+      memberNumber: member.member_number,
+      error: error.message
+    });
+    throw error;
+  }
+
   return data as HealthTaxHouseholdMember;
 }
 
