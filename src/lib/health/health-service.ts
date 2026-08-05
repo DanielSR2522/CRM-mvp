@@ -181,6 +181,36 @@ export async function updateHealthPolicyTaxHouseholdCount(
 }
 
 /**
+ * Update applied Marketplace plan fields directly on an existing health policy.
+ * Performs a partial update on the policy row identified by healthPolicyId.
+ */
+export async function updateAppliedMarketplacePlan(
+  healthPolicyId: string,
+  payload: {
+    company_2026?: string | null;
+    type_plan?: string | null;
+    plan_id?: string | null;
+    plan_name?: string | null;
+    plan_cost?: number;
+    tax_credit?: number;
+    year_renovation?: number | null;
+  }
+): Promise<HealthPolicy> {
+  const { data, error } = await supabase
+    .from('health_policies')
+    .update({
+      ...payload,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', healthPolicyId)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return data as HealthPolicy;
+}
+
+/**
  * Save a single sensitive field securely via the server-side API.
  */
 export async function saveHealthSecret(

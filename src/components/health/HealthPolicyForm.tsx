@@ -13,6 +13,7 @@ import {
   upsertTaxHouseholdMember,
   deleteTaxHouseholdMembers,
   updateHealthPolicyTaxHouseholdCount,
+  updateAppliedMarketplacePlan,
   saveTaxMemberSecret,
   fetchHealthNotes,
   fetchHealthDocuments
@@ -371,19 +372,76 @@ export default function HealthPolicyForm({
     };
   }, [initialPolicy, isEditing, clientId]);
 
-  const handleApplyMarketplacePlan = (plan: MarketplacePlanPreview) => {
-    if (plan.issuerName) setCompany2026(plan.issuerName);
-    const validMetalTypes = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Catastrophic'];
-    const matchedMetal = validMetalTypes.find(m => m.toLowerCase() === (plan.metalLevel || '').toLowerCase());
-    if (matchedMetal) {
-      setTypePlan(matchedMetal as any);
+  const handleApplyMarketplacePlan = async (plan: MarketplacePlanPreview): Promise<{ success: boolean; error?: string }> => {
+    const policyId = initialPolicy?.id;
+    if (!policyId) {
+      const msg = 'Save the Health Policy before applying a Marketplace plan.';
+      addToast({
+        title: 'Policy Not Saved',
+        description: msg,
+        type: 'warning'
+      });
+      return { success: false, error: msg };
     }
-    if (plan.id) setPlanId(plan.id);
-    if (plan.planName) setPlanName(plan.planName);
-    if (typeof plan.premiumFull === 'number') setPlanCost(plan.premiumFull);
-    if (typeof plan.taxCredit === 'number') setTaxCredit(plan.taxCredit);
-    if (plan.coverageYear) setYearRenovation(plan.coverageYear.toString());
-    setAppliedMarketplacePlan(plan);
+
+    try {
+      const updatedCompany2026 = plan.issuerName || company2026;
+      const validMetalTypes = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Catastrophic'];
+      const matchedMetal = validMetalTypes.find(m => m.toLowerCase() === (plan.metalLevel || '').toLowerCase());
+      const updatedTypePlan = matchedMetal || plan.planType || typePlan;
+      const updatedPlanId = plan.id || planId;
+      const updatedPlanName = plan.planName || planName;
+      const updatedPlanCost = typeof plan.premiumFull === 'number' ? plan.premiumFull : planCost;
+      const updatedTaxCredit = typeof plan.taxCredit === 'number' ? plan.taxCredit : taxCredit;
+      const updatedYearRenovation = plan.coverageYear ? Number(plan.coverageYear) : (yearRenovation ? Number(yearRenovation) : 2026);
+
+      // 1. Immediate partial update to health_policies table in Supabase
+      const savedPolicy = await updateAppliedMarketplacePlan(policyId, {
+        company_2026: updatedCompany2026 || null,
+        type_plan: updatedTypePlan || null,
+        plan_id: updatedPlanId || null,
+        plan_name: updatedPlanName || null,
+        plan_cost: Number(updatedPlanCost || 0),
+        tax_credit: Number(updatedTaxCredit || 0),
+        year_renovation: updatedYearRenovation
+      });
+
+      // 2. Persist full marketplace plan snapshot & benefits
+      const snapshotRes = await saveMarketplacePlanSnapshot(clientId, policyId, null, plan);
+      if (snapshotRes.error && process.env.NODE_ENV !== 'production') {
+        console.warn('Snapshot insert warning:', snapshotRes.error);
+      }
+
+      // 3. Update local React state to match persisted values
+      if (updatedCompany2026) setCompany2026(updatedCompany2026);
+      if (updatedTypePlan) setTypePlan(updatedTypePlan as any);
+      if (updatedPlanId) setPlanId(updatedPlanId);
+      if (updatedPlanName) setPlanName(updatedPlanName);
+      if (typeof updatedPlanCost === 'number') setPlanCost(updatedPlanCost);
+      if (typeof updatedTaxCredit === 'number') setTaxCredit(updatedTaxCredit);
+      if (updatedYearRenovation) setYearRenovation(updatedYearRenovation.toString());
+      setAppliedMarketplacePlan(plan);
+
+      // 4. Update parent policy state silently without navigating
+      onSaved(savedPolicy);
+
+      addToast({
+        title: 'Plan Applied and Saved',
+        description: `Applied ${plan.planName} (${plan.id}) and saved to this policy.`,
+        type: 'success'
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('Failed to save applied marketplace plan:', err);
+      const errMsg = err?.message || 'Unable to save applied plan. Please try again.';
+      addToast({
+        title: 'Unable to Save Plan',
+        description: errMsg,
+        type: 'error'
+      });
+      return { success: false, error: errMsg };
+    }
   };
 
   const handleInlineSaveAgencyField = async (fieldName: string, newValue: any) => {

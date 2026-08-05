@@ -7,7 +7,7 @@ interface MarketplacePlanLookupPanelProps {
   initialPlanId?: string;
   context: MarketplaceClientContext;
   isEditing: boolean;
-  onApplyPlan: (plan: MarketplacePlanPreview) => void;
+  onApplyPlan: (plan: MarketplacePlanPreview) => Promise<{ success: boolean; error?: string }> | void;
   appliedPlan: MarketplacePlanPreview | null;
   addToast: (toast: { title: string; description: string; type: 'success' | 'error' | 'warning' }) => void;
 }
@@ -22,6 +22,8 @@ export default function MarketplacePlanLookupPanel({
 }: MarketplacePlanLookupPanelProps) {
   const [planIdInput, setPlanIdInput] = useState(initialPlanId);
   const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [foundPlan, setFoundPlan] = useState<MarketplacePlanPreview | null>(null);
   const [relatedVariants, setRelatedVariants] = useState<Array<{ id: string; name: string; issuerName: string; metalLevel: string }>>([]);
@@ -179,20 +181,28 @@ export default function MarketplacePlanLookupPanel({
     setErrorMsg(null);
   };
 
-  const handleConfirmApply = (e?: React.SyntheticEvent) => {
+  const handleConfirmApply = async (e?: React.SyntheticEvent) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
-    if (foundPlan) {
-      onApplyPlan(foundPlan);
+    if (!foundPlan) return;
+
+    setApplying(true);
+    setApplyError(null);
+    try {
+      const res = await onApplyPlan(foundPlan);
+      if (res && res.success === false) {
+        setApplyError(res.error || 'Unable to save applied plan. Please try again.');
+        return;
+      }
       setShowConfirmModal(false);
       setIsBenefitsCollapsed(false);
-      addToast({
-        title: 'Marketplace Plan Applied',
-        description: `Applied ${foundPlan.planName} (${foundPlan.id}). Remember to click Save Policy to persist changes.`,
-        type: 'success'
-      });
+    } catch (err: any) {
+      console.error('Apply plan error:', err);
+      setApplyError(err?.message || 'Unable to save applied plan. Please try again.');
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -611,6 +621,11 @@ export default function MarketplacePlanLookupPanel({
               <div>Tax Credit: <strong className="text-emerald-700">{foundPlan.taxCredit ? formatCurrency(foundPlan.taxCredit) : 'Not calculated'}</strong></div>
               <div>Monthly Premium: <strong className="text-blue-700">{formatCurrency(foundPlan.premiumNet)}</strong></div>
             </div>
+            {applyError && (
+              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-700 text-xs font-semibold">
+                {applyError}
+              </div>
+            )}
             <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
               <button
                 type="button"
@@ -618,17 +633,30 @@ export default function MarketplacePlanLookupPanel({
                   e.preventDefault();
                   e.stopPropagation();
                   setShowConfirmModal(false);
+                  setApplyError(null);
                 }}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
+                disabled={applying}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleConfirmApply}
-                className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition-all"
+                disabled={applying}
+                className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50"
               >
-                Confirm & Apply
+                {applying ? (
+                  <>
+                    <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Saving...
+                  </>
+                ) : (
+                  'Confirm & Apply'
+                )}
               </button>
             </div>
           </div>
