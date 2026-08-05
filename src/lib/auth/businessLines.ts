@@ -27,7 +27,9 @@ export async function fetchAgentBusinessLines(userId: string): Promise<BusinessL
       .eq('id', userId)
       .maybeSingle();
 
-    if (error || !data || !Array.isArray(data.business_lines) || data.business_lines.length === 0) {
+    console.log('LOADED BUSINESS LINES FROM DB SERVICE:', data ? data.business_lines : null);
+
+    if (error || !data || data.business_lines === null || data.business_lines === undefined || !Array.isArray(data.business_lines)) {
       return DEFAULT_BUSINESS_LINES;
     }
 
@@ -36,7 +38,7 @@ export async function fetchAgentBusinessLines(userId: string): Promise<BusinessL
       DEFAULT_BUSINESS_LINES.includes(b as BusinessLine)
     );
 
-    return validLines.length > 0 ? validLines : DEFAULT_BUSINESS_LINES;
+    return validLines;
   } catch (err) {
     console.error('Error fetching agent business lines:', err);
     return DEFAULT_BUSINESS_LINES;
@@ -44,18 +46,33 @@ export async function fetchAgentBusinessLines(userId: string): Promise<BusinessL
 }
 
 /**
- * Updates the business lines configuration for an agent in public.profiles
+ * Updates the business lines configuration for an agent in public.profiles using controlled upsert
  */
-export async function updateAgentBusinessLines(userId: string, lines: BusinessLine[]): Promise<void> {
-  const { error } = await supabase
+export async function updateAgentBusinessLines(userId: string, lines: BusinessLine[]): Promise<BusinessLine[]> {
+  const { data: existing } = await supabase
     .from('profiles')
-    .update({
+    .select('name, email')
+    .eq('id', userId)
+    .maybeSingle();
+
+  const nameVal = existing?.name || existing?.email || 'Agent Profile';
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .upsert({
+      id: userId,
+      name: nameVal,
       business_lines: lines,
       updated_at: new Date().toISOString()
-    })
-    .eq('id', userId);
+    }, { onConflict: 'id' })
+    .select('id, business_lines')
+    .maybeSingle();
 
-  if (error) {
-    throw error;
+  if (error || !data) {
+    console.error('Supabase business_lines upsert error:', error);
+    throw error || new Error('Failed to save business lines to database.');
   }
+
+  console.log('SAVED BUSINESS LINES VIA SERVICE:', data.business_lines);
+  return data.business_lines;
 }

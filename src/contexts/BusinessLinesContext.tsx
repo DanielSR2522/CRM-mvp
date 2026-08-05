@@ -34,10 +34,10 @@ export function BusinessLinesProvider({ children }: { children: React.ReactNode 
     setLoading(true);
     try {
       const lines = await fetchAgentBusinessLines(uid);
+      console.log('[BusinessLinesContext] Loaded lines for user:', uid, lines);
       setBusinessLines(lines);
     } catch (err) {
-      console.error('Failed to load business lines:', err);
-      setBusinessLines(DEFAULT_BUSINESS_LINES);
+      console.error('[BusinessLinesContext] Failed to load business lines:', err);
     } finally {
       setLoading(false);
     }
@@ -82,8 +82,8 @@ export function BusinessLinesProvider({ children }: { children: React.ReactNode 
     if (!userId) {
       throw new Error('User is not authenticated.');
     }
-    await updateAgentBusinessLines(userId, lines);
-    setBusinessLines(lines);
+    const saved = await updateAgentBusinessLines(userId, lines);
+    setBusinessLines(saved);
   }, [userId]);
 
   const reloadLines = useCallback(async (): Promise<void> => {

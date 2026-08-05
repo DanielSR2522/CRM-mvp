@@ -5,6 +5,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { supabase } from '@/lib/supabaseClient';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 import { ALL_BUSINESS_LINES, BusinessLine } from '@/lib/auth/businessLines';
+import GoogleAddressAutocomplete from '@/components/address/GoogleAddressAutocomplete';
 
 interface AgentProfileForm {
   // Agent Details
@@ -62,9 +63,10 @@ const CONTACT_METHODS = [
 export default function AgentInformationPage() {
   const [userId, setUserId] = useState<string | null>(null);
 
-  // Business Lines Hook & State
+  // Business Lines Context & State
   const { businessLines, saveBusinessLines, loading: businessLinesLoading } = useBusinessLines();
-  const [selectedLines, setSelectedLines] = useState<BusinessLine[]>(businessLines);
+  const [selectedLines, setSelectedLines] = useState<BusinessLine[]>([]);
+  const [hasLoadedProfile, setHasLoadedProfile] = useState<boolean>(false);
 
   // Form State
   const [form, setForm] = useState<AgentProfileForm>({
@@ -95,10 +97,6 @@ export default function AgentInformationPage() {
   const [successMsg, setSuccessMsg] = useState<boolean>(false);
 
   useEffect(() => {
-    setSelectedLines(businessLines);
-  }, [businessLines]);
-
-  useEffect(() => {
     const loadProfile = async () => {
       try {
         setLoading(true);
@@ -106,6 +104,7 @@ export default function AgentInformationPage() {
         if (!session?.user) return;
 
         const currentUserId = session.user.id;
+        console.log('AUTHENTICATED USER ID (loadProfile):', currentUserId);
         setUserId(currentUserId);
 
         const { data, error } = await supabase
@@ -115,10 +114,26 @@ export default function AgentInformationPage() {
           .maybeSingle();
 
         if (error) {
-          console.error('Error fetching agent profile:', error);
+          console.error('Error fetching agent profile:', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint
+          });
+          setErrorMsg(`Error loading profile: ${error.message}`);
         }
 
         if (data) {
+          console.log('LOADED BUSINESS LINES:', data.business_lines);
+          if (Array.isArray(data.business_lines)) {
+            const valid = data.business_lines.filter((b: any): b is BusinessLine =>
+              ALL_BUSINESS_LINES.some(a => a.id === b)
+            );
+            console.log('setSelectedLines (loadProfile):', valid);
+            setSelectedLines(valid);
+            setHasLoadedProfile(true);
+          }
+
           let fn = data.first_name || '';
           let ln = data.last_name || '';
           if (!fn && !ln && data.name) {
@@ -162,6 +177,14 @@ export default function AgentInformationPage() {
     loadProfile();
   }, []);
 
+  // Sync context fallback only if profile has not populated selectedLines yet
+  useEffect(() => {
+    if (!businessLinesLoading && !hasLoadedProfile && businessLines && businessLines.length > 0) {
+      console.log('setSelectedLines (context fallback):', businessLines);
+      setSelectedLines(businessLines);
+    }
+  }, [businessLines, businessLinesLoading, hasLoadedProfile]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setForm(prev => ({ ...prev, [name]: value }));
@@ -169,11 +192,11 @@ export default function AgentInformationPage() {
 
   const toggleLine = (lineId: BusinessLine) => {
     setSelectedLines(prev => {
-      if (prev.includes(lineId)) {
-        return prev.filter(l => l !== lineId);
-      } else {
-        return [...prev, lineId];
-      }
+      const next = prev.includes(lineId)
+        ? prev.filter(l => l !== lineId)
+        : [...prev, lineId];
+      console.log('setSelectedLines (toggleLine):', next);
+      return next;
     });
   };
 
@@ -184,41 +207,72 @@ export default function AgentInformationPage() {
     setSuccessMsg(false);
 
     try {
-      if (!userId) {
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentUserId = session?.user?.id || userId;
+
+      if (!currentUserId) {
         throw new Error('User session not found.');
       }
 
-      const fullName = `${form.first_name.trim()} ${form.last_name.trim()}`.trim();
+      console.log('AUTHENTICATED USER ID (save):', currentUserId);
+      console.log('SELECTED LINES BEFORE SAVE:', selectedLines);
 
-      const { error: profileErr } = await supabase
+      const computedName = `${form.first_name.trim()} ${form.last_name.trim()}`.trim() || session?.user?.email || 'Agent Profile';
+
+      const upsertPayload = {
+        id: currentUserId,
+        name: computedName,
+        first_name: form.first_name.trim() || null,
+        last_name: form.last_name.trim() || null,
+        email: form.email.trim() || session?.user?.email || null,
+        phone: form.phone.trim() || null,
+        npn_number: form.npn_number.trim() || null,
+        license_number: form.license_number.trim() || null,
+        agency_name: form.agency_name.trim() || null,
+        agency_email: form.agency_email.trim() || null,
+        agency_phone: form.agency_phone.trim() || null,
+        website: form.website.trim() || null,
+        address: form.address.trim() || null,
+        city: form.city.trim() || null,
+        state: form.state.trim() || null,
+        zip_code: form.zip_code.trim() || null,
+        country: form.country.trim() || null,
+        preferred_contact_method: form.preferred_contact_method,
+        secondary_phone: form.secondary_phone.trim() || null,
+        timezone: form.timezone,
+        language: form.language,
+        business_lines: selectedLines,
+        updated_at: new Date().toISOString(),
+      };
+
+      console.log('EXACT SUPABASE UPSERT PAYLOAD:', upsertPayload);
+
+      const { data: updatedRow, error: profileErr } = await supabase
         .from('profiles')
-        .update({
-          name: fullName || null,
-          first_name: form.first_name.trim() || null,
-          last_name: form.last_name.trim() || null,
-          email: form.email.trim() || null,
-          phone: form.phone.trim() || null,
-          npn_number: form.npn_number.trim() || null,
-          license_number: form.license_number.trim() || null,
-          agency_name: form.agency_name.trim() || null,
-          agency_email: form.agency_email.trim() || null,
-          agency_phone: form.agency_phone.trim() || null,
-          website: form.website.trim() || null,
-          address: form.address.trim() || null,
-          city: form.city.trim() || null,
-          state: form.state.trim() || null,
-          zip_code: form.zip_code.trim() || null,
-          country: form.country.trim() || null,
-          preferred_contact_method: form.preferred_contact_method,
-          secondary_phone: form.secondary_phone.trim() || null,
-          timezone: form.timezone,
-          language: form.language,
-          business_lines: selectedLines,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId);
+        .upsert(upsertPayload, { onConflict: 'id' })
+        .select('id, business_lines')
+        .maybeSingle();
 
-      if (profileErr) throw profileErr;
+      console.log('SUPABASE UPSERT RESULT:', { data: updatedRow, error: profileErr });
+
+      if (profileErr || !updatedRow) {
+        console.error('Supabase update error details:', {
+          code: profileErr?.code,
+          message: profileErr?.message,
+          details: profileErr?.details,
+          hint: profileErr?.hint
+        });
+        throw profileErr || new Error('Zero rows returned from Supabase profiles upsert.');
+      }
+
+      console.log('SAVED BUSINESS LINES:', updatedRow.business_lines);
+
+      // Verify saved returned row matches selectedLines
+      const savedSet = JSON.stringify(updatedRow.business_lines || []);
+      const expectedSet = JSON.stringify(selectedLines || []);
+      if (savedSet !== expectedSet) {
+        throw new Error(`Persisted database row (${savedSet}) does not match selected array (${expectedSet}).`);
+      }
 
       await saveBusinessLines(selectedLines);
 
@@ -251,13 +305,13 @@ export default function AgentInformationPage() {
             type="submit"
             form="agent-info-form"
             disabled={saving || loading}
-            className="crm-btn-primary self-start sm:self-auto text-xs px-4 py-2"
+            className="crm-btn-primary self-start sm:self-auto text-xs px-4 py-2 disabled:opacity-50"
           >
             {saving ? 'Saving Changes...' : 'Save Changes'}
           </button>
         </div>
 
-        {loading || businessLinesLoading ? (
+        {loading ? (
           <div className="bg-white border border-[#DCE2EA] rounded-md p-12 text-center text-[#7C8799] text-xs font-medium">
             Loading agent information...
           </div>
@@ -450,11 +504,22 @@ export default function AgentInformationPage() {
                     <label className="block text-xs font-medium text-[#172033] mb-1">
                       Street Address
                     </label>
-                    <input
-                      type="text"
+                    <GoogleAddressAutocomplete
+                      id="address"
                       name="address"
                       value={form.address}
-                      onChange={handleChange}
+                      onChange={val => setForm(prev => ({ ...prev, address: val }))}
+                      onAddressSelected={normalized => {
+                        console.log('[AgentInformation] Google Place Address selected:', normalized);
+                        setForm(prev => ({
+                          ...prev,
+                          address: normalized.streetAddress || prev.address,
+                          city: normalized.city || prev.city,
+                          state: normalized.state || prev.state,
+                          zip_code: normalized.postalCode || prev.zip_code,
+                          country: normalized.country || prev.country || 'United States',
+                        }));
+                      }}
                       className="crm-input w-full"
                     />
                   </div>
@@ -639,8 +704,8 @@ export default function AgentInformationPage() {
             <div className="flex justify-end pt-4 border-t border-[#DCE2EA]">
               <button
                 type="submit"
-                disabled={saving}
-                className="crm-btn-primary text-xs px-6 py-2.5"
+                disabled={saving || loading}
+                className="crm-btn-primary text-xs px-6 py-2.5 disabled:opacity-50"
               >
                 {saving ? 'Saving Changes...' : 'Save Changes'}
               </button>
