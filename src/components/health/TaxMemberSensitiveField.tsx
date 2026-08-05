@@ -110,7 +110,7 @@ export default function TaxMemberSensitiveField({
       return fieldName === 'ssn' ? formatSsnInput(value) : value;
     }
     if (hasValue && fieldName === 'ssn') {
-      return '•••-••-••••';
+      return '***-**-****';
     }
     return '••••••••';
   };

@@ -5,6 +5,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { supabase } from '@/lib/supabaseClient';
+import { formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
+import { formatUSPhone } from '@/lib/formatters/phone';
+import PhoneInput from '@/components/common/PhoneInput';
 
 interface Client {
   id: string;
@@ -274,20 +277,14 @@ export default function ClientsPage() {
                         </Link>
                       </td>
                       <td className="px-6 py-4 text-slate-600">{client.email || '-'}</td>
-                      <td className="px-6 py-4 text-slate-600">{client.phone || '-'}</td>
+                      <td className="px-6 py-4 text-slate-600">{formatUSPhone(client.phone) || '-'}</td>
                       <td className="px-6 py-4 text-center">
                         <span className="inline-flex items-center justify-center bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full text-xs font-bold border border-blue-100">
                           {client.policies?.length || 0}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-slate-500 text-xs">
-                        {new Date(client.updated_at).toLocaleDateString(undefined, {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                        {formatDateTimeMMDDYYYY(client.updated_at)}
                       </td>
                       <td className="px-6 py-4 text-right space-x-3" onClick={(e) => e.stopPropagation()}>
                         <button
@@ -380,12 +377,9 @@ export default function ClientsPage() {
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Phone Number</label>
-                <input
-                  type="tel"
+                <PhoneInput
                   value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                  placeholder="e.g. (305) 555-0199"
+                  onChange={setFormPhone}
                 />
               </div>
 
@@ -480,12 +474,9 @@ export default function ClientsPage() {
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Phone Number</label>
-                <input
-                  type="tel"
+                <PhoneInput
                   value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                  placeholder="e.g. (305) 555-0199"
+                  onChange={setFormPhone}
                 />
               </div>
 

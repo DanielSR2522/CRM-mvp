@@ -2,6 +2,7 @@
 
 import React from 'react';
 import type { ConsentTemplateVersion } from '@/lib/consents/types';
+import { formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
 
 /**
  * Read-only list of published versions.
@@ -104,15 +105,6 @@ export default function TemplateVersionHistory({
   );
 }
 
-/** Local time, MM/DD/YYYY plus clock — matches how the timeline reads elsewhere. */
 function formatTimestamp(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString('en-US', {
-    month: '2-digit',
-    day: '2-digit',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  return formatDateTimeMMDDYYYY(iso);
 }

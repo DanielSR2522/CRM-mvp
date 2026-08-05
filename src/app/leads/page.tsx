@@ -14,6 +14,8 @@ import {
 } from '@/utils/dateUtils';
 import ConvertLeadModal from '@/components/leads/ConvertLeadModal';
 import DatePicker from '@/components/ui/DatePicker';
+import { formatUSPhone } from '@/lib/formatters/phone';
+import PhoneInput from '@/components/common/PhoneInput';
 
 const DEFAULT_FILTERS: LeadFiltersState = {
   searchQuery: '',
@@ -766,7 +768,7 @@ export default function LeadsPage() {
                           <div className="text-[11px] text-[var(--workspace-muted)] flex items-center gap-2 mt-0.5 font-sans">
                             {lead.email && <span>{lead.email}</span>}
                             {lead.email && lead.phone && <span>•</span>}
-                            {lead.phone && <span>{lead.phone}</span>}
+                            {lead.phone && <span>{formatUSPhone(lead.phone)}</span>}
                           </div>
                         </td>
                         <td className="py-3.5 px-4 font-semibold text-[var(--workspace-fg)]">
@@ -1009,12 +1011,10 @@ export default function LeadsPage() {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1">Phone</label>
-                    <input
-                      type="text"
+                    <PhoneInput
                       value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
+                      onChange={setPhone}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-100 outline-none focus:border-blue-500/50"
-                      placeholder="(555) 000-0000"
                     />
                   </div>
                   <div>

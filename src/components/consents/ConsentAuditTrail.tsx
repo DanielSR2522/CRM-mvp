@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { listConsentEvents } from '@/lib/consents/request-service';
+import { formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
 
 /**
  * The audit trail for one consent.
@@ -191,14 +192,5 @@ function shortUserAgent(ua: string): string {
 }
 
 function formatTimestamp(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString('en-US', {
-    month: '2-digit',
-    day: '2-digit',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  return formatDateTimeMMDDYYYY(iso);
 }

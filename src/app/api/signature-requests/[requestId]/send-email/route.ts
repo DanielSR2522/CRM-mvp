@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin, isAdminConfigured } from '@/lib/supabaseAdmin';
+import { formatDateMMDDYYYY } from '@/lib/formatters/date';
 import { generateSecureToken } from '@/lib/consents/token-service';
 
 export const dynamic = 'force-dynamic';
@@ -204,7 +205,7 @@ export async function POST(
     'Open the document here:',
     signingUrl,
     '',
-    `This secure link expires on ${expiresAt.toLocaleDateString('en-US')}.`,
+    `This secure link expires on ${formatDateMMDDYYYY(expiresAt)}.`,
     'Please do not share it with anyone else.',
     '',
     'If you were not expecting this message, you can ignore it.',

@@ -12,6 +12,7 @@ import {
   calculateTermDuration,
   formatAsDateInput,
 } from '@/utils/dateUtils';
+import { formatDateMMDDYYYY, formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
 import FileDropzone from '@/components/ui/FileDropzone';
 import DatePicker from '@/components/ui/DatePicker';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
@@ -2070,16 +2071,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                                     ? `${(doc.size_bytes / (1024 * 1024)).toFixed(2)} MB`
                                     : `${(doc.size_bytes / 1024).toFixed(1)} KB`;
 
-                                  const dateObj = new Date(doc.created_at);
-                                  const formattedDateTime = dateObj.toLocaleDateString('en-US', {
-                                    month: '2-digit',
-                                    day: '2-digit',
-                                    year: 'numeric'
-                                  }) + ' ' + dateObj.toLocaleTimeString('en-US', {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    hour12: true
-                                  });
+                                  const formattedDateTime = formatDateTimeMMDDYYYY(doc.created_at);
 
                                   const uploader = uploaderProfiles[doc.uploaded_by] || 'Agent';
 
@@ -2181,11 +2173,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
               const groupChronoEventsByDate = (eventsList: ActivityEvent[]) => {
                 const groups: { [key: string]: ActivityEvent[] } = {};
                 eventsList.forEach(evt => {
-                  const dateStr = new Date(evt.created_at).toLocaleDateString('en-US', {
-                    month: '2-digit',
-                    day: '2-digit',
-                    year: 'numeric'
-                  });
+                  const dateStr = formatDateMMDDYYYY(evt.created_at);
                   if (!groups[dateStr]) {
                     groups[dateStr] = [];
                   }
@@ -2196,11 +2184,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
 
               const groupedChrono = groupChronoEventsByDate(filteredChronoEvents);
               const uniqueChronoDates = Array.from(new Set(filteredChronoEvents.map(evt => 
-                new Date(evt.created_at).toLocaleDateString('en-US', {
-                  month: '2-digit',
-                  day: '2-digit',
-                  year: 'numeric'
-                })
+                formatDateMMDDYYYY(evt.created_at)
               )));
 
               return (
@@ -2426,17 +2410,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                       const authorDisplay = note.profiles?.name || note.profiles?.email || 'Agent';
                       const isEdited = new Date(note.updated_at).getTime() !== new Date(note.created_at).getTime();
 
-                      // Format timestamp in US format: MM/DD/YYYY hh:mm A
-                      const dateObj = new Date(note.created_at);
-                      const formattedDateTime = dateObj.toLocaleDateString('en-US', {
-                        month: '2-digit',
-                        day: '2-digit',
-                        year: 'numeric'
-                      }) + ' ' + dateObj.toLocaleTimeString('en-US', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: true
-                      });
+                      const formattedDateTime = formatDateTimeMMDDYYYY(note.created_at);
 
                       return (
                         <div key={note.id} className="bg-slate-50/50 border border-slate-100 rounded-xl p-4 space-y-2">

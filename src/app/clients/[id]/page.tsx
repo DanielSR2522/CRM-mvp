@@ -8,6 +8,7 @@ import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
+import { formatDateMMDDYYYY, formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
 import FileDropzone from '@/components/ui/FileDropzone';
 import DatePicker from '@/components/ui/DatePicker';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
@@ -2913,15 +2914,14 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 <div>
                                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
                                   {isEditingPersonal ? (
-                                    <input
-                                      type="date"
+                                    <DatePicker
                                       value={personalForm.immigration_expiration_date}
-                                      onChange={e => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: e.target.value }))}
-                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                      onChange={iso => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: iso || '' }))}
+                                      placeholder="MM/DD/YYYY"
                                     />
                                   ) : (
                                     <span className="font-semibold text-slate-800 block min-h-[16px]">
-                                      {personalForm.immigration_expiration_date ? new Date(personalForm.immigration_expiration_date + 'T00:00:00').toLocaleDateString() : '-'}
+                                      {formatDateMMDDYYYY(personalForm.immigration_expiration_date) || '-'}
                                     </span>
                                   )}
                                 </div>
@@ -2974,15 +2974,14 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 <div>
                                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
                                   {isEditingPersonal ? (
-                                    <input
-                                      type="date"
+                                    <DatePicker
                                       value={personalForm.immigration_expiration_date}
-                                      onChange={e => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: e.target.value }))}
-                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                      onChange={iso => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: iso || '' }))}
+                                      placeholder="MM/DD/YYYY"
                                     />
                                   ) : (
                                     <span className="font-semibold text-slate-800 block min-h-[16px]">
-                                      {personalForm.immigration_expiration_date ? new Date(personalForm.immigration_expiration_date + 'T00:00:00').toLocaleDateString() : '-'}
+                                      {formatDateMMDDYYYY(personalForm.immigration_expiration_date) || '-'}
                                     </span>
                                   )}
                                 </div>
@@ -3790,7 +3789,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         <div key={note.id} className="bg-slate-50/70 border border-slate-150 rounded-xl p-4 space-y-3">
                           <div className="flex items-center justify-between text-xs text-slate-400">
                             <span className="font-bold text-slate-700">{note.author_name || 'Agent'}</span>
-                            <span>{new Date(note.created_at).toLocaleString('en-US')}</span>
+                            <span>{formatDateTimeMMDDYYYY(note.created_at)}</span>
                           </div>
                           <p className="text-xs text-slate-800 whitespace-pre-wrap font-sans">{note.content}</p>
 
@@ -3899,11 +3898,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
         const groupEventsByDate = (eventsList: ActivityEvent[]) => {
           const groups: { [key: string]: ActivityEvent[] } = {};
           eventsList.forEach(evt => {
-            const dateStr = new Date(evt.created_at).toLocaleDateString('en-US', {
-              month: '2-digit',
-              day: '2-digit',
-              year: 'numeric'
-            });
+            const dateStr = formatDateMMDDYYYY(evt.created_at);
             if (!groups[dateStr]) {
               groups[dateStr] = [];
             }
@@ -3914,11 +3909,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
         const groupedEvents = groupEventsByDate(filteredEvents);
         const uniqueDates = Array.from(new Set(filteredEvents.map(evt => 
-          new Date(evt.created_at).toLocaleDateString('en-US', {
-            month: '2-digit',
-            day: '2-digit',
-            year: 'numeric'
-          })
+          formatDateMMDDYYYY(evt.created_at)
         )));
 
         return (

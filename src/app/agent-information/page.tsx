@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 import { ALL_BUSINESS_LINES, BusinessLine } from '@/lib/auth/businessLines';
 import GoogleAddressAutocomplete from '@/components/address/GoogleAddressAutocomplete';
+import PhoneInput from '@/components/common/PhoneInput';
 
 interface AgentProfileForm {
   // Agent Details
@@ -392,12 +393,10 @@ export default function AgentInformationPage() {
                       <label className="block text-xs font-medium text-[#172033] mb-1">
                         Phone Number
                       </label>
-                      <input
-                        type="text"
+                      <PhoneInput
                         name="phone"
                         value={form.phone}
-                        onChange={handleChange}
-                        className="crm-input w-full"
+                        onChange={val => setForm(prev => ({ ...prev, phone: val }))}
                       />
                     </div>
                   </div>
@@ -470,12 +469,10 @@ export default function AgentInformationPage() {
                       <label className="block text-xs font-medium text-[#172033] mb-1">
                         Agency Phone
                       </label>
-                      <input
-                        type="text"
+                      <PhoneInput
                         name="agency_phone"
                         value={form.agency_phone}
-                        onChange={handleChange}
-                        className="crm-input w-full"
+                        onChange={val => setForm(prev => ({ ...prev, agency_phone: val }))}
                       />
                     </div>
 
@@ -611,12 +608,10 @@ export default function AgentInformationPage() {
                       <label className="block text-xs font-medium text-[#172033] mb-1">
                         Secondary Phone <span className="text-[#7C8799] font-normal">(optional)</span>
                       </label>
-                      <input
-                        type="text"
+                      <PhoneInput
                         name="secondary_phone"
                         value={form.secondary_phone}
-                        onChange={handleChange}
-                        className="crm-input w-full"
+                        onChange={val => setForm(prev => ({ ...prev, secondary_phone: val }))}
                       />
                     </div>
                   </div>

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import DashboardLayout from '@/components/DashboardLayout';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, extractUsDateAnd12hTime } from '@/utils/dateUtils';
+import { formatDateMMDDYYYY } from '@/lib/formatters/date';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 
 interface UserProfile {
@@ -384,12 +385,7 @@ export default function DashboardPage() {
   }, [leads]);
 
   // US Current Date Formatting
-  const currentDateFormatted = now.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  const currentDateFormatted = formatDateMMDDYYYY(now);
 
   return (
     <DashboardLayout>
