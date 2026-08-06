@@ -1,31 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, use, useRef, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, use, useRef } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
-import { formatDateMMDDYYYY, formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
-import FileDropzone from '@/components/ui/FileDropzone';
-import DatePicker from '@/components/ui/DatePicker';
-import {
-  InlineEditableText,
-  InlineEditablePhone,
-  InlineEditableSSN,
-  InlineEditableDate,
-  InlineEditableSelect,
-  InlineEditableTextarea,
-  InlineEditableAddress,
-} from '@/components/common/inline-edit';
-import SSNInput from '@/components/common/SSNInput';
-import PhoneInput from '@/components/common/PhoneInput';
-import { formatSSN } from '@/lib/formatters/ssn';
-import { formatUSPhone } from '@/lib/formatters/phone';
-import { useBusinessLines } from '@/contexts/BusinessLinesContext';
-import { deleteClientSecure, getClientDeletionSummaryAction, type ClientDeletionSummary } from '@/app/actions/deleteClientAction';
 
 declare global {
   interface Window {
@@ -141,69 +123,15 @@ interface ClientIncomeInformation {
 }
 
 export default function ClientProfilePage({ params }: { params: Promise<{ id: string }> }) {
-  return (
-    <Suspense fallback={
-      <DashboardLayout>
-        <div className="flex justify-center items-center py-20">
-          <div className="h-8 w-8 rounded-full border-4 border-blue-600 border-t-transparent animate-spin" />
-        </div>
-      </DashboardLayout>
-    }>
-      <ClientProfileContent params={params} />
-    </Suspense>
-  );
-}
-
-function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { id: clientId } = use(params);
-  const { isLineEnabled } = useBusinessLines();
 
   const isValidUuid = (uuid: string) => {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid);
   };
 
-  // Section mapping & URL-driven tab state
-  const rawSection = searchParams.get('section');
-  const validSections = ['overview', 'personal-information', 'personal-info', 'policies', 'documents', 'notes', 'consents', 'timeline', 'health'];
-  const normalizedSection = validSections.includes(rawSection || '')
-    ? (rawSection === 'personal-info' ? 'personal-information' : rawSection!)
-    : 'overview';
-
-  const activeTab = (normalizedSection === 'personal-information' ? 'personal-info' : normalizedSection) as 'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health';
-
-  const handleTabChange = useCallback((tab: string) => {
-    const targetSection = tab === 'personal-info' ? 'personal-information' : tab;
-    const currentSectionInUrl = searchParams.get('section');
-    if (currentSectionInUrl !== targetSection) {
-      const paramsObj = new URLSearchParams(searchParams.toString());
-      paramsObj.set('section', targetSection);
-      router.push(`/clients/${clientId}?${paramsObj.toString()}`);
-    }
-  }, [clientId, router, searchParams]);
-
-  // Client Sidebar Collapse Preference
-  const [isClientSidebarCollapsed, setIsClientSidebarCollapsed] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        return localStorage.getItem('smartrack:client-sidebar-collapsed') === 'true';
-      } catch {
-        return false;
-      }
-    }
-    return false;
-  });
-
-  const toggleClientSidebar = useCallback(() => {
-    setIsClientSidebarCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem('smartrack:client-sidebar-collapsed', String(next));
-      } catch {}
-      return next;
-    });
-  }, []);
+  // Tab State
+  const [activeTab, setActiveTab] = useState<'overview' | 'personal-info' | 'policies' | 'consents' | 'timeline' | 'health'>('overview');
 
   // Policies Search and Filters States
   const [policiesSearch, setPoliciesSearch] = useState('');
@@ -252,63 +180,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [timelineFilter, setTimelineFilter] = useState<'all' | 'policies' | 'notes' | 'documents' | 'consents'>('all');
   const [noteCounts, setNoteCounts] = useState<{ [policyId: string]: number }>({});
   const [docCounts, setDocCounts] = useState<{ [policyId: string]: number }>({});
-  // Client Documents & Notes States
-  const [clientDocDisplayName, setClientDocDisplayName] = useState('');
-  const [clientDocType, setClientDocType] = useState('Identification');
-  const [clientDocDescription, setClientDocDescription] = useState('');
-  const [clientDocFile, setClientDocFile] = useState<File | null>(null);
-  const [clientDocUploading, setClientDocUploading] = useState(false);
-  const [clientDocError, setClientDocError] = useState<string | null>(null);
-  const [clientDocsList, setClientDocsList] = useState<any[]>([]);
-  const [clientDocsLoading, setClientDocsLoading] = useState(false);
-
-  const [clientNoteBody, setClientNoteBody] = useState('');
-  const [clientNoteFiles, setClientNoteFiles] = useState<File[]>([]);
-  const [clientNotePasted, setClientNotePasted] = useState<{ id: string; file: File; previewUrl: string }[]>([]);
-  const [clientNotePosting, setClientNotePosting] = useState(false);
-  const [clientNotesList, setClientNotesList] = useState<any[]>([]);
-  const [clientNotesLoading, setClientNotesLoading] = useState(false);
-
-  const [replyingNoteId, setReplyingNoteId] = useState<string | null>(null);
-  const [clientReplyBody, setClientReplyBody] = useState('');
-  const [clientReplyFiles, setClientReplyFiles] = useState<File[]>([]);
-
-  const loadClientDocuments = useCallback(async () => {
-    try {
-      setClientDocsLoading(true);
-      const { data } = await supabase.from('client_documents').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
-      setClientDocsList(data || []);
-    } catch {
-      setClientDocsList([]);
-    } finally {
-      setClientDocsLoading(false);
-    }
-  }, [clientId]);
-
-  const loadClientNotes = useCallback(async () => {
-    try {
-      setClientNotesLoading(true);
-      const { data } = await supabase.from('client_notes').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
-      setClientNotesList(data || []);
-    } catch {
-      setClientNotesList([]);
-    } finally {
-      setClientNotesLoading(false);
-    }
-  }, [clientId]);
-
-  useEffect(() => {
-    if (activeTab === 'documents') loadClientDocuments();
-    if (activeTab === 'notes') loadClientNotes();
-  }, [activeTab, loadClientDocuments, loadClientNotes]);
 
   // Personal Information States
   const [personalInfo, setPersonalInfo] = useState<ClientPersonalInformation | null>(null);
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
   const [isDeletingClient, setIsDeletingClient] = useState(false);
-  // Deletion Summary State
-  const [deletionSummary, setDeletionSummary] = useState<ClientDeletionSummary | null>(null);
-  const [loadingDeletionSummary, setLoadingDeletionSummary] = useState<boolean>(false);
   const [isDeleteClientModalOpen, setIsDeleteClientModalOpen] = useState(false);
   const [deleteClientError, setDeleteClientError] = useState<string | null>(null);
   const [personalForm, setPersonalForm] = useState<ClientPersonalInformation>({
@@ -660,113 +536,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   };
 
   // Fetch Personal Information
-  
-  const savePersonalField = async (fieldName: string, value: any) => {
-    if (!isValidUuid(clientId)) return;
-    const { data: existing } = await supabase
-      .from('client_personal_information')
-      .select('id')
-      .eq('client_id', clientId)
-      .maybeSingle();
-
-    if (existing) {
-      const { error } = await supabase
-        .from('client_personal_information')
-        .update({ [fieldName]: value, updated_at: new Date().toISOString() })
-        .eq('client_id', clientId);
-      if (error) throw error;
-    } else {
-      const { error } = await supabase
-        .from('client_personal_information')
-        .insert({ client_id: clientId, [fieldName]: value });
-      if (error) throw error;
-    }
-
-    setPersonalForm(prev => ({ ...prev, [fieldName]: value }));
-    await fetchPersonalInformation();
-  };
-
-  
-
-
-  const saveResidenceField = async (fieldOrObject: string | Record<string, any>, val?: any) => {
-    if (!isValidUuid(clientId)) return;
-    let patch: Record<string, any> = {};
-    if (typeof fieldOrObject === 'string') {
-      patch[fieldOrObject] = val;
-    } else {
-      patch = { ...fieldOrObject };
-    }
-
-    const { data: existing } = await supabase
-      .from('client_residence_information')
-      .select('id')
-      .eq('client_id', clientId)
-      .maybeSingle();
-
-    if (existing) {
-      const { data: updated, error } = await supabase
-        .from('client_residence_information')
-        .update({ ...patch, updated_at: new Date().toISOString() })
-        .eq('client_id', clientId)
-        .select('*')
-        .maybeSingle();
-
-      if (error || !updated) throw error || new Error('Zero rows returned from residence update.');
-      setResidenceInfo(updated);
-    } else {
-      const { data: inserted, error } = await supabase
-        .from('client_residence_information')
-        .insert({ client_id: clientId, ...patch })
-        .select('*')
-        .maybeSingle();
-
-      if (error || !inserted) throw error || new Error('Zero rows returned from residence insert.');
-      setResidenceInfo(inserted);
-    }
-
-    setResidenceForm(prev => ({ ...prev, ...patch }));
-  };
-
-  const saveIncomeField = async (incomeId: string, fieldName: string, value: any) => {
-    const { data: updated, error } = await supabase
-      .from('client_income_information')
-      .update({ [fieldName]: value, updated_at: new Date().toISOString() })
-      .eq('id', incomeId)
-      .select('*')
-      .maybeSingle();
-
-    if (error || !updated) throw error || new Error('Zero rows returned from income update.');
-    setIncomeList(prev => prev.map(inc => inc.id === incomeId ? updated : inc));
-  };
-
-
-
-  const saveCoApplicantField = async (fieldName: string, value: any) => {
-    if (!isValidUuid(clientId)) return;
-    const { data: existing } = await supabase
-      .from('client_co_applicant_information')
-      .select('id')
-      .eq('client_id', clientId)
-      .maybeSingle();
-
-    if (existing) {
-      const { error } = await supabase
-        .from('client_co_applicant_information')
-        .update({ [fieldName]: value, updated_at: new Date().toISOString() })
-        .eq('client_id', clientId);
-      if (error) throw error;
-    } else {
-      const { error } = await supabase
-        .from('client_co_applicant_information')
-        .insert({ client_id: clientId, [fieldName]: value });
-      if (error) throw error;
-    }
-
-    setCoApplicantForm(prev => ({ ...prev, [fieldName]: value }));
-    await fetchCoApplicantInformation();
-  };
-
   const fetchPersonalInformation = async () => {
     try {
       setLoadingPersonal(true);
@@ -1029,9 +798,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
       if (error) throw error;
       setIncomeList(data || []);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('income-updated', { detail: { clientId } }));
-      }
     } catch (err: any) {
       console.error('Error fetching income info:', err);
     } finally {
@@ -1893,40 +1659,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           <div className="flex flex-col lg:flex-row gap-6 items-start">
             
             {/* Left Sidebar Summary */}
-            {isClientSidebarCollapsed ? (
-              <aside className="hidden lg:flex flex-col items-center bg-white border border-slate-100 rounded-2xl p-3 shadow-xs space-y-4 flex-shrink-0 lg:sticky lg:top-6">
-                <button
-                  type="button"
-                  onClick={toggleClientSidebar}
-                  title="Expand client details sidebar"
-                  className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                  </svg>
-                </button>
-                <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-extrabold flex items-center justify-center text-xs">
-                  {client?.full_name?.charAt(0) || 'C'}
-                </div>
-              </aside>
-            ) : (
-              <aside className="w-full lg:w-[280px] bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 flex-shrink-0 lg:sticky lg:top-6 relative">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client Profile</span>
-                    <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">{personalInfo?.full_name || client?.full_name || '-'}</h2>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={toggleClientSidebar}
-                    title="Collapse sidebar"
-                    className="hidden lg:block p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-                    </svg>
-                  </button>
-                </div>
+            <aside className="w-full lg:w-[280px] bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 flex-shrink-0 lg:sticky lg:top-6">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client Profile</span>
+                <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">{personalInfo?.full_name || client?.full_name || '-'}</h2>
+              </div>
 
               <div className="border-t border-slate-100 pt-5 space-y-4">
                 <div>
@@ -2176,94 +1913,69 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 )}
               </div>
             </aside>
-          )}
 
             {/* Main Area */}
             <div className="flex-1 w-full space-y-6">
               
               {/* Tabs and Actions bar */}
-              <div className="crm-card p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-1 border-b sm:border-b-0 border-[#E8ECF2] pb-2 sm:pb-0">
+              <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex border-b sm:border-b-0 border-slate-100 pb-2 sm:pb-0">
                   <button
-                    onClick={() => handleTabChange('overview')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    onClick={() => setActiveTab('overview')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'overview'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
                     Overview
                   </button>
                   <button
-                    onClick={() => handleTabChange('personal-info')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    onClick={() => setActiveTab('personal-info')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'personal-info'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
                     Personal Info
                   </button>
-                  {isLineEnabled('property_casualty') && (
-                    <button
-                      onClick={() => handleTabChange('policies')}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                        activeTab === 'policies'
-                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                      }`}
-                    >
-                      Property & Casualty
-                    </button>
-                  )}
-                  {isLineEnabled('health') && (
-                    <button
-                      onClick={() => handleTabChange('health')}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                        activeTab === 'health'
-                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                      }`}
-                    >
-                      Health
-                    </button>
-                  )}
                   <button
-                    onClick={() => handleTabChange('documents')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      activeTab === 'documents'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                    onClick={() => setActiveTab('policies')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                      activeTab === 'policies'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
-                    Documents
+                    Property & Casualty
                   </button>
                   <button
-                    onClick={() => handleTabChange('notes')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      activeTab === 'notes'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                    onClick={() => setActiveTab('health')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
+                      activeTab === 'health'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
-                    Notes
+                    Health
                   </button>
                   <button
-                    onClick={() => handleTabChange('consents')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    onClick={() => setActiveTab('consents')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'consents'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
                     Consents
                   </button>
                   <button
-                    onClick={() => handleTabChange('timeline')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    onClick={() => setActiveTab('timeline')}
+                    className={`pb-2 sm:pb-0 px-4 text-sm font-bold transition-all ${
                       activeTab === 'timeline'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                        ? 'border-b-2 border-blue-600 text-blue-600'
+                        : 'text-slate-550 hover:text-blue-600'
                     }`}
                   >
                     Timeline
@@ -2271,10 +1983,10 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
                 
                 {activeTab === 'policies' && policies.length > 0 && (
-                  <div className="flex justify-end gap-2">
+                  <div className="flex justify-end gap-3">
                     <Link
                       href={`/clients/${clientId}/policies/new`}
-                      className="crm-btn-primary text-xs px-3 py-1.5"
+                      className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
@@ -2344,7 +2056,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         <div className="flex items-center justify-between border-b border-slate-50 pb-4">
                           <h4 className="text-base font-extrabold text-slate-900">Recent Policies</h4>
                           <button
-                            onClick={() => handleTabChange('policies')}
+                            onClick={() => setActiveTab('policies')}
                             className="text-xs font-bold text-blue-650 hover:text-blue-850 transition-colors flex items-center gap-1"
                           >
                             View All Policies
@@ -2541,12 +2253,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
               {/* POLICIES TAB CONTENT (Functional list, edit/delete actions, search/filters, details table) */}
               {activeTab === 'policies' && (
-                !isLineEnabled('property_casualty') ? (
-                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
-                    <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
-                    <p className="text-sm text-slate-300">The <strong>Property & Casualty</strong> module is disabled for your agent profile.</p>
-                  </div>
-                ) : (
                 <div className="space-y-6">
 
                   {/* Policies Search and Filter Section */}
@@ -2759,20 +2465,43 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                     </div>
                   )}
                 </div>
-                )
               )}
 
               {/* PERSONAL INFO TAB CONTENT */}
               {activeTab === 'personal-info' && (
-                <div className="space-y-6 font-sans">
+                <div className="space-y-6">
                   
                   {/* SECTION 1: Personal Information Card */}
                   <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                      <div>
-                        <h3 className="text-lg font-extrabold text-slate-900">Personal Information</h3>
-                        <p className="text-xs text-slate-400 mt-0.5">Click any field to edit directly.</p>
-                      </div>
+                      <h3 className="text-lg font-extrabold text-slate-900">Personal Information</h3>
+                      {!isEditingPersonal ? (
+                        <button
+                          onClick={() => setIsEditingPersonal(true)}
+                          className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1.5 rounded-lg transition-all"
+                        >
+                          Edit Info
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setIsEditingPersonal(false);
+                              setPersonalError(null);
+                            }}
+                            className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg transition-all"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleSavePersonal}
+                            disabled={savingPersonal}
+                            className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-all shadow-md disabled:opacity-50"
+                          >
+                            {savingPersonal ? 'Saving...' : 'Save'}
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {personalError && (
@@ -2789,61 +2518,120 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         </svg>
                       </div>
                     ) : (
-                      <div className="space-y-8">
+                      <form onSubmit={handleSavePersonal} className="space-y-8">
                         {/* Main Applicant Grid */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
                           {/* Left Column */}
                           <div className="space-y-4">
-                            <InlineEditableText
-                              label="Applicant Name"
-                              value={personalForm.full_name}
-                              onSave={val => savePersonalField('full_name', val)}
-                            />
-
-                            <InlineEditableDate
-                              label="DOB"
-                              value={personalForm.date_of_birth}
-                              onSave={iso => savePersonalField('date_of_birth', iso || '')}
-                            />
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Applicant Name</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="text"
+                                  value={personalForm.full_name}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, full_name: e.target.value }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                  required
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.full_name || '-'}</span>
+                              )}
+                            </div>
 
                             <div>
-                              <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</span>
-                              <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">DOB</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="text"
+                                  placeholder="MM/DD/YYYY"
+                                  value={personalForm.date_of_birth.includes('-') ? formatIsoToUsDate(personalForm.date_of_birth) : personalForm.date_of_birth}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, date_of_birth: formatAsDateInput(e.target.value) }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">
+                                  {personalForm.date_of_birth ? formatIsoToUsDate(personalForm.date_of_birth) : '-'}
+                                </span>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</label>
+                              <span className="font-semibold text-slate-500 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center">
                                 {calculateAge(personalForm.date_of_birth)}
                               </span>
                             </div>
 
-                            <InlineEditableSSN
-                              label="SSN"
-                              value={personalForm.ssn}
-                              onSave={val => savePersonalField('ssn', val)}
-                            />
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">SSN</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="text"
+                                  value={personalForm.ssn}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, ssn: e.target.value }))}
+                                  placeholder="e.g. 000-00-0000"
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.ssn || '-'}</span>
+                              )}
+                            </div>
 
-                            <InlineEditablePhone
-                              label="Primary Phone"
-                              value={personalForm.phone}
-                              onSave={val => savePersonalField('phone', val)}
-                            />
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Phone</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="text"
+                                  value={personalForm.phone}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, phone: e.target.value }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.phone || '-'}</span>
+                              )}
+                            </div>
 
-                            <InlineEditablePhone
-                              label="Secondary Phone"
-                              value={personalForm.secondary_phone}
-                              onSave={val => savePersonalField('secondary_phone', val)}
-                            />
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Phone</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="text"
+                                  value={personalForm.secondary_phone}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, secondary_phone: e.target.value }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.secondary_phone || '-'}</span>
+                              )}
+                            </div>
 
-                            <InlineEditableText
-                              label="Primary Email"
-                              type="email"
-                              value={personalForm.email}
-                              onSave={val => savePersonalField('email', val)}
-                            />
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Email</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="email"
+                                  value={personalForm.email}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, email: e.target.value }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{personalForm.email || '-'}</span>
+                              )}
+                            </div>
 
-                            <InlineEditableText
-                              label="Secondary Email"
-                              type="email"
-                              value={personalForm.secondary_email}
-                              onSave={val => savePersonalField('secondary_email', val)}
-                            />
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Email</label>
+                              {isEditingPersonal ? (
+                                <input
+                                  type="email"
+                                  value={personalForm.secondary_email}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, secondary_email: e.target.value }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                />
+                              ) : (
+                                <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{personalForm.secondary_email || '-'}</span>
+                              )}
+                            </div>
 
                             <div className="pt-2">
                               <div className="flex items-center space-x-3 p-4 bg-slate-50 border border-slate-200 rounded-xl">
@@ -2851,12 +2639,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                   type="checkbox"
                                   id="has_co_applicant"
                                   checked={personalForm.has_co_applicant}
-                                  onChange={async (e) => {
-                                    const checked = e.target.checked;
-                                    setPersonalForm(prev => ({ ...prev, has_co_applicant: checked }));
-                                    await savePersonalField('has_co_applicant', checked);
+                                  onChange={e => {
+                                    if (isEditingPersonal) {
+                                      setPersonalForm(prev => ({ ...prev, has_co_applicant: e.target.checked }));
+                                    }
                                   }}
-                                  className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+                                  disabled={!isEditingPersonal}
+                                  className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 disabled:opacity-50"
                                 />
                                 <label htmlFor="has_co_applicant" className="text-sm font-bold text-slate-700 select-none cursor-pointer">
                                   Include Co-Applicant
@@ -2867,94 +2656,185 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
                           {/* Right Column */}
                           <div className="space-y-4">
-                            <InlineEditableSelect
-                              label="Gender"
-                              value={personalForm.gender}
-                              options={[
-                                { label: 'Select Gender', value: '' },
-                                { label: 'Female', value: 'Female' },
-                                { label: 'Male', value: 'Male' },
-                              ]}
-                              onSave={val => savePersonalField('gender', val)}
-                            />
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Gender</label>
+                              {isEditingPersonal ? (
+                                <select
+                                  value={personalForm.gender}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, gender: e.target.value as any }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                >
+                                  <option value="">Select Gender</option>
+                                  <option value="Female">Female</option>
+                                  <option value="Male">Male</option>
+                                </select>
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.gender || '-'}</span>
+                              )}
+                            </div>
 
-                            <InlineEditableSelect
-                              label="Marital Status"
-                              value={personalForm.marital_status}
-                              options={[
-                                { label: 'Select Status', value: '' },
-                                { label: 'Single', value: 'Single' },
-                                { label: 'Married', value: 'Married' },
-                              ]}
-                              onSave={val => savePersonalField('marital_status', val)}
-                            />
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Marital Status</label>
+                              {isEditingPersonal ? (
+                                <select
+                                  value={personalForm.marital_status}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, marital_status: e.target.value as any }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                >
+                                  <option value="">Select Status</option>
+                                  <option value="Single">Single</option>
+                                  <option value="Married">Married</option>
+                                </select>
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.marital_status || '-'}</span>
+                              )}
+                            </div>
 
-                            <InlineEditableSelect
-                              label="Immigration Status"
-                              value={personalForm.immigration_status}
-                              options={[
-                                { label: 'Select Status', value: '' },
-                                { label: 'Resident', value: 'Resident' },
-                                { label: 'Work Permit', value: 'Work Permit' },
-                                { label: 'Citizen', value: 'Citizen' },
-                                { label: 'Other', value: 'Other' },
-                              ]}
-                              onSave={val => savePersonalField('immigration_status', val)}
-                            />
+                            <div>
+                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Immigration Status</label>
+                              {isEditingPersonal ? (
+                                <select
+                                  value={personalForm.immigration_status}
+                                  onChange={e => setPersonalForm(prev => ({ ...prev, immigration_status: e.target.value as any }))}
+                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                >
+                                  <option value="">Select Status</option>
+                                  <option value="Resident">Resident</option>
+                                  <option value="Work Permit">Work Permit</option>
+                                  <option value="Citizen">Citizen</option>
+                                  <option value="Other">Other</option>
+                                </select>
+                              ) : (
+                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.immigration_status || '-'}</span>
+                              )}
+                            </div>
 
-                            {/* CONDITIONAL IMMIGRATION FIELDS */}
+                            {/* CONDITIONAL IMMIGRATION FIELDS DIRECTLY BELOW IMMIGRATION STATUS */}
+
+                            {/* Resident fields */}
                             {personalForm.immigration_status === 'Resident' && (
                               <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                <InlineEditableText
-                                  label="Alien Number"
-                                  value={personalForm.alien_number}
-                                  onSave={val => savePersonalField('alien_number', val)}
-                                />
-                                <InlineEditableText
-                                  label="Card Number"
-                                  value={personalForm.card_number}
-                                  onSave={val => savePersonalField('card_number', val)}
-                                />
-                                <InlineEditableDate
-                                  label="Expiration Date"
-                                  value={personalForm.immigration_expiration_date}
-                                  onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Alien Number</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={personalForm.alien_number}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, alien_number: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.alien_number || '-'}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Card Number</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={personalForm.card_number}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, card_number: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.card_number || '-'}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="date"
+                                      value={personalForm.immigration_expiration_date}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">
+                                      {personalForm.immigration_expiration_date ? new Date(personalForm.immigration_expiration_date + 'T00:00:00').toLocaleDateString() : '-'}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             )}
 
+                            {/* Work Permit fields */}
                             {personalForm.immigration_status === 'Work Permit' && (
                               <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                <InlineEditableText
-                                  label="Card Number"
-                                  value={personalForm.card_number}
-                                  onSave={val => savePersonalField('card_number', val)}
-                                />
-                                <InlineEditableText
-                                  label="USCIS Number"
-                                  value={personalForm.uscis_number}
-                                  onSave={val => savePersonalField('uscis_number', val)}
-                                />
-                                <InlineEditableText
-                                  label="Category"
-                                  value={personalForm.immigration_category}
-                                  onSave={val => savePersonalField('immigration_category', val)}
-                                />
-                                <InlineEditableDate
-                                  label="Expiration Date"
-                                  value={personalForm.immigration_expiration_date}
-                                  onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Card Number</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={personalForm.card_number}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, card_number: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.card_number || '-'}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">USCIS Number</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={personalForm.uscis_number}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, uscis_number: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.uscis_number || '-'}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Category</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={personalForm.immigration_category}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, immigration_category: e.target.value }))}
+                                      placeholder="e.g. C09"
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.immigration_category || '-'}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="date"
+                                      value={personalForm.immigration_expiration_date}
+                                      onChange={e => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: e.target.value }))}
+                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[16px]">
+                                      {personalForm.immigration_expiration_date ? new Date(personalForm.immigration_expiration_date + 'T00:00:00').toLocaleDateString() : '-'}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             )}
 
+                            {/* Other fields */}
                             {personalForm.immigration_status === 'Other' && (
                               <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
-                                <InlineEditableTextarea
-                                  label="Other Immigration Status Description"
-                                  value={personalForm.immigration_other_description}
-                                  onSave={val => savePersonalField('immigration_other_description', val)}
-                                />
+                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Other Immigration Status Description</label>
+                                {isEditingPersonal ? (
+                                  <textarea
+                                    value={personalForm.immigration_other_description}
+                                    onChange={e => setPersonalForm(prev => ({ ...prev, immigration_other_description: e.target.value }))}
+                                    className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all h-20 resize-none"
+                                    placeholder="e.g. Asylee, TPS"
+                                  />
+                                ) : (
+                                  <p className="font-semibold text-slate-700 leading-relaxed text-xs block min-h-[16px] whitespace-pre-line">
+                                    {personalForm.immigration_other_description || '-'}
+                                  </p>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2967,165 +2847,304 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
                               {/* Left Column */}
                               <div className="space-y-4">
-                                <InlineEditableText
-                                  label="Co-Applicant Name"
-                                  value={coApplicantForm.full_name}
-                                  onSave={val => saveCoApplicantField('full_name', val)}
-                                />
-
-                                <InlineEditableDate
-                                  label="DOB"
-                                  value={coApplicantForm.date_of_birth}
-                                  onSave={iso => saveCoApplicantField('date_of_birth', iso || '')}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Co-Applicant Name</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={coApplicantForm.full_name}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, full_name: e.target.value }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.full_name || '-'}</span>
+                                  )}
+                                </div>
 
                                 <div>
-                                  <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</span>
-                                  <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
-                                    {calculateAge(coApplicantForm.date_of_birth)}
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">DOB</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      placeholder="MM/DD/YYYY"
+                                      value={coApplicantForm.date_of_birth.includes('-') ? formatIsoToUsDate(coApplicantForm.date_of_birth) : coApplicantForm.date_of_birth}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, date_of_birth: formatAsDateInput(e.target.value) }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">
+                                      {coApplicantInfo?.date_of_birth ? formatIsoToUsDate(coApplicantInfo.date_of_birth) : '-'}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</label>
+                                  <span className="font-semibold text-slate-500 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center">
+                                    {calculateAge(isEditingPersonal ? coApplicantForm.date_of_birth : (coApplicantInfo?.date_of_birth || ''))}
                                   </span>
                                 </div>
 
-                                <InlineEditableSSN
-                                  label="SSN"
-                                  value={coApplicantForm.ssn}
-                                  onSave={val => saveCoApplicantField('ssn', val)}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">SSN</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={coApplicantForm.ssn}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, ssn: e.target.value }))}
+                                      placeholder="e.g. 000-00-0000"
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.ssn || '-'}</span>
+                                  )}
+                                </div>
 
-                                <InlineEditablePhone
-                                  label="Primary Phone"
-                                  value={coApplicantForm.primary_phone}
-                                  onSave={val => saveCoApplicantField('primary_phone', val)}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Phone</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={coApplicantForm.primary_phone}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, primary_phone: e.target.value }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.primary_phone || '-'}</span>
+                                  )}
+                                </div>
 
-                                <InlineEditablePhone
-                                  label="Secondary Phone"
-                                  value={coApplicantForm.secondary_phone}
-                                  onSave={val => saveCoApplicantField('secondary_phone', val)}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Phone</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="text"
+                                      value={coApplicantForm.secondary_phone}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, secondary_phone: e.target.value }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.secondary_phone || '-'}</span>
+                                  )}
+                                </div>
 
-                                <InlineEditableText
-                                  label="Primary Email"
-                                  type="email"
-                                  value={coApplicantForm.primary_email}
-                                  onSave={val => saveCoApplicantField('primary_email', val)}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Email</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="email"
+                                      value={coApplicantForm.primary_email}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, primary_email: e.target.value }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{coApplicantInfo?.primary_email || '-'}</span>
+                                  )}
+                                </div>
 
-                                <InlineEditableText
-                                  label="Secondary Email"
-                                  type="email"
-                                  value={coApplicantForm.secondary_email}
-                                  onSave={val => saveCoApplicantField('secondary_email', val)}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Email</label>
+                                  {isEditingPersonal ? (
+                                    <input
+                                      type="email"
+                                      value={coApplicantForm.secondary_email}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, secondary_email: e.target.value }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    />
+                                  ) : (
+                                    <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{coApplicantInfo?.secondary_email || '-'}</span>
+                                  )}
+                                </div>
                               </div>
 
                               {/* Right Column */}
                               <div className="space-y-4">
-                                <InlineEditableSelect
-                                  label="Gender"
-                                  value={coApplicantForm.gender}
-                                  options={[
-                                    { label: 'Select Gender', value: '' },
-                                    { label: 'Female', value: 'Female' },
-                                    { label: 'Male', value: 'Male' },
-                                  ]}
-                                  onSave={val => saveCoApplicantField('gender', val)}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Gender</label>
+                                  {isEditingPersonal ? (
+                                    <select
+                                      value={coApplicantForm.gender}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, gender: e.target.value as any }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    >
+                                      <option value="">Select Gender</option>
+                                      <option value="Female">Female</option>
+                                      <option value="Male">Male</option>
+                                    </select>
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.gender || '-'}</span>
+                                  )}
+                                </div>
 
-                                <InlineEditableSelect
-                                  label="Marital Status"
-                                  value={coApplicantForm.marital_status}
-                                  options={[
-                                    { label: 'Select Status', value: '' },
-                                    { label: 'Single', value: 'Single' },
-                                    { label: 'Married', value: 'Married' },
-                                  ]}
-                                  onSave={val => saveCoApplicantField('marital_status', val)}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Marital Status</label>
+                                  {isEditingPersonal ? (
+                                    <select
+                                      value={coApplicantForm.marital_status}
+                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, marital_status: e.target.value as any }))}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    >
+                                      <option value="">Select Status</option>
+                                      <option value="Single">Single</option>
+                                      <option value="Married">Married</option>
+                                    </select>
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.marital_status || '-'}</span>
+                                  )}
+                                </div>
 
-                                <InlineEditableSelect
-                                  label="Immigration Status"
-                                  value={coApplicantForm.immigration_status}
-                                  options={[
-                                    { label: 'Select Status', value: '' },
-                                    { label: 'Resident', value: 'Resident' },
-                                    { label: 'Work Permit', value: 'Work Permit' },
-                                    { label: 'Citizen', value: 'Citizen' },
-                                    { label: 'Other', value: 'Other' },
-                                  ]}
-                                  onSave={val => saveCoApplicantField('immigration_status', val)}
-                                />
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Immigration Status</label>
+                                  {isEditingPersonal ? (
+                                    <select
+                                      value={coApplicantForm.immigration_status}
+                                      onChange={e => {
+                                        const newStatus = e.target.value as any;
+                                        setCoApplicantForm(prev => {
+                                          const next = { ...prev, immigration_status: newStatus };
+                                          if (newStatus === 'Resident') { next.uscis_number = ''; next.immigration_category = ''; next.immigration_other_description = ''; }
+                                          else if (newStatus === 'Work Permit') { next.alien_number = ''; next.immigration_other_description = ''; }
+                                          else if (newStatus === 'Citizen') { next.alien_number = ''; next.card_number = ''; next.uscis_number = ''; next.immigration_category = ''; next.immigration_expiration_date = ''; next.immigration_other_description = ''; }
+                                          else if (newStatus === 'Other') { next.alien_number = ''; next.card_number = ''; next.uscis_number = ''; next.immigration_category = ''; next.immigration_expiration_date = ''; }
+                                          return next;
+                                        });
+                                      }}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                                    >
+                                      <option value="">Select Status</option>
+                                      <option value="Resident">Resident</option>
+                                      <option value="Work Permit">Work Permit</option>
+                                      <option value="Citizen">Citizen</option>
+                                      <option value="Other">Other</option>
+                                    </select>
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.immigration_status || '-'}</span>
+                                  )}
+                                </div>
 
-                                {coApplicantForm.immigration_status === 'Resident' && (
-                                  <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                    <InlineEditableText
-                                      label="Alien Number"
-                                      value={coApplicantForm.alien_number}
-                                      onSave={val => saveCoApplicantField('alien_number', val)}
-                                    />
-                                    <InlineEditableText
-                                      label="Card Number"
-                                      value={coApplicantForm.card_number}
-                                      onSave={val => saveCoApplicantField('card_number', val)}
-                                    />
-                                    <InlineEditableDate
-                                      label="Expiration Date"
-                                      value={coApplicantForm.immigration_expiration_date}
-                                      onSave={iso => saveCoApplicantField('immigration_expiration_date', iso || '')}
-                                    />
-                                  </div>
-                                )}
+                                {/* Co-Applicant Conditional Immigration Fields */}
+                                {['Resident', 'Work Permit', 'Other'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
+                                  <div className="space-y-4 pt-4 border-t border-slate-100">
+                                    {['Resident'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
+                                      <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Alien Number</label>
+                                        {isEditingPersonal ? (
+                                          <input type="text" value={coApplicantForm.alien_number} onChange={e => setCoApplicantForm(prev => ({ ...prev, alien_number: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                                        ) : (
+                                          <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.alien_number || '-'}</span>
+                                        )}
+                                      </div>
+                                    )}
 
-                                {coApplicantForm.immigration_status === 'Work Permit' && (
-                                  <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                    <InlineEditableText
-                                      label="Card Number"
-                                      value={coApplicantForm.card_number}
-                                      onSave={val => saveCoApplicantField('card_number', val)}
-                                    />
-                                    <InlineEditableText
-                                      label="USCIS Number"
-                                      value={coApplicantForm.uscis_number}
-                                      onSave={val => saveCoApplicantField('uscis_number', val)}
-                                    />
-                                    <InlineEditableText
-                                      label="Category"
-                                      value={coApplicantForm.immigration_category}
-                                      onSave={val => saveCoApplicantField('immigration_category', val)}
-                                    />
-                                    <InlineEditableDate
-                                      label="Expiration Date"
-                                      value={coApplicantForm.immigration_expiration_date}
-                                      onSave={iso => saveCoApplicantField('immigration_expiration_date', iso || '')}
-                                    />
-                                  </div>
-                                )}
+                                    {['Resident', 'Work Permit'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
+                                      <>
+                                        {coApplicantForm.immigration_status === 'Work Permit' && (
+                                          <div>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">USCIS Number</label>
+                                            {isEditingPersonal ? (
+                                              <input type="text" value={coApplicantForm.uscis_number} onChange={e => setCoApplicantForm(prev => ({ ...prev, uscis_number: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                                            ) : (
+                                              <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.uscis_number || '-'}</span>
+                                            )}
+                                          </div>
+                                        )}
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Card Number</label>
+                                          {isEditingPersonal ? (
+                                            <input type="text" value={coApplicantForm.card_number} onChange={e => setCoApplicantForm(prev => ({ ...prev, card_number: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                                          ) : (
+                                            <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.card_number || '-'}</span>
+                                          )}
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Expiration Date</label>
+                                          {isEditingPersonal ? (
+                                            <input type="text" placeholder="MM/DD/YYYY" value={coApplicantForm.immigration_expiration_date.includes('-') ? formatIsoToUsDate(coApplicantForm.immigration_expiration_date) : coApplicantForm.immigration_expiration_date} onChange={e => setCoApplicantForm(prev => ({ ...prev, immigration_expiration_date: formatAsDateInput(e.target.value) }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                                          ) : (
+                                            <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">
+                                              {coApplicantInfo?.immigration_expiration_date ? formatIsoToUsDate(coApplicantInfo.immigration_expiration_date) : '-'}
+                                            </span>
+                                          )}
+                                        </div>
+                                        {coApplicantForm.immigration_status === 'Work Permit' && (
+                                          <div>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Category</label>
+                                            {isEditingPersonal ? (
+                                              <input type="text" value={coApplicantForm.immigration_category} onChange={e => setCoApplicantForm(prev => ({ ...prev, immigration_category: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                                            ) : (
+                                              <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.immigration_category || '-'}</span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
 
-                                {coApplicantForm.immigration_status === 'Other' && (
-                                  <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
-                                    <InlineEditableTextarea
-                                      label="Other Description"
-                                      value={coApplicantForm.immigration_other_description}
-                                      onSave={val => saveCoApplicantField('immigration_other_description', val)}
-                                    />
+                                    {['Other'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
+                                      <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Description</label>
+                                        {isEditingPersonal ? (
+                                          <textarea value={coApplicantForm.immigration_other_description} onChange={e => setCoApplicantForm(prev => ({ ...prev, immigration_other_description: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all resize-y min-h-[80px]" placeholder="e.g. Asylee, TPS" />
+                                        ) : (
+                                          <p className="font-semibold text-slate-700 leading-relaxed text-xs block min-h-[16px] whitespace-pre-line">
+                                            {coApplicantInfo?.immigration_other_description || '-'}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>
                             </div>
                           </div>
                         )}
-                      </div>
+                      </form>
                     )}
                   </div>
 
                   {/* SECTION 2: Residence Information Card */}
                   <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                      <div>
-                        <h3 className="text-lg font-extrabold text-slate-900">Residence Information</h3>
-                        <p className="text-xs text-slate-400 mt-0.5">Click any field to edit directly.</p>
-                      </div>
+                      <h3 className="text-lg font-extrabold text-slate-900">Residence Information</h3>
+                      {!isEditingResidence ? (
+                        <button
+                          onClick={() => setIsEditingResidence(true)}
+                          className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1.5 rounded-lg transition-all"
+                        >
+                          Edit Info
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setIsEditingResidence(false);
+                              setResidenceError(null);
+                            }}
+                            className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg transition-all"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={handleSaveResidence}
+                            disabled={savingResidence}
+                            className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-all shadow-md disabled:opacity-50"
+                          >
+                            {savingResidence ? 'Saving...' : 'Save'}
+                          </button>
+                        </div>
+                      )}
                     </div>
+
+                    {residenceError && (
+                      <div className="mb-4 p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm">
+                        {residenceError}
+                      </div>
+                    )}
+
+                    {googleMapsWarning && (
+                      <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-100 text-amber-700 text-xs leading-relaxed">
+                        {googleMapsWarning}
+                      </div>
+                    )}
 
                     {loadingResidence ? (
                       <div className="flex justify-center items-center py-10">
@@ -3135,41 +3154,94 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         </svg>
                       </div>
                     ) : (
-                      <InlineEditableAddress
-                        label=""
-                        data={{
-                          address: residenceForm.address,
-                          city: residenceForm.city,
-                          state: residenceForm.state,
-                          zip_code: residenceForm.zip_code,
-                          county: residenceForm.county,
-                        }}
-                        onSave={async (newData) => {
-                          await saveResidenceField({
-                            address: newData.address,
-                            city: newData.city,
-                            state: newData.state,
-                            zip_code: newData.zip_code,
-                            county: newData.county || '',
-                          });
-                        }}
-                      />
+                      <form onSubmit={handleSaveResidence} className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Address</label>
+                          {isEditingResidence ? (
+                            <input
+                              type="text"
+                              ref={autocompleteInputRef}
+                              value={residenceForm.address}
+                              onChange={e => setResidenceForm(prev => ({ ...prev, address: e.target.value }))}
+                              placeholder="Search address or enter manually"
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                              required
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.address || '-'}</span>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">City</label>
+                          {isEditingResidence ? (
+                            <input
+                              type="text"
+                              value={residenceForm.city}
+                              onChange={e => setResidenceForm(prev => ({ ...prev, city: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                              required
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.city || '-'}</span>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">State</label>
+                          {isEditingResidence ? (
+                            <input
+                              type="text"
+                              value={residenceForm.state}
+                              onChange={e => setResidenceForm(prev => ({ ...prev, state: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.state || '-'}</span>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">County</label>
+                          {isEditingResidence ? (
+                            <input
+                              type="text"
+                              value={residenceForm.county}
+                              onChange={e => setResidenceForm(prev => ({ ...prev, county: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.county || '-'}</span>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ZIP Code</label>
+                          {isEditingResidence ? (
+                            <input
+                              type="text"
+                              value={residenceForm.zip_code}
+                              onChange={e => setResidenceForm(prev => ({ ...prev, zip_code: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                              required
+                            />
+                          ) : (
+                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.zip_code || '-'}</span>
+                          )}
+                        </div>
+                      </form>
                     )}
                   </div>
 
                   {/* SECTION 3: Income Information Card */}
-                  <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
+                  <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                      <div>
-                        <h3 className="text-lg font-extrabold text-slate-900">Income Information</h3>
-                        <p className="text-xs text-slate-400 mt-0.5">Manage income records for health eligibility and tax household.</p>
-                      </div>
+                      <h3 className="text-lg font-extrabold text-slate-900">Income Information</h3>
                       <button
-                        type="button"
-                        onClick={() => setIsAddIncomeOpen(true)}
-                        className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-2 rounded-xl transition-all shadow-md active:scale-95"
+                        onClick={handleOpenAddIncome}
+                        className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-all shadow-md active:scale-95"
                       >
-                        + Add Income
+                        Add Income
                       </button>
                     </div>
 
@@ -3181,554 +3253,57 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         </svg>
                       </div>
                     ) : incomeList.length === 0 ? (
-                      <div className="text-center py-10 border border-dashed border-slate-200 rounded-xl">
-                        <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="text-center py-12">
+                        <svg className="w-10 h-10 text-slate-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <h4 className="text-xs font-bold text-slate-700">No income records registered</h4>
-                        <p className="text-[11px] text-slate-400 mt-0.5">Click "+ Add Income" above to add income details.</p>
+                        <h4 className="text-sm font-semibold text-slate-700">No income records</h4>
+                        <p className="text-xs text-slate-400 mt-0.5">Register client employment or other income sources.</p>
                       </div>
                     ) : (
-                      <div className="space-y-4">
+                      <div className="space-y-3">
                         {incomeList.map((income) => (
                           <div
                             key={income.id}
-                            className="p-4 border border-slate-150 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                            className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                           >
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 flex-1">
-                              <InlineEditableSelect
-                                label="Relationship"
-                                value={income.relationship_to_applicant}
-                                options={[
-                                  { label: 'Applicant', value: 'Applicant' },
-                                  { label: 'Spouse', value: 'Spouse' },
-                                  { label: 'Son/Daughter', value: 'Son/Daughter' },
-                                  { label: 'Mother', value: 'Mother' },
-                                  { label: 'Father', value: 'Father' },
-                                  { label: 'Other', value: 'Other' },
-                                ]}
-                                onSave={val => saveIncomeField(income.id, 'relationship_to_applicant', val)}
-                              />
-
-                              <InlineEditableSelect
-                                label="Income Type"
-                                value={income.income_type}
-                                options={[
-                                  { label: 'W2', value: 'W2' },
-                                  { label: '1099', value: '1099' },
-                                ]}
-                                onSave={val => saveIncomeField(income.id, 'income_type', val)}
-                              />
-
-                              <InlineEditableText
-                                label="Employer / Source"
-                                value={income.employer_name}
-                                onSave={val => saveIncomeField(income.id, 'employer_name', val)}
-                              />
-
-                              <InlineEditablePhone
-                                label="Employer Phone"
-                                value={income.employer_phone}
-                                onSave={val => saveIncomeField(income.id, 'employer_phone', val)}
-                              />
-
-                              <InlineEditableText
-                                label="Amount ($)"
-                                type="number"
-                                value={String(income.income || '')}
-                                onSave={val => saveIncomeField(income.id, 'income', Number(val))}
-                              />
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteIncome(income.id)}
-                              className="text-xs font-bold text-rose-500 hover:text-rose-700 p-1 self-end sm:self-center"
-                              title="Delete income record"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* ADD INCOME MODAL */}
-                    {isAddIncomeOpen && (
-                      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-                        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 border border-slate-100">
-                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                            <h4 className="text-base font-extrabold text-slate-900">Add Income Record</h4>
-                            <button
-                              type="button"
-                              onClick={() => setIsAddIncomeOpen(false)}
-                              className="text-slate-400 hover:text-slate-600 font-bold"
-                            >
-                              ✕
-                            </button>
-                          </div>
-
-                          {incomeError && (
-                            <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs font-semibold">
-                              {incomeError}
-                            </div>
-                          )}
-
-                          <div className="space-y-3 text-xs">
-                            <div>
-                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Relationship</label>
-                              <select
-                                value={incomeRelationship}
-                                onChange={e => setIncomeRelationship(e.target.value as any)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                              >
-                                <option value="Applicant">Applicant</option>
-                                <option value="Spouse">Spouse</option>
-                                <option value="Son/Daughter">Son/Daughter</option>
-                                <option value="Mother">Mother</option>
-                                <option value="Father">Father</option>
-                                <option value="Other">Other</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Income Type</label>
-                              <select
-                                value={incomeType}
-                                onChange={e => setIncomeType(e.target.value as any)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                              >
-                                <option value="W2">W2</option>
-                                <option value="1099">1099</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer / Source</label>
-                              <input
-                                type="text"
-                                value={incomeEmployerName}
-                                onChange={e => setIncomeEmployerName(e.target.value)}
-                                placeholder="e.g. Acme Corp"
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer Phone</label>
-                              <PhoneInput
-                                value={incomeEmployerPhone}
-                                onChange={val => setIncomeEmployerPhone(val)}
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Annual Amount ($)</label>
-                              <input
-                                type="number"
-                                value={incomeAmount}
-                                onChange={e => setIncomeAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                                placeholder="e.g. 55000"
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                                required
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                            <button
-                              type="button"
-                              onClick={() => setIsAddIncomeOpen(false)}
-                              className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 rounded-xl"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleAddIncomeSubmit}
-                              disabled={incomeSaving}
-                              className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs disabled:opacity-50"
-                            >
-                              {incomeSaving ? 'Saving...' : 'Save Income'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'documents' && (
-                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
-                  <div className="border-b border-slate-100 pb-4">
-                    <h3 className="text-lg font-extrabold text-slate-900">Client Documents</h3>
-                    <p className="text-xs text-slate-500 mt-1">Upload and manage files attached to this client profile.</p>
-                  </div>
-
-                  {/* Upload Form with Visible FileDropzone */}
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (!clientDocFile) return;
-                      try {
-                        setClientDocUploading(true);
-                        setClientDocError(null);
-                        const { data: { user } } = await supabase.auth.getUser();
-                        if (!user) throw new Error('Not authenticated');
-
-                        const cleanName = clientDocFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-                        const storagePath = `${user.id}/${clientId}/documents/${Date.now()}-${cleanName}`;
-
-                        const { error: uploadErr } = await supabase.storage
-                          .from('client-documents')
-                          .upload(storagePath, clientDocFile, { upsert: false });
-
-                        if (uploadErr) throw uploadErr;
-
-                        const docTitle = clientDocDisplayName.trim() || clientDocFile.name;
-                        await supabase
-                          .from('client_documents')
-                          .insert({
-                            client_id: clientId,
-                            agent_id: user.id,
-                            display_name: docTitle,
-                            document_type: clientDocType,
-                            description: clientDocDescription.trim() || null,
-                            original_filename: clientDocFile.name,
-                            storage_path: storagePath,
-                            mime_type: clientDocFile.type || null,
-                            size_bytes: clientDocFile.size,
-                          });
-
-                        setClientDocDisplayName('');
-                        setClientDocDescription('');
-                        setClientDocFile(null);
-                        loadClientDocuments();
-                      } catch (err: any) {
-                        console.error('Upload error:', err);
-                        setClientDocError(err?.message || 'Failed to upload document.');
-                      } finally {
-                        setClientDocUploading(false);
-                      }
-                    }}
-                    className="bg-slate-50 border border-slate-200/80 rounded-xl p-5 space-y-4"
-                  >
-                    <h4 className="text-sm font-bold text-slate-800">Upload New Client Document</h4>
-                    {clientDocError && (
-                      <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-600 font-medium">
-                        {clientDocError}
-                      </div>
-                    )}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">Display Name</label>
-                        <input
-                          type="text"
-                          value={clientDocDisplayName}
-                          onChange={(e) => setClientDocDisplayName(e.target.value)}
-                          placeholder="e.g. Drivers License"
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block font-bold text-slate-700 mb-1">Document Type</label>
-                        <select
-                          value={clientDocType}
-                          onChange={(e) => setClientDocType(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500"
-                        >
-                          <option value="Identification">Identification</option>
-                          <option value="Application">Application</option>
-                          <option value="Proof of Income">Proof of Income</option>
-                          <option value="Correspondence">Correspondence</option>
-                          <option value="Other">Other</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Description (Optional)</label>
-                      <textarea
-                        rows={2}
-                        value={clientDocDescription}
-                        onChange={(e) => setClientDocDescription(e.target.value)}
-                        placeholder="Add context or notes..."
-                        className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-800 outline-none focus:border-blue-500"
-                      />
-                    </div>
-
-                    {/* Visible FileDropzone in Client Documents Upload Form */}
-                    <div className="pt-1">
-                      <FileDropzone
-                        label="Drag files here or click to select"
-                        multiple={false}
-                        disabled={clientDocUploading}
-                        selectedFiles={clientDocFile ? [clientDocFile] : []}
-                        onFilesSelected={(files) => {
-                          if (files.length > 0) {
-                            setClientDocFile(files[0]);
-                            if (!clientDocDisplayName) {
-                              setClientDocDisplayName(files[0].name.replace(/\.[^/.]+$/, ''));
-                            }
-                          }
-                        }}
-                        onRemoveFile={() => setClientDocFile(null)}
-                      />
-                    </div>
-
-                    <div className="flex justify-end pt-2">
-                      <button
-                        type="submit"
-                        disabled={clientDocUploading || !clientDocFile}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow transition-all disabled:opacity-50"
-                      >
-                        {clientDocUploading ? 'Uploading...' : 'Upload Document'}
-                      </button>
-                    </div>
-                  </form>
-
-                  {/* Client Documents List */}
-                  {clientDocsLoading ? (
-                    <div className="text-center py-8 text-xs text-slate-400">Loading documents...</div>
-                  ) : clientDocsList.length === 0 ? (
-                    <div className="text-center py-12 border border-dashed border-slate-200 rounded-xl text-slate-400 text-xs">
-                      No documents uploaded for this client yet.
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-100">
-                      {clientDocsList.map((doc) => (
-                        <div key={doc.id} className="py-3 flex items-center justify-between gap-4">
-                          <div>
-                            <h5 className="font-bold text-slate-800 text-sm">{doc.display_name}</h5>
-                            <p className="text-xs text-slate-400 mt-0.5">{doc.original_filename} • {doc.document_type}</p>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={async () => {
-                                const { data } = await supabase.storage.from('client-documents').createSignedUrl(doc.storage_path, 3600);
-                                if (data?.signedUrl) window.open(data.signedUrl, '_blank');
-                              }}
-                              className="text-xs font-bold text-blue-600 hover:underline"
-                            >
-                              Download
-                            </button>
-                            <button
-                              onClick={async () => {
-                                await supabase.storage.from('client-documents').remove([doc.storage_path]);
-                                await supabase.from('client_documents').delete().eq('id', doc.id);
-                                loadClientDocuments();
-                              }}
-                              className="text-xs font-bold text-rose-500 hover:underline"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* CLIENT NOTES TAB CONTENT WITH VISIBLE FILEDROPZONE */}
-              {activeTab === 'notes' && (
-                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
-                  <div className="border-b border-slate-100 pb-4">
-                    <h3 className="text-lg font-extrabold text-slate-900">Client Notes & Attachments</h3>
-                    <p className="text-xs text-slate-500 mt-1">Post notes, thread replies, and attach images or documents.</p>
-                  </div>
-
-                  {/* Top-level Note Composer with Visible FileDropzone */}
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (!clientNoteBody.trim() && clientNoteFiles.length === 0 && clientNotePasted.length === 0) return;
-                      try {
-                        setClientNotePosting(true);
-                        const { data: { user } } = await supabase.auth.getUser();
-                        if (!user) throw new Error('Not authenticated');
-
-                        const { data: noteRec } = await supabase
-                          .from('client_notes')
-                          .insert({
-                            client_id: clientId,
-                            author_id: user.id,
-                            content: clientNoteBody.trim(),
-                          })
-                          .select()
-                          .single();
-
-                        const allFiles = [...clientNoteFiles, ...clientNotePasted.map(p => p.file)];
-                        for (const f of allFiles) {
-                          const cleanName = f.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-                          const storagePath = `${user.id}/${clientId}/notes/${Date.now()}-${cleanName}`;
-                          await supabase.storage.from('client-documents').upload(storagePath, f);
-                        }
-
-                        setClientNoteBody('');
-                        setClientNoteFiles([]);
-                        setClientNotePasted([]);
-                        loadClientNotes();
-                      } catch (err: any) {
-                        console.error('Note post error:', err);
-                      } finally {
-                        setClientNotePosting(false);
-                      }
-                    }}
-                    className="bg-slate-50 border border-slate-200/80 rounded-xl p-5 space-y-4"
-                  >
-                    <textarea
-                      rows={3}
-                      value={clientNoteBody}
-                      onChange={(e) => setClientNoteBody(e.target.value)}
-                      onPaste={(e) => {
-                        const items = e.clipboardData?.items;
-                        if (!items) return;
-                        for (let i = 0; i < items.length; i++) {
-                          if (items[i].type.startsWith('image/')) {
-                            const file = items[i].getAsFile();
-                            if (file) {
-                              const previewUrl = URL.createObjectURL(file);
-                              setClientNotePasted(prev => [...prev, { id: crypto.randomUUID(), file, previewUrl }]);
-                            }
-                          }
-                        }
-                      }}
-                      placeholder="Type a note... (You can paste screenshots here with Ctrl+V)"
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-800 outline-none focus:border-blue-500 resize-none font-sans"
-                    />
-
-                    {/* Pasted Screenshot Previews */}
-                    {clientNotePasted.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {clientNotePasted.map(p => (
-                          <div key={p.id} className="relative bg-white border border-blue-200 rounded-xl p-1 flex items-center gap-2">
-                            <img src={p.previewUrl} alt="pasted screenshot" className="w-10 h-10 object-cover rounded-lg" />
-                            <span className="text-[10px] font-bold text-blue-600">Pasted Image</span>
-                            <button
-                              type="button"
-                              onClick={() => setClientNotePasted(prev => prev.filter(x => x.id !== p.id))}
-                              className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center ml-1"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Visible FileDropzone under top-level note textarea */}
-                    <div className="pt-1">
-                      <FileDropzone
-                        label="Drag attachments here or click to select"
-                        multiple={true}
-                        disabled={clientNotePosting}
-                        selectedFiles={clientNoteFiles}
-                        onFilesSelected={(newFiles) => setClientNoteFiles(prev => [...prev, ...newFiles])}
-                        onRemoveFile={(index) => setClientNoteFiles(prev => prev.filter((_, i) => i !== index))}
-                      />
-                    </div>
-
-                    <div className="flex justify-end pt-2">
-                      <button
-                        type="submit"
-                        disabled={clientNotePosting || (!clientNoteBody.trim() && clientNoteFiles.length === 0 && clientNotePasted.length === 0)}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow transition-all disabled:opacity-50"
-                      >
-                        {clientNotePosting ? 'Posting...' : 'Post Note'}
-                      </button>
-                    </div>
-                  </form>
-
-                  {/* Client Notes List with Threaded Reply Composer featuring FileDropzone */}
-                  {clientNotesLoading ? (
-                    <div className="text-center py-8 text-xs text-slate-400">Loading notes...</div>
-                  ) : clientNotesList.length === 0 ? (
-                    <div className="text-center py-12 border border-dashed border-slate-200 rounded-xl text-slate-400 text-xs">
-                      No notes posted for this client yet.
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {clientNotesList.map(note => (
-                        <div key={note.id} className="bg-slate-50/70 border border-slate-150 rounded-xl p-4 space-y-3">
-                          <div className="flex items-center justify-between text-xs text-slate-400">
-                            <span className="font-bold text-slate-700">{note.author_name || 'Agent'}</span>
-                            <span>{formatDateTimeMMDDYYYY(note.created_at)}</span>
-                          </div>
-                          <p className="text-xs text-slate-800 whitespace-pre-wrap font-sans">{note.content}</p>
-
-                          {/* Reply Toggle & Reply Composer */}
-                          <div>
-                            <button
-                              type="button"
-                              onClick={() => setReplyingNoteId(replyingNoteId === note.id ? null : note.id)}
-                              className="text-xs font-bold text-blue-600 hover:underline"
-                            >
-                              Reply
-                            </button>
-
-                            {replyingNoteId === note.id && (
-                              <div className="mt-3 pl-4 border-l-2 border-blue-200 space-y-3">
-                                <textarea
-                                  rows={2}
-                                  value={clientReplyBody}
-                                  onChange={(e) => setClientReplyBody(e.target.value)}
-                                  placeholder="Write a reply..."
-                                  className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 resize-none font-sans"
-                                />
-
-                                {/* Visible FileDropzone under reply textarea */}
-                                <FileDropzone
-                                  label="Drag reply attachments here or click to select"
-                                  multiple={true}
-                                  disabled={clientNotePosting}
-                                  selectedFiles={clientReplyFiles}
-                                  onFilesSelected={(newFiles) => setClientReplyFiles(prev => [...prev, ...newFiles])}
-                                  onRemoveFile={(index) => setClientReplyFiles(prev => prev.filter((_, i) => i !== index))}
-                                />
-
-                                <div className="flex justify-end gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setReplyingNoteId(null);
-                                      setClientReplyBody('');
-                                      setClientReplyFiles([]);
-                                    }}
-                                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg"
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      if (!clientReplyBody.trim() && clientReplyFiles.length === 0) return;
-                                      const { data: { user } } = await supabase.auth.getUser();
-                                      if (!user) return;
-                                      await supabase.from('client_notes').insert({
-                                        client_id: clientId,
-                                        author_id: user.id,
-                                        parent_note_id: note.id,
-                                        content: clientReplyBody.trim(),
-                                      });
-                                      setReplyingNoteId(null);
-                                      setClientReplyBody('');
-                                      setClientReplyFiles([]);
-                                      loadClientNotes();
-                                    }}
-                                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg"
-                                  >
-                                    Post Reply
-                                  </button>
-                                </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs flex-1">
+                              <div>
+                                <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-0.5">Relationship</span>
+                                <span className="font-semibold text-slate-800">{income.relationship_to_applicant}</span>
                               </div>
-                            )}
+                              <div>
+                                <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-0.5">Employer / Source</span>
+                                <span className="font-semibold text-slate-800 truncate block">{income.employer_name || '-'}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-0.5">Income Type</span>
+                                <span className="font-semibold text-slate-850">{income.income_type}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-0.5">Amount</span>
+                                <strong className="text-emerald-700 font-extrabold text-sm">{formatCurrency(income.income)}</strong>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 justify-end pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                              <button
+                                onClick={() => handleOpenEditIncome(income)}
+                                className="text-xs font-bold text-blue-600 hover:text-blue-800"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteIncome(income.id)}
+                                className="text-xs font-bold text-rose-500 hover:text-rose-700"
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -3763,7 +3338,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
         const groupEventsByDate = (eventsList: ActivityEvent[]) => {
           const groups: { [key: string]: ActivityEvent[] } = {};
           eventsList.forEach(evt => {
-            const dateStr = formatDateMMDDYYYY(evt.created_at);
+            const dateStr = new Date(evt.created_at).toLocaleDateString('en-US', {
+              month: '2-digit',
+              day: '2-digit',
+              year: 'numeric'
+            });
             if (!groups[dateStr]) {
               groups[dateStr] = [];
             }
@@ -3774,7 +3353,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
         const groupedEvents = groupEventsByDate(filteredEvents);
         const uniqueDates = Array.from(new Set(filteredEvents.map(evt => 
-          formatDateMMDDYYYY(evt.created_at)
+          new Date(evt.created_at).toLocaleDateString('en-US', {
+            month: '2-digit',
+            day: '2-digit',
+            year: 'numeric'
+          })
         )));
 
         return (
@@ -3925,19 +3508,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       })()}
 
       {activeTab === 'health' && client && (
-        !isLineEnabled('health') ? (
-          <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
-            <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
-            <p className="text-sm text-slate-300">The <strong>Health</strong> module is disabled for your agent profile.</p>
-          </div>
-        ) : (
-          <HealthPolicyTab
-            clientId={clientId}
-            agentName={getAgentDisplayName()}
-            currentUserId={currentUserId}
-            formatIsoToUsDate={formatIsoToUsDate}
-          />
-        )
+        <HealthPolicyTab
+          clientId={clientId}
+          agentName={getAgentDisplayName()}
+          currentUserId={currentUserId}
+          formatIsoToUsDate={formatIsoToUsDate}
+        />
       )}
             </div>
           </div>
@@ -3968,73 +3544,45 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       {/* Delete Client Modal */}
       {isDeleteClientModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-lg shadow-2xl animate-scale-up border border-slate-100 space-y-5">
-            <div>
-              <h3 className="text-xl font-extrabold text-rose-600">Delete Client Profile</h3>
-              <p className="text-xs text-slate-500 mt-1 font-medium">
-                This will permanently delete the client and all associated data across all modules.
-              </p>
+          <div className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-lg shadow-2xl animate-scale-up border border-slate-100">
+            <h3 className="text-xl font-extrabold text-rose-600 mb-2">Delete Client</h3>
+            <p className="text-sm font-semibold text-slate-800 mb-2">
+              Are you sure you want to permanently delete this client? This action cannot be undone.
+            </p>
+            <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 mb-6">
+              <span className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Client Profile</span>
+              <span className="text-base font-bold text-slate-900">{personalInfo?.full_name || client?.full_name}</span>
             </div>
-
-            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4">
-              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Target Client</span>
-              <span className="text-base font-extrabold text-slate-900">{personalForm.full_name || client?.full_name || 'Client Profile'}</span>
-            </div>
-
-            {/* Informational Warning Summary */}
-            {loadingDeletionSummary ? (
-              <div className="flex justify-center items-center py-6">
-                <svg className="animate-spin h-6 w-6 text-rose-600" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
+            
+            {policies.length > 0 && (
+              <div className="bg-orange-50 border border-orange-100 rounded-xl p-4 mb-6">
+                <span className="block text-xs font-bold uppercase tracking-wider text-orange-600 mb-1">Warning</span>
+                <span className="text-sm font-medium text-orange-800">
+                  This client has {policies.length} policies. Deleting the client will also permanently delete those policies and their related notes, documents, chronology, and attachments.
+                </span>
               </div>
-            ) : deletionSummary ? (
-              <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-4 space-y-2">
-                <span className="block text-xs font-extrabold text-amber-800 uppercase tracking-wider">Permanent Deletion Warning</span>
-                <ul className="text-xs text-amber-900 font-medium space-y-1.5 list-disc list-inside">
-                  {deletionSummary.signed_consents_count > 0 && (
-                    <li>This client has <strong>{deletionSummary.signed_consents_count}</strong> signed consent(s).</li>
-                  )}
-                  {deletionSummary.pending_signatures_count > 0 && (
-                    <li>This client has <strong>{deletionSummary.pending_signatures_count}</strong> pending signature request(s).</li>
-                  )}
-                  {deletionSummary.uploaded_files_count > 0 && (
-                    <li>This client has <strong>{deletionSummary.uploaded_files_count}</strong> uploaded document(s).</li>
-                  )}
-                  {(deletionSummary.health_policies_count + deletionSummary.pc_policies_count) > 0 && (
-                    <li>This client has <strong>{deletionSummary.health_policies_count + deletionSummary.pc_policies_count}</strong> active policy / policies.</li>
-                  )}
-                  {deletionSummary.notes_count > 0 && (
-                    <li>This client has <strong>{deletionSummary.notes_count}</strong> note(s).</li>
-                  )}
-                  <li>All related database records, policies, consents, and files will be permanently deleted.</li>
-                </ul>
-              </div>
-            ) : null}
+            )}
 
             {deleteClientError && (
-              <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-semibold">
+              <div className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-sm font-medium">
                 {deleteClientError}
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+            <div className="flex justify-end gap-3 pt-2">
               <button
-                type="button"
                 onClick={() => setIsDeleteClientModalOpen(false)}
-                className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
+                className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
                 disabled={isDeletingClient}
               >
                 Cancel
               </button>
               <button
-                type="button"
                 onClick={handleDeleteClient}
+                className="px-5 py-2.5 text-sm font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-500/20 rounded-xl transition-all disabled:opacity-50"
                 disabled={isDeletingClient}
-                className="px-5 py-2.5 text-xs font-extrabold text-white bg-rose-600 hover:bg-rose-700 active:scale-95 shadow-md shadow-rose-500/20 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isDeletingClient ? 'Deleting Everything...' : 'Delete Everything'}
+                {isDeletingClient ? 'Deleting...' : 'Delete Client'}
               </button>
             </div>
           </div>
