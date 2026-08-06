@@ -9,7 +9,7 @@ import HealthPolicyTab from '@/components/health/HealthPolicyTab';
 import LifePolicyTab from '@/components/life/LifePolicyTab';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
-import { formatDateMMDDYYYY, formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
+import { formatDateMMDDYYYY, formatDateTimeMMDDYYYY, isoDateToMMDDYYYY } from '@/lib/formatters/date';
 import FileDropzone from '@/components/ui/FileDropzone';
 import DatePicker from '@/components/ui/DatePicker';
 import {
@@ -242,27 +242,25 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [loadingIncome, setLoadingIncome] = useState(true);
 
   // Activity Timeline Interface
-  interface ActivityEvent {
+  interface NormalizedTimelineEvent {
     id: string;
     client_id: string;
-    policy_id: string | null;
-    actor_id: string;
+    policy_id?: string | null;
+    module: 'property_casualty' | 'health' | 'life' | 'consent' | 'client';
+    category: 'policies' | 'notes' | 'documents' | 'consents';
     event_type: string;
     title: string;
     description: string | null;
-    metadata: {
-      policy_number?: string | null;
-      line_of_business?: string | null;
-    };
+    actor_name: string;
     created_at: string;
-    profiles?: {
-      name: string | null;
-      email: string | null;
-    } | null;
+    related_label: string;
+    target_tab: 'policies' | 'health' | 'life' | 'consents' | 'notes' | 'documents' | 'personal-info';
+    target_policy_id?: string | null;
+    dedup_key?: string;
   }
 
   // Timeline & Counter States
-  const [events, setEvents] = useState<ActivityEvent[]>([]);
+  const [events, setEvents] = useState<NormalizedTimelineEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [timelineFilter, setTimelineFilter] = useState<'all' | 'policies' | 'notes' | 'documents' | 'consents'>('all');
@@ -344,58 +342,69 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       updated_at: string;
     }> = [];
 
-    // P&C policies
+    // 1. P&C policies (only active status)
     (policies || []).forEach((p: any) => {
-      cards.push({
-        id: p.id,
-        businessLine: 'property_casualty',
-        businessLineLabel: 'Property & Casualty',
-        policy_type: p.policy_type || 'P&C Policy',
-        company_name: p.writing_company || p.company_name || 'Carrier Unspecified',
-        policy_number: p.policy_number || 'N/A',
-        status: p.status || 'Active',
-        effective_date: p.effective_date || null,
-        expiration_date: p.expiration_date || null,
-        premium: p.total_premium || p.premium || 0,
-        targetTab: 'policies',
-        updated_at: p.updated_at || p.created_at || new Date().toISOString(),
-      });
+      if (p.status === 'Active') {
+        cards.push({
+          id: p.id,
+          businessLine: 'property_casualty',
+          businessLineLabel: 'Property & Casualty',
+          policy_type: p.policy_type || 'P&C Policy',
+          company_name: p.writing_company || p.company_name || 'Carrier Unspecified',
+          policy_number: p.policy_number || 'N/A',
+          status: 'Active',
+          effective_date: p.effective_date || null,
+          expiration_date: p.expiration_date || null,
+          premium: Number(p.total_premium || p.premium || 0),
+          targetTab: 'policies',
+          updated_at: p.updated_at || p.created_at || new Date().toISOString(),
+        });
+      }
     });
 
-    // Health policies
+    // 2. Health policies (only active = true)
     (healthPoliciesOverview || []).forEach((h: any) => {
-      cards.push({
-        id: h.id,
-        businessLine: 'health',
-        businessLineLabel: 'Health',
-        policy_type: h.plan_name || 'Health Plan',
-        company_name: h.company_2026 || 'Marketplace Carrier',
-        policy_number: h.plan_id || h.application_number || 'N/A',
-        status: h.policy_status || (h.active ? 'Active' : 'Cancelled'),
-        effective_date: h.effective_date || null,
-        expiration_date: null,
-        premium: h.plan_cost || 0,
-        targetTab: 'health',
-        updated_at: h.updated_at || h.created_at || new Date().toISOString(),
-      });
+      if (h.active === true) {
+        cards.push({
+          id: h.id,
+          businessLine: 'health',
+          businessLineLabel: 'Health',
+          policy_type: h.plan_name || 'Health Plan',
+          company_name: h.company_2026 || 'Marketplace Carrier',
+          policy_number: h.plan_id || h.application_number || 'N/A',
+          status: 'Active',
+          effective_date: h.effective_date || null,
+          expiration_date: null,
+          premium: Number(h.plan_cost || 0),
+          targetTab: 'health',
+          updated_at: h.updated_at || h.created_at || new Date().toISOString(),
+        });
+      }
     });
 
-    // Life policies
+    // 3. Life policies (only with at least one product having a non-empty company name)
     (lifePolicies || []).forEach((l: any) => {
-      cards.push({
-        id: l.id,
-        businessLine: 'life',
-        businessLineLabel: 'Life Insurance',
-        policy_type: 'Life Policy',
-        company_name: 'Life Carrier',
-        policy_number: l.policy_number || 'N/A',
-        status: l.status || 'Active',
-        effective_date: l.effective_date || null,
-        expiration_date: l.expiration_date || null,
-        premium: 0,
-        targetTab: 'life',
-        updated_at: l.updated_at || l.created_at || new Date().toISOString(),
-      });
+      const prods = l.life_policy_products || [];
+      const qualifyingProd = prods.find(
+        (prod: any) => prod.company && typeof prod.company === 'string' && prod.company.trim().length > 0
+      );
+
+      if (qualifyingProd) {
+        cards.push({
+          id: l.id,
+          businessLine: 'life',
+          businessLineLabel: 'Life Insurance',
+          policy_type: qualifyingProd.product_type || 'Life Policy',
+          company_name: qualifyingProd.company.trim(),
+          policy_number: qualifyingProd.policy_number || 'N/A',
+          status: 'Active',
+          effective_date: qualifyingProd.policy_date || null,
+          expiration_date: null,
+          premium: Number(qualifyingProd.monthly_premium || 0),
+          targetTab: 'life',
+          updated_at: l.updated_at || l.created_at || new Date().toISOString(),
+        });
+      }
     });
 
     return cards.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
@@ -748,6 +757,35 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
   };
 
+  // Fetch Health and Life policies for Overview tab
+  const fetchOverviewPolicies = useCallback(async () => {
+    if (!isValidUuid(clientId)) return;
+    try {
+      const [healthRes, lifeRes] = await Promise.all([
+        supabase
+          .from('health_policies')
+          .select('*')
+          .eq('client_id', clientId)
+          .eq('active', true)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('life_policies')
+          .select('*, life_policy_products(*)')
+          .eq('client_id', clientId)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      if (healthRes.data) {
+        setHealthPoliciesOverview(healthRes.data);
+      }
+      if (lifeRes.data) {
+        setLifePolicies(lifeRes.data);
+      }
+    } catch (err) {
+      console.error('Error fetching overview policies:', err);
+    }
+  }, [clientId]);
+
   // Fetch Personal Information
   
   const savePersonalField = async (fieldName: string, value: any) => {
@@ -873,13 +911,19 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
       if (error) throw error;
       setPersonalInfo(data);
+
+      // Fallback order: client_personal_information.full_name -> clients.full_name -> ''
+      const resolvedName = (data?.full_name && data.full_name.trim().length > 0)
+        ? data.full_name
+        : (client?.full_name || '');
+
       if (data) {
         setPersonalForm({
-          full_name: data.full_name || '',
+          full_name: resolvedName,
           date_of_birth: data.date_of_birth || '',
           ssn: data.ssn || '',
-          email: data.email || '',
-          phone: data.phone || '',
+          email: data.email || client?.email || '',
+          phone: data.phone || client?.phone || '',
           secondary_phone: data.secondary_phone || '',
           secondary_email: data.secondary_email || '',
           has_co_applicant: data.has_co_applicant || false,
@@ -1328,76 +1372,267 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
   }, [policies]);
 
-  // Fetch timeline events
+  // Fetch timeline events across all implemented modules
   const fetchTimelineEvents = async () => {
     try {
       setEventsLoading(true);
       setEventsError(null);
 
-      // 1. Fetch activity_events without profiles relation
-      const { data: eventsData, error: eventsErr } = await supabase
-        .from('activity_events')
-        .select('*')
-        .eq('client_id', clientId)
-        .order('created_at', { ascending: false });
+      // Concurrent queries across all module event tables
+      const [
+        actRes,
+        cNotesRes,
+        cDocsRes,
+        healthRes,
+        lifeRes,
+        consentRes,
+      ] = await Promise.all([
+        supabase.from('activity_events').select('*').eq('client_id', clientId),
+        supabase.from('client_notes').select('*').eq('client_id', clientId),
+        supabase.from('client_documents').select('*').eq('client_id', clientId),
+        supabase.from('health_policies').select('*').eq('client_id', clientId),
+        supabase.from('life_policies').select('*, life_policy_products(*), life_policy_beneficiaries(*), life_policy_documents(*), life_policy_notes(*), life_policy_timeline_events(*)').eq('client_id', clientId),
+        supabase.from('signature_requests').select('*, consent_templates(internal_name, public_title)').eq('client_id', clientId),
+      ]);
 
-      if (eventsErr) throw eventsErr;
+      const normalizedList: NormalizedTimelineEvent[] = [];
 
-      const loadedEvents = (eventsData || []) as ActivityEvent[];
+      // 1. P&C & General Activity Events
+      (actRes.data || []).forEach((evt: any) => {
+        let category: 'policies' | 'notes' | 'documents' | 'consents' = 'policies';
+        if (evt.event_type.startsWith('note_')) category = 'notes';
+        else if (evt.event_type.startsWith('document_')) category = 'documents';
+        else if (evt.event_type.startsWith('consent_') || evt.event_type.startsWith('signed_document_')) category = 'consents';
 
-      // 2. Collect unique actor_id values
-      const actorIds = Array.from(new Set(loadedEvents.map(e => e.actor_id).filter(Boolean)));
-
-      // 3. Fetch profiles separately
-      let profilesMap: { [id: string]: { name?: string | null; full_name?: string | null; email?: string | null } } = {};
-      if (actorIds.length > 0) {
-        const { data: profilesData, error: profilesErr } = await supabase
-          .from('profiles')
-          .select('id, name, email')
-          .in('id', actorIds);
-
-        if (profilesErr) {
-          console.error('Error fetching profiles for timeline:', profilesErr);
-        } else if (profilesData) {
-          profilesData.forEach((p: any) => {
-            profilesMap[p.id] = {
-              name: p.name,
-              full_name: p.full_name || null,
-              email: p.email
-            };
-          });
-        }
-      }
-
-      // Get current logged in user details for fallback
-      const { data: { session } } = await supabase.auth.getSession();
-      const currentUserId = session?.user?.id;
-      const currentUserEmailAddr = session?.user?.email || null;
-
-      // 4. Merge profiles and author displays into events
-      const mergedEvents = loadedEvents.map(evt => {
-        const profile = profilesMap[evt.actor_id];
-        let authorDisplay = 'Agent';
-
-        if (profile) {
-          authorDisplay = profile.full_name || profile.name || profile.email || 'Agent';
-        } else if (currentUserId && evt.actor_id === currentUserId && currentUserEmailAddr) {
-          authorDisplay = currentUserEmailAddr;
+        let targetTab: any = 'policies';
+        if (!evt.policy_id) {
+          if (category === 'notes') targetTab = 'notes';
+          else if (category === 'documents') targetTab = 'documents';
+          else if (category === 'consents') targetTab = 'consents';
+          else targetTab = 'personal-info';
         }
 
-        return {
-          ...evt,
-          profiles: profile ? {
-            name: authorDisplay,
-            email: profile.email || null
-          } : {
-            name: authorDisplay,
-            email: null
-          }
-        };
+        const relatedLabel = evt.policy_id
+          ? `P&C | ${evt.metadata?.line_of_business || 'Policy'} | ${evt.metadata?.policy_number || 'N/A'}`
+          : 'Client | Profile';
+
+        normalizedList.push({
+          id: evt.id,
+          client_id: clientId,
+          policy_id: evt.policy_id || null,
+          module: evt.policy_id ? 'property_casualty' : 'client',
+          category,
+          event_type: evt.event_type,
+          title: evt.title,
+          description: evt.description || null,
+          actor_name: 'Agent',
+          created_at: evt.created_at,
+          related_label: relatedLabel,
+          target_tab: targetTab,
+          target_policy_id: evt.policy_id || null,
+          dedup_key: `act_${evt.id}_${evt.event_type}_${(evt.created_at || '').slice(0, 19)}`,
+        });
       });
 
-      setEvents(mergedEvents);
+      // 2. Health Policies
+      (healthRes.data || []).forEach((h: any) => {
+        normalizedList.push({
+          id: `health_pol_${h.id}`,
+          client_id: clientId,
+          policy_id: h.id,
+          module: 'health',
+          category: 'policies',
+          event_type: 'health_policy_created',
+          title: `Health Policy Registered`,
+          description: `Plan: ${h.plan_name || 'Health Plan'} | Insurer: ${h.company_2026 || 'Marketplace'}`,
+          actor_name: 'Agent',
+          created_at: h.created_at || new Date().toISOString(),
+          related_label: `Health | ${h.company_2026 || 'Marketplace'} | ${h.plan_id || h.application_number || 'N/A'}`,
+          target_tab: 'health',
+          target_policy_id: h.id,
+          dedup_key: `health_${h.id}_created_${(h.created_at || '').slice(0, 19)}`,
+        });
+      });
+
+      // 3. Life Policies & Sub-tables
+      (lifeRes.data || []).forEach((l: any) => {
+        const prods = l.life_policy_products || [];
+        const mainProd = prods[0];
+        const lifeLabel = mainProd
+          ? `Life | ${mainProd.product_type || 'Policy'} | ${mainProd.company || 'Carrier'}`
+          : 'Life | Insurance';
+
+        // Products
+        prods.forEach((p: any) => {
+          normalizedList.push({
+            id: `life_prod_${p.id}`,
+            client_id: clientId,
+            policy_id: l.id,
+            module: 'life',
+            category: 'policies',
+            event_type: 'life_product_added',
+            title: `Life Product: ${p.product_type || 'Product'} (${p.company || 'Carrier'})`,
+            description: `Policy #: ${p.policy_number || 'N/A'} | Premium: $${p.monthly_premium || 0}/mo`,
+            actor_name: 'Agent',
+            created_at: p.created_at || l.created_at || new Date().toISOString(),
+            related_label: `Life | ${p.product_type || 'Product'} | ${p.company || 'Carrier'}`,
+            target_tab: 'life',
+            target_policy_id: l.id,
+            dedup_key: `life_prod_${p.id}_${(p.created_at || '').slice(0, 19)}`,
+          });
+        });
+
+        // Beneficiaries
+        (l.life_policy_beneficiaries || []).forEach((b: any) => {
+          normalizedList.push({
+            id: `life_ben_${b.id}`,
+            client_id: clientId,
+            policy_id: l.id,
+            module: 'life',
+            category: 'policies',
+            event_type: 'life_beneficiary_updated',
+            title: `Life Beneficiary: ${b.name}`,
+            description: `Relationship: ${b.relationship || 'N/A'} | Allocation: ${b.benefit_percentage}%`,
+            actor_name: 'Agent',
+            created_at: b.created_at || l.created_at || new Date().toISOString(),
+            related_label: lifeLabel,
+            target_tab: 'life',
+            target_policy_id: l.id,
+            dedup_key: `life_ben_${b.id}_${(b.created_at || '').slice(0, 19)}`,
+          });
+        });
+
+        // Documents
+        (l.life_policy_documents || []).forEach((d: any) => {
+          normalizedList.push({
+            id: `life_doc_${d.id}`,
+            client_id: clientId,
+            policy_id: l.id,
+            module: 'life',
+            category: 'documents',
+            event_type: 'life_document_uploaded',
+            title: `Life Document Uploaded: ${d.file_name}`,
+            description: `File Size: ${d.file_size ? `${(d.file_size / 1024).toFixed(1)} KB` : 'File'}`,
+            actor_name: 'Agent',
+            created_at: d.created_at || l.created_at || new Date().toISOString(),
+            related_label: lifeLabel,
+            target_tab: 'life',
+            target_policy_id: l.id,
+            dedup_key: `life_doc_${d.id}_${(d.created_at || '').slice(0, 19)}`,
+          });
+        });
+
+        // Notes
+        (l.life_policy_notes || []).forEach((n: any) => {
+          normalizedList.push({
+            id: `life_note_${n.id}`,
+            client_id: clientId,
+            policy_id: l.id,
+            module: 'life',
+            category: 'notes',
+            event_type: 'life_note_added',
+            title: `Life Internal Note Added`,
+            description: n.body,
+            actor_name: 'Agent',
+            created_at: n.created_at || l.created_at || new Date().toISOString(),
+            related_label: lifeLabel,
+            target_tab: 'life',
+            target_policy_id: l.id,
+            dedup_key: `life_note_${n.id}_${(n.created_at || '').slice(0, 19)}`,
+          });
+        });
+
+        // Custom Timeline Events
+        (l.life_policy_timeline_events || []).forEach((t: any) => {
+          normalizedList.push({
+            id: `life_evt_${t.id}`,
+            client_id: clientId,
+            policy_id: l.id,
+            module: 'life',
+            category: 'policies',
+            event_type: t.event_type || 'life_timeline_event',
+            title: t.title,
+            description: t.description || null,
+            actor_name: 'Agent',
+            created_at: t.created_at || new Date().toISOString(),
+            related_label: lifeLabel,
+            target_tab: 'life',
+            target_policy_id: l.id,
+            dedup_key: `life_evt_${t.id}_${(t.created_at || '').slice(0, 19)}`,
+          });
+        });
+      });
+
+      // 4. Consents (signature_requests)
+      (consentRes.data || []).forEach((c: any) => {
+        const templateName = c.consent_templates?.internal_name || c.consent_templates?.public_title || 'Consent Template';
+        normalizedList.push({
+          id: `consent_${c.id}`,
+          client_id: clientId,
+          module: 'consent',
+          category: 'consents',
+          event_type: `consent_${c.status || 'created'}`,
+          title: `Consent Request: ${templateName}`,
+          description: `Status: ${c.status || 'Sent'}`,
+          actor_name: 'Agent',
+          created_at: c.created_at || new Date().toISOString(),
+          related_label: `Consent | ${templateName}`,
+          target_tab: 'consents',
+          dedup_key: `consent_${c.id}_${c.status}_${(c.created_at || '').slice(0, 19)}`,
+        });
+      });
+
+      // 5. Client Notes
+      (cNotesRes.data || []).forEach((n: any) => {
+        normalizedList.push({
+          id: `cnote_${n.id}`,
+          client_id: clientId,
+          module: 'client',
+          category: 'notes',
+          event_type: 'client_note_added',
+          title: `Client Note Added`,
+          description: n.body,
+          actor_name: 'Agent',
+          created_at: n.created_at || new Date().toISOString(),
+          related_label: `Client | Note`,
+          target_tab: 'notes',
+          dedup_key: `cnote_${n.id}_${(n.created_at || '').slice(0, 19)}`,
+        });
+      });
+
+      // 6. Client Documents
+      (cDocsRes.data || []).forEach((d: any) => {
+        normalizedList.push({
+          id: `cdoc_${d.id}`,
+          client_id: clientId,
+          module: 'client',
+          category: 'documents',
+          event_type: 'client_document_uploaded',
+          title: `Client Document: ${d.display_name || d.file_name}`,
+          description: `Category: ${d.document_type || 'General Document'}`,
+          actor_name: 'Agent',
+          created_at: d.created_at || new Date().toISOString(),
+          related_label: `Client | Document`,
+          target_tab: 'documents',
+          dedup_key: `cdoc_${d.id}_${(d.created_at || '').slice(0, 19)}`,
+        });
+      });
+
+      // Deduplicate by dedup_key
+      const seen = new Set<string>();
+      const deduplicatedEvents: NormalizedTimelineEvent[] = [];
+
+      normalizedList.forEach((evt) => {
+        if (!seen.has(evt.dedup_key!)) {
+          seen.add(evt.dedup_key!);
+          deduplicatedEvents.push(evt);
+        }
+      });
+
+      // Sort created_at descending
+      deduplicatedEvents.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      setEvents(deduplicatedEvents);
     } catch (err: any) {
       console.error('Error fetching timeline events:', err);
       setEventsError(err?.message || 'Failed to fetch timeline.');
@@ -1410,13 +1645,17 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     if (activeTab === 'timeline') {
       fetchTimelineEvents();
     }
-  }, [activeTab]);
+    if (activeTab === 'overview') {
+      fetchOverviewPolicies();
+    }
+  }, [activeTab, fetchOverviewPolicies]);
 
   useEffect(() => {
     fetchClientDetails();
     fetchPolicies();
     fetchLinkedCompanyPolicies();
-  }, [clientId]);
+    fetchOverviewPolicies();
+  }, [clientId, fetchOverviewPolicies]);
 
   // Lazy load modules only when tab is active
   useEffect(() => {
@@ -1918,8 +2157,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   };
 
   // computed stats for overview dashboard
-  const activeCount = policies.filter(p => p.status === 'Active').length;
-  const pendingCount = policies.filter(p => p.status === 'Pending').length;
+  const activeCount = consolidatedOverviewCards.length;
+  const pendingCount = 0;
 
   const expiringSoonCount = (() => {
     const today = new Date();
@@ -1928,9 +2167,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     sixtyDaysFromNow.setDate(today.getDate() + 60);
     sixtyDaysFromNow.setHours(23, 59, 59, 999);
 
-    return policies.filter(p => {
-      if (!p.expiration_date || p.status === 'Cancelled') return false;
-      const expDate = new Date(p.expiration_date + 'T00:00:00');
+    return consolidatedOverviewCards.filter((card) => {
+      if (card.businessLine !== 'property_casualty' || !card.expiration_date) return false;
+      const expDate = new Date(card.expiration_date + 'T00:00:00');
       return expDate >= today && expDate <= sixtyDaysFromNow;
     }).length;
   })();
@@ -3823,188 +4062,177 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               )}
 
               {activeTab === 'timeline' && (() => {
-        const filteredEvents = events.filter(evt => {
-          if (timelineFilter === 'policies') {
-            return evt.event_type.startsWith('policy_');
-          }
-          if (timelineFilter === 'notes') {
-            return evt.event_type.startsWith('note_');
-          }
-          if (timelineFilter === 'documents') {
-            return evt.event_type.startsWith('document_');
-          }
-          // Consent events use two prefixes: consent_ for lifecycle moments and
-          // signed_document_ for the generated PDF. Both belong here.
-          if (timelineFilter === 'consents') {
-            return evt.event_type.startsWith('consent_') || evt.event_type.startsWith('signed_document_');
-          }
-          return true;
-        });
+                const filteredEvents = events.filter((evt: NormalizedTimelineEvent) => {
+                  if (timelineFilter === 'policies') return evt.category === 'policies';
+                  if (timelineFilter === 'notes') return evt.category === 'notes';
+                  if (timelineFilter === 'documents') return evt.category === 'documents';
+                  if (timelineFilter === 'consents') return evt.category === 'consents';
+                  return true;
+                });
 
-        // Group by calendar date (MM/DD/YYYY)
-        const groupEventsByDate = (eventsList: ActivityEvent[]) => {
-          const groups: { [key: string]: ActivityEvent[] } = {};
-          eventsList.forEach(evt => {
-            const dateStr = formatDateMMDDYYYY(evt.created_at);
-            if (!groups[dateStr]) {
-              groups[dateStr] = [];
-            }
-            groups[dateStr].push(evt);
-          });
-          return groups;
-        };
+                const groupEventsByDate = (eventsList: NormalizedTimelineEvent[]) => {
+                  const groups: { [key: string]: NormalizedTimelineEvent[] } = {};
+                  eventsList.forEach(evt => {
+                    const dateStr = isoDateToMMDDYYYY(evt.created_at);
+                    if (!groups[dateStr]) {
+                      groups[dateStr] = [];
+                    }
+                    groups[dateStr].push(evt);
+                  });
+                  return groups;
+                };
 
-        const groupedEvents = groupEventsByDate(filteredEvents);
-        const uniqueDates = Array.from(new Set(filteredEvents.map(evt => 
-          formatDateMMDDYYYY(evt.created_at)
-        )));
+                const groupedEvents = groupEventsByDate(filteredEvents);
+                const uniqueDates = Array.from(new Set(filteredEvents.map(evt => isoDateToMMDDYYYY(evt.created_at))));
 
-        return (
-          <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
-            {/* Timeline Header & Filters */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-50 pb-4 gap-4">
-              <h3 className="text-lg font-extrabold text-slate-900 font-sans">Client Activity Timeline</h3>
-              <div className="flex bg-slate-50 border border-slate-200/60 p-1 rounded-xl gap-1">
-                <button
-                  onClick={() => setTimelineFilter('all')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    timelineFilter === 'all'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-slate-550 hover:text-slate-800'
-                  }`}
-                >
-                  All Activity
-                </button>
-                <button
-                  onClick={() => setTimelineFilter('policies')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    timelineFilter === 'policies'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-slate-550 hover:text-slate-800'
-                  }`}
-                >
-                  Policies
-                </button>
-                <button
-                  onClick={() => setTimelineFilter('notes')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    timelineFilter === 'notes'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-slate-550 hover:text-slate-800'
-                  }`}
-                >
-                  Notes
-                </button>
-                <button
-                  onClick={() => setTimelineFilter('documents')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    timelineFilter === 'documents'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-slate-550 hover:text-slate-800'
-                  }`}
-                >
-                  Documents
-                </button>
-                <button
-                  onClick={() => setTimelineFilter('consents')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                    timelineFilter === 'consents'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-slate-550 hover:text-slate-800'
-                  }`}
-                >
-                  Consents
-                </button>
-              </div>
-            </div>
-
-            {/* Timeline Body */}
-            {eventsLoading ? (
-              <div className="flex justify-center items-center py-20">
-                <svg className="animate-spin h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-              </div>
-            ) : eventsError ? (
-              <div className="p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm">
-                {eventsError}
-              </div>
-            ) : filteredEvents.length === 0 ? (
-              <div className="text-center py-20 border border-dashed border-slate-200 rounded-2xl">
-                <svg className="w-12 h-12 text-slate-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-sm text-slate-400 font-sans">No events found for this client.</p>
-              </div>
-            ) : (
-              <div className="relative border-l border-slate-100 ml-4 pl-6 space-y-8">
-                {uniqueDates.map(dateStr => {
-                  const dayEvents = groupedEvents[dateStr] || [];
-                  return (
-                    <div key={dateStr} className="space-y-4">
-                      {/* Date Header */}
-                      <div className="relative -ml-[31px] flex items-center gap-3">
-                        <div className="w-2.5 h-2.5 rounded-full bg-blue-600 ring-4 ring-blue-50" />
-                        <span className="text-xs font-bold text-slate-400 font-sans tracking-wider uppercase bg-white px-2">
-                          {dateStr}
-                        </span>
+                return (
+                  <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 font-sans">
+                    {/* Timeline Header & Filters */}
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-50 pb-4 gap-4">
+                      <h3 className="text-lg font-extrabold text-slate-900 font-sans">Client Activity Timeline</h3>
+                      <div className="flex bg-slate-50 border border-slate-200/60 p-1 rounded-xl gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setTimelineFilter('all')}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                            timelineFilter === 'all'
+                              ? 'bg-white text-blue-600 shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          All Activity
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTimelineFilter('policies')}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                            timelineFilter === 'policies'
+                              ? 'bg-white text-blue-600 shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          Policies
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTimelineFilter('notes')}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                            timelineFilter === 'notes'
+                              ? 'bg-white text-blue-600 shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          Notes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTimelineFilter('documents')}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                            timelineFilter === 'documents'
+                              ? 'bg-white text-blue-600 shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          Documents
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTimelineFilter('consents')}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                            timelineFilter === 'consents'
+                              ? 'bg-white text-blue-600 shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          Consents
+                        </button>
                       </div>
+                    </div>
 
-                      {/* Events List for this date */}
-                      <div className="space-y-4">
-                        {dayEvents.map(evt => {
-                          const actorDisplay = evt.profiles?.name || evt.profiles?.email || 'Agent';
-                          const timeStr = new Date(evt.created_at).toLocaleTimeString('en-US', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: true
-                          });
-
-                          const policyLabel = evt.metadata?.line_of_business || evt.metadata?.policy_number;
-
+                    {/* Timeline Body */}
+                    {eventsLoading ? (
+                      <div className="py-16 text-center text-xs text-slate-400 font-sans">
+                        Loading activity timeline...
+                      </div>
+                    ) : eventsError ? (
+                      <div className="p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs font-semibold">
+                        {eventsError}
+                      </div>
+                    ) : filteredEvents.length === 0 ? (
+                      <div className="text-center py-16 border border-dashed border-slate-200 rounded-2xl text-xs text-slate-400 font-sans">
+                        No timeline events found for this filter.
+                      </div>
+                    ) : (
+                      <div className="relative border-l border-slate-200 ml-3 pl-4 space-y-6">
+                        {uniqueDates.map(dateStr => {
+                          const dayEvents = groupedEvents[dateStr] || [];
                           return (
-                            <div key={evt.id} className="bg-slate-50/50 border border-slate-100/85 rounded-xl p-4 space-y-1.5 shadow-sm hover:shadow-md transition-all">
-                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
-                                <h4 className="text-sm font-extrabold text-slate-800 font-sans">
-                                  {evt.title}
-                                </h4>
-                                <span className="text-[10px] font-bold text-slate-400 font-sans">
-                                  {timeStr} • By {actorDisplay}
+                            <div key={dateStr} className="space-y-3">
+                              {/* Date Header */}
+                              <div className="relative -ml-[23px] flex items-center gap-2">
+                                <div className="w-2.5 h-2.5 rounded-full bg-blue-600 ring-4 ring-white" />
+                                <span className="text-[10px] font-bold text-slate-400 font-sans tracking-wider uppercase bg-white px-1">
+                                  {dateStr}
                                 </span>
                               </div>
-                              {evt.description && (
-                                <p className="text-xs text-slate-655 font-sans">
-                                  {evt.description}
-                                </p>
-                              )}
 
-                              {evt.policy_id && (
-                                <div className="pt-1 text-xs">
-                                  <span className="text-slate-450 font-sans">Related Policy: </span>
-                                  <Link
-                                    href={`/clients/${clientId}/policies/${evt.policy_id}`}
-                                    className="text-blue-650 hover:text-blue-800 font-bold font-sans inline-flex items-center gap-0.5 hover:underline"
-                                  >
-                                    {policyLabel ? `${evt.metadata?.line_of_business || ''}${evt.metadata?.policy_number ? ` | ${evt.metadata?.policy_number}` : ''}` : 'View Policy'}
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
-                                    </svg>
-                                  </Link>
-                                </div>
-                              )}
+                              {/* Events List */}
+                              <div className="space-y-3">
+                                {dayEvents.map(evt => (
+                                  <div key={evt.id} className="bg-slate-50/80 border border-slate-200/80 rounded-xl p-3.5 space-y-1.5 shadow-2xs hover:shadow-xs transition-all font-sans">
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-blue-50 text-blue-700 border border-blue-100">
+                                          {evt.related_label}
+                                        </span>
+                                        <h4 className="text-xs font-extrabold text-slate-800">
+                                          {evt.title}
+                                        </h4>
+                                      </div>
+                                      <span className="text-[10px] font-bold text-slate-400">
+                                        By {evt.actor_name}
+                                      </span>
+                                    </div>
+
+                                    {evt.description && (
+                                      <p className="text-xs text-slate-600 font-normal leading-relaxed">
+                                        {evt.description}
+                                      </p>
+                                    )}
+
+                                    <div className="pt-1 flex justify-end">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleTabChange(evt.target_tab as any);
+                                          if (evt.target_policy_id) {
+                                            setTimeout(() => {
+                                              const targetEl = document.getElementById('life-policy-' + evt.target_policy_id) || document.getElementById('policy-' + evt.target_policy_id);
+                                              if (targetEl) {
+                                                targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                              }
+                                            }, 150);
+                                          }
+                                        }}
+                                        className="text-[11px] font-bold text-blue-600 hover:text-blue-800 bg-white border border-slate-200 px-2.5 py-1 rounded-lg hover:border-blue-200 transition-all flex items-center gap-1 shadow-2xs"
+                                      >
+                                        View Record
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           );
                         })}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+                    )}
+                  </div>
+                );
+              })()}
 
       {activeTab === 'life' && client && (
         !isLineEnabled('life') ? (

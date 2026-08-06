@@ -41,3 +41,5 @@ offsets.forEach(offset => {
 console.log('\n===========================================================');
 console.log(`RESULTS: ${pass} PASSED, ${fail} FAILED`);
 console.log('===========================================================');
+
+export {};

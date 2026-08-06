@@ -903,9 +903,9 @@ export default function HealthPolicyForm({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-xs">
           {/* LEFT COLUMN */}
           <div className="space-y-0 divide-y divide-slate-100/70">
-            {/* 1. Active */}
+            {/* 1. Enrolled */}
             <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Active</span>
+              <span className="text-slate-500 font-medium">Enrolled</span>
               {editingAgencyField === 'active' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -948,7 +948,7 @@ export default function HealthPolicyForm({
                     setAgencyFieldError(null);
                   }}
                   className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Active"
+                  title="Click to edit Enrolled"
                 >
                   {isActive ? 'Yes' : 'No'}
                 </span>

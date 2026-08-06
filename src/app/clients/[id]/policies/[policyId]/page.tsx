@@ -251,6 +251,11 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
   const [unlinkingClient, setUnlinkingClient] = useState(false);
   const [unlinkError, setUnlinkError] = useState<string | null>(null);
 
+  // Client Personal and Residence States
+  const [personalInfo, setPersonalInfo] = useState<any>(null);
+  const [residenceInfo, setResidenceInfo] = useState<any>(null);
+  const [noAddressMessage, setNoAddressMessage] = useState<string | null>(null);
+
   // Fetch client details for sidebar
   const fetchClientDetails = async () => {
     try {
@@ -263,21 +268,39 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
         setCurrentUserId(session.user.id);
       }
 
-      const { data, error } = await supabase
-        .from('clients')
-        .select('id, agent_id, full_name, agency_name, address, email, phone, created_at, updated_at')
-        .eq('id', id)
-        .single();
+      const [clientRes, personalRes, residenceRes] = await Promise.all([
+        supabase
+          .from('clients')
+          .select('*')
+          .eq('id', id)
+          .single(),
+        supabase
+          .from('client_personal_information')
+          .select('*')
+          .eq('client_id', id)
+          .maybeSingle(),
+        supabase
+          .from('client_residence_information')
+          .select('*')
+          .eq('client_id', id)
+          .maybeSingle(),
+      ]);
 
-      if (error) throw error;
-      setClient(data);
-      setClientName(data?.full_name || '');
+      if (clientRes.error) throw clientRes.error;
+      const clientData = clientRes.data;
+      const personalData = personalRes.data || null;
+      const residenceData = residenceRes.data || null;
 
-      if (data?.agent_id) {
+      setClient(clientData);
+      setPersonalInfo(personalData);
+      setResidenceInfo(residenceData);
+      setClientName(personalData?.full_name || clientData?.full_name || '');
+
+      if (clientData?.agent_id) {
         const { data: profileData } = await supabase
           .from('profiles')
           .select('name, email')
-          .eq('id', data.agent_id)
+          .eq('id', clientData.agent_id)
           .maybeSingle();
 
         setAgentProfile(profileData || null);
@@ -1713,6 +1736,78 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
     );
   }
 
+  const handleUseAddressOnFileToggle = (checked: boolean) => {
+    setUseAddressOnFile(checked);
+    if (checked) {
+      let street = '';
+      let c = '';
+      let s = '';
+      let z = '';
+
+      if (residenceInfo?.address && residenceInfo.address.trim().length > 0) {
+        street = residenceInfo.address.trim();
+        c = residenceInfo.city?.trim() || '';
+        s = residenceInfo.state?.trim() || residenceInfo.county?.trim() || '';
+        z = residenceInfo.zip_code?.trim() || '';
+      } else if (client?.address && client.address.trim().length > 0) {
+        street = client.address.trim();
+        c = (client as any).city?.trim() || '';
+        s = (client as any).state?.trim() || '';
+        z = (client as any).zip_code?.trim() || '';
+      }
+
+      const hasSavedAddress = Boolean(street || c || s || z);
+
+      if (hasSavedAddress) {
+        setAddress(street);
+        setCity(c);
+        setState(s);
+        setZipCode(z);
+        setNoAddressMessage(null);
+      } else {
+        setNoAddressMessage('No address is available in Personal Information.');
+      }
+    } else {
+      setNoAddressMessage(null);
+    }
+  };
+
+  const resolvedSidebarName = (personalInfo?.full_name && personalInfo.full_name.trim().length > 0)
+    ? personalInfo.full_name.trim()
+    : (client?.full_name || clientName || '-');
+
+  const resolvedSidebarEmail = (personalInfo?.email && personalInfo.email.trim().length > 0)
+    ? personalInfo.email.trim()
+    : (client?.email || '-');
+
+  const resolvedSidebarPhone = (personalInfo?.phone && personalInfo.phone.trim().length > 0)
+    ? personalInfo.phone.trim()
+    : (client?.phone || '-');
+
+  const formatResidenceAddress = (res: any, cl: any): string => {
+    if (res?.address && res.address.trim().length > 0) {
+      const parts = [
+        res.address.trim(),
+        res.city?.trim(),
+        res.state?.trim() || res.county?.trim(),
+        res.zip_code?.trim(),
+      ].filter(Boolean);
+      return parts.join(', ');
+    }
+    if (cl?.address && cl.address.trim().length > 0) {
+      const parts = [
+        cl.address.trim(),
+        cl.city?.trim(),
+        cl.state?.trim(),
+        cl.zip_code?.trim(),
+      ].filter(Boolean);
+      return parts.join(', ');
+    }
+    return '-';
+  };
+
+  const resolvedSidebarAddress = formatResidenceAddress(residenceInfo, client);
+
   return (
     <DashboardLayout>
       <div className="max-w-7xl mx-auto space-y-6">
@@ -1722,7 +1817,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
           <Link href="/clients" className="hover:text-blue-600 transition-colors">Clients</Link>
           <span>/</span>
           <Link href={`/clients/${id}?section=policies`} className="hover:text-blue-600 transition-colors font-medium">
-            {clientName || 'Client Profile'}
+            {resolvedSidebarName || 'Client Profile'}
           </Link>
           <span>/</span>
           <span className="text-slate-800 font-semibold">{lob || 'Policy details'}</span>
@@ -1742,7 +1837,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client Profile</span>
                 <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">
-                  {loadingClient ? 'Loading...' : client?.full_name || clientName || '-'}
+                  {loadingClient ? 'Loading...' : resolvedSidebarName}
                 </h2>
               </div>
 
@@ -1770,8 +1865,8 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                   {loadingClient ? (
                     <span className="text-sm font-semibold text-slate-500 block mt-1">Loading...</span>
                   ) : (
-                    <a href={`mailto:${client?.email}`} className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline block mt-1 truncate">
-                      {client?.email || '-'}
+                    <a href={`mailto:${resolvedSidebarEmail}`} className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline block mt-1 truncate">
+                      {resolvedSidebarEmail}
                     </a>
                   )}
                 </div>
@@ -1780,15 +1875,15 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                   {loadingClient ? (
                     <span className="text-sm font-semibold text-slate-500 block mt-1">Loading...</span>
                   ) : (
-                    <a href={`tel:${client?.phone}`} className="text-sm font-semibold text-slate-800 hover:text-blue-600 block mt-1">
-                      {client?.phone || '-'}
+                    <a href={`tel:${resolvedSidebarPhone}`} className="text-sm font-semibold text-slate-800 hover:text-blue-600 block mt-1">
+                      {resolvedSidebarPhone}
                     </a>
                   )}
                 </div>
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Address</span>
                   <span className="text-sm font-medium text-slate-700 block mt-1 leading-relaxed">
-                    {loadingClient ? 'Loading...' : client?.address || '-'}
+                    {loadingClient ? 'Loading...' : resolvedSidebarAddress}
                   </span>
                 </div>
               </div>
@@ -2689,12 +2784,18 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                           <input
                             type="checkbox"
                             checked={useAddressOnFile}
-                            onChange={e => setUseAddressOnFile(e.target.checked)}
+                            onChange={e => handleUseAddressOnFileToggle(e.target.checked)}
                             className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
                           />
                           <span className="text-xs font-semibold text-slate-700">Use Address on File</span>
                         </label>
                       </div>
+
+                      {noAddressMessage && (
+                        <div className="p-3 mb-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold leading-relaxed">
+                          {noAddressMessage}
+                        </div>
+                      )}
 
                       {residenceError && (
                         <div className="p-3 mb-4 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 text-xs leading-relaxed">
