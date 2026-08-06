@@ -894,7 +894,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     await fetchCoApplicantInformation();
   };
 
-  const fetchPersonalInformation = async () => {
+  const fetchPersonalInformation = useCallback(async () => {
     try {
       setLoadingPersonal(true);
       if (!isValidUuid(clientId)) {
@@ -955,7 +955,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     } finally {
       setLoadingPersonal(false);
     }
-  };
+  }, [clientId, client]);
 
   // Fetch Residence Information
   const fetchCoApplicantInformation = async () => {
@@ -1023,7 +1023,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
   };
 
-  const fetchResidenceInformation = async () => {
+  const fetchResidenceInformation = useCallback(async () => {
     try {
       setLoadingResidence(true);
       if (!isValidUuid(clientId)) {
@@ -1060,7 +1060,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     } finally {
       setLoadingResidence(false);
     }
-  };
+  }, [clientId, client]);
 
   // Fetch Linked Company Policies
   const fetchLinkedCompanyPolicies = async () => {
@@ -1655,13 +1655,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     fetchPolicies();
     fetchLinkedCompanyPolicies();
     fetchOverviewPolicies();
-  }, [clientId, fetchOverviewPolicies]);
+    fetchPersonalInformation();
+    fetchResidenceInformation();
+  }, [clientId, fetchOverviewPolicies, fetchPersonalInformation, fetchResidenceInformation]);
 
-  // Lazy load modules only when tab is active
+  // Lazy load income/co-applicant modules only when personal-info tab is active
   useEffect(() => {
     if (activeTab === 'personal-info' && client) {
-      fetchPersonalInformation();
-      fetchResidenceInformation();
       fetchIncomeInformation();
       fetchCoApplicantInformation();
     }
@@ -2242,7 +2242,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 <div className="flex items-start justify-between">
                   <div>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client Profile</span>
-                    <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">{personalInfo?.full_name || client?.full_name || '-'}</h2>
+                    <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">
+                      {loadingClient || loadingPersonal
+                        ? 'Loading...'
+                        : ((personalInfo?.full_name && personalInfo.full_name.trim().length > 0)
+                            ? personalInfo.full_name.trim()
+                            : (client?.full_name || '-'))}
+                    </h2>
                   </div>
                   <button
                     type="button"
@@ -2268,7 +2274,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email Address</span>
                   {(() => {
-                    const resolvedEmail = personalInfo?.email || client?.email || '-';
+                    if (loadingClient || loadingPersonal) {
+                      return <span className="text-sm font-semibold text-slate-400 block mt-1">Loading...</span>;
+                    }
+                    const resolvedEmail = (personalInfo?.email && personalInfo.email.trim().length > 0)
+                      ? personalInfo.email.trim()
+                      : ((client?.email && client.email.trim().length > 0) ? client.email.trim() : '-');
+
                     return (
                       <a
                         href={resolvedEmail !== '-' ? `mailto:${resolvedEmail}` : '#'}
@@ -2282,7 +2294,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Phone Number</span>
                   {(() => {
-                    const resolvedPhone = personalInfo?.phone || client?.phone || '-';
+                    if (loadingClient || loadingPersonal) {
+                      return <span className="text-sm font-semibold text-slate-400 block mt-1">Loading...</span>;
+                    }
+                    const resolvedPhone = (personalInfo?.phone && personalInfo.phone.trim().length > 0)
+                      ? personalInfo.phone.trim()
+                      : ((client?.phone && client.phone.trim().length > 0) ? client.phone.trim() : '-');
+
                     return (
                       <a
                         href={resolvedPhone !== '-' ? `tel:${resolvedPhone}` : '#'}
@@ -2295,9 +2313,24 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Address</span>
-                  <span className="text-sm font-medium text-slate-700 block mt-1 leading-relaxed">
-                    {[residenceInfo?.address, residenceInfo?.city, residenceInfo?.state, residenceInfo?.county, residenceInfo?.zip_code].filter(Boolean).join(', ') || '-'}
-                  </span>
+                  {(() => {
+                    if (loadingClient || loadingResidence) {
+                      return <span className="text-sm font-medium text-slate-400 block mt-1">Loading...</span>;
+                    }
+                    const resParts = [residenceInfo?.address, residenceInfo?.city, residenceInfo?.state || residenceInfo?.county, residenceInfo?.zip_code]
+                      .filter(Boolean).map(s => String(s).trim()).filter(Boolean);
+                    const clientAddress = client?.address?.trim();
+
+                    const resolvedAddress = resParts.length > 0
+                      ? resParts.join(', ')
+                      : (clientAddress || '-');
+
+                    return (
+                      <span className="text-sm font-medium text-slate-700 block mt-1 leading-relaxed">
+                        {resolvedAddress}
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 {personalInfo?.has_co_applicant === true && (

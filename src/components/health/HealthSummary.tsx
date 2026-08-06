@@ -48,10 +48,14 @@ export default function HealthSummary({
         )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 text-xs font-sans">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-4 text-xs font-sans">
         <div>
-          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Status</span>
-          <span className="font-semibold text-slate-800 mt-1 block">{policy.policy_status}</span>
+          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">ENROLLED</span>
+          <span className="font-semibold text-slate-800 mt-1 block">{policy.active ? 'Yes' : 'No'}</span>
+        </div>
+        <div>
+          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">POLICY STATUS</span>
+          <span className="font-semibold text-slate-800 mt-1 block">{policy.policy_status || '-'}</span>
         </div>
         <div>
           <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Company 2026</span>
