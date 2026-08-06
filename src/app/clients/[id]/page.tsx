@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
+import LifePolicyTab from '@/components/life/LifePolicyTab';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
 import { formatDateMMDDYYYY, formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
@@ -165,20 +166,33 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   };
 
   // Section mapping & URL-driven tab state
-  const rawSection = searchParams.get('section');
-  const validSections = ['overview', 'personal-information', 'personal-info', 'policies', 'documents', 'notes', 'consents', 'timeline', 'health'];
+  const rawSection = searchParams.get('section') || searchParams.get('tab');
+  const validSections = ['overview', 'personal-information', 'personal-info', 'policies', 'documents', 'notes', 'consents', 'timeline', 'health', 'life'];
   const normalizedSection = validSections.includes(rawSection || '')
     ? (rawSection === 'personal-info' ? 'personal-information' : rawSection!)
     : 'overview';
 
-  const activeTab = (normalizedSection === 'personal-information' ? 'personal-info' : normalizedSection) as 'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health';
+  const activeTab = (normalizedSection === 'personal-information' ? 'personal-info' : normalizedSection) as 'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health' | 'life';
+
+  // Temporary diagnostic log as requested
+  if (typeof window !== 'undefined') {
+    console.log('[ClientTabNav Diagnostic]', {
+      rawSection,
+      normalizedSection,
+      activeTab,
+      isLifeRendered: activeTab === 'life',
+      isLifeEnabled: isLineEnabled('life')
+    });
+  }
 
   const handleTabChange = useCallback((tab: string) => {
+    console.log('[ClientTabNav] Clicked tab key:', tab);
     const targetSection = tab === 'personal-info' ? 'personal-information' : tab;
-    const currentSectionInUrl = searchParams.get('section');
+    const currentSectionInUrl = searchParams.get('section') || searchParams.get('tab');
     if (currentSectionInUrl !== targetSection) {
       const paramsObj = new URLSearchParams(searchParams.toString());
       paramsObj.set('section', targetSection);
+      if (paramsObj.has('tab')) paramsObj.set('tab', targetSection);
       router.push(`/clients/${clientId}?${paramsObj.toString()}`);
     }
   }, [clientId, router, searchParams]);
@@ -214,6 +228,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   // Master Client & Policies
   const [client, setClient] = useState<Client | null>(null);
   const [policies, setPolicies] = useState<Policy[]>([]);
+  const [lifePolicies, setLifePolicies] = useState<any[]>([]);
+  const [healthPoliciesOverview, setHealthPoliciesOverview] = useState<any[]>([]);
   const [loadingClient, setLoadingClient] = useState(true);
   const [loadingPolicies, setLoadingPolicies] = useState(true);
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('Agent');
@@ -311,6 +327,79 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [loadingDeletionSummary, setLoadingDeletionSummary] = useState<boolean>(false);
   const [isDeleteClientModalOpen, setIsDeleteClientModalOpen] = useState(false);
   const [deleteClientError, setDeleteClientError] = useState<string | null>(null);
+  // Build unified consolidated policy summary cards for Overview tab
+  const consolidatedOverviewCards = (() => {
+    const cards: Array<{
+      id: string;
+      businessLine: 'property_casualty' | 'health' | 'life';
+      businessLineLabel: string;
+      policy_type: string;
+      company_name: string;
+      policy_number: string;
+      status: string;
+      effective_date: string | null;
+      expiration_date: string | null;
+      premium: number;
+      targetTab: 'policies' | 'health' | 'life';
+      updated_at: string;
+    }> = [];
+
+    // P&C policies
+    (policies || []).forEach((p: any) => {
+      cards.push({
+        id: p.id,
+        businessLine: 'property_casualty',
+        businessLineLabel: 'Property & Casualty',
+        policy_type: p.policy_type || 'P&C Policy',
+        company_name: p.writing_company || p.company_name || 'Carrier Unspecified',
+        policy_number: p.policy_number || 'N/A',
+        status: p.status || 'Active',
+        effective_date: p.effective_date || null,
+        expiration_date: p.expiration_date || null,
+        premium: p.total_premium || p.premium || 0,
+        targetTab: 'policies',
+        updated_at: p.updated_at || p.created_at || new Date().toISOString(),
+      });
+    });
+
+    // Health policies
+    (healthPoliciesOverview || []).forEach((h: any) => {
+      cards.push({
+        id: h.id,
+        businessLine: 'health',
+        businessLineLabel: 'Health',
+        policy_type: h.plan_name || 'Health Plan',
+        company_name: h.company_2026 || 'Marketplace Carrier',
+        policy_number: h.plan_id || h.application_number || 'N/A',
+        status: h.policy_status || (h.active ? 'Active' : 'Cancelled'),
+        effective_date: h.effective_date || null,
+        expiration_date: null,
+        premium: h.plan_cost || 0,
+        targetTab: 'health',
+        updated_at: h.updated_at || h.created_at || new Date().toISOString(),
+      });
+    });
+
+    // Life policies
+    (lifePolicies || []).forEach((l: any) => {
+      cards.push({
+        id: l.id,
+        businessLine: 'life',
+        businessLineLabel: 'Life Insurance',
+        policy_type: 'Life Policy',
+        company_name: 'Life Carrier',
+        policy_number: l.policy_number || 'N/A',
+        status: l.status || 'Active',
+        effective_date: l.effective_date || null,
+        expiration_date: l.expiration_date || null,
+        premium: 0,
+        targetTab: 'life',
+        updated_at: l.updated_at || l.created_at || new Date().toISOString(),
+      });
+    });
+
+    return cards.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  })();
   const [personalForm, setPersonalForm] = useState<ClientPersonalInformation>({
     full_name: '',
     date_of_birth: '',
@@ -2216,6 +2305,18 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       Property & Casualty
                     </button>
                   )}
+                  {isLineEnabled('life') && (
+                    <button
+                      onClick={() => handleTabChange('life')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        activeTab === 'life'
+                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                      }`}
+                    >
+                      Life
+                    </button>
+                  )}
                   {isLineEnabled('health') && (
                     <button
                       onClick={() => handleTabChange('health')}
@@ -2339,110 +2440,91 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         </div>
                       </div>
 
-                      {/* Recent Policies Section */}
-                      <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
-                        <div className="flex items-center justify-between border-b border-slate-50 pb-4">
-                          <h4 className="text-base font-extrabold text-slate-900">Recent Policies</h4>
-                          <button
-                            onClick={() => handleTabChange('policies')}
-                            className="text-xs font-bold text-blue-650 hover:text-blue-850 transition-colors flex items-center gap-1"
-                          >
-                            View All Policies
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                            </svg>
-                          </button>
+                      {/* Consolidated Overview Policies Section */}
+                      <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4 font-sans">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                          <div>
+                            <h4 className="text-base font-extrabold text-slate-900">Active Client Policies</h4>
+                            <p className="text-xs text-slate-400">Consolidated policies across Health, Property & Casualty, and Life Insurance</p>
+                          </div>
+                          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                            {consolidatedOverviewCards.length} Total Policy / Policies
+                          </span>
                         </div>
 
-                        {recentPolicies.length === 0 ? (
-                          <p className="text-sm text-slate-400 text-center py-6">No recent policies found.</p>
+                        {consolidatedOverviewCards.length === 0 ? (
+                          <p className="text-xs text-slate-400 text-center py-8 border border-dashed border-slate-200 rounded-xl">
+                            No policies recorded for this client yet.
+                          </p>
                         ) : (
                           <div className="space-y-3">
-                            {recentPolicies.map((policy) => (
+                            {consolidatedOverviewCards.map((card) => (
                               <div
-                                key={policy.id}
-                                className="bg-slate-50/50 border border-slate-100 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                                key={card.id}
+                                className="bg-slate-50/70 border border-slate-200/80 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-slate-300 transition-all"
                               >
                                 <div className="space-y-1.5 min-w-0 flex-1">
-                                  {/* Line 1: Status & LOB & Number */}
+                                  {/* Badges */}
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex-shrink-0 ${
-                                      policy.status === 'Active'
-                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                        : policy.status === 'Cancelled'
-                                        ? 'bg-rose-50 text-rose-700 border-rose-100'
-                                        : policy.status === 'Expired'
-                                        ? 'bg-slate-50 text-slate-650 border-slate-200'
-                                        : 'bg-amber-50 text-amber-700 border-amber-100'
-                                    }`}>
-                                      {policy.status || 'Active'}
+                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                      {card.businessLineLabel}
                                     </span>
-
-                                    <span className="font-extrabold text-slate-800 text-sm">
-                                      {policy.policy_type}
-                                      {policy.policy_subtype ? ` (${policy.policy_subtype})` : ''}
-                                      {policy.policy_number ? ` | ${policy.policy_number}` : ''}
+                                    <span
+                                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                        card.status === 'Active'
+                                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                          : card.status === 'Cancelled'
+                                          ? 'bg-rose-50 text-rose-700 border border-rose-100'
+                                          : 'bg-amber-50 text-amber-700 border border-amber-100'
+                                      }`}
+                                    >
+                                      {card.status}
+                                    </span>
+                                    <span className="font-extrabold text-slate-900 text-sm">
+                                      {card.policy_type} {card.policy_number !== 'N/A' ? '| #' + card.policy_number : ''}
                                     </span>
                                   </div>
 
-                                  {/* Line 2: Company */}
-                                  <div className="text-xs text-slate-400 font-medium">
-                                    {policy.writing_company ?? policy.company_name ?? 'Company not specified'}
+                                  {/* Company */}
+                                  <div className="text-xs text-slate-500 font-medium">
+                                    Carrier/Company: <strong>{card.company_name}</strong>
                                   </div>
 
-                                  {/* Line 3, 4, 5: Term, Premium, Transaction Type */}
-                                  <div className="flex flex-col gap-1 text-xs text-slate-550">
-                                    <div>
-                                      <span className="text-slate-400">Term: </span>
-                                      <span>
-                                        {policy.effective_date && policy.expiration_date
-                                          ? `${formatIsoToUsDate(policy.effective_date)} to ${formatIsoToUsDate(policy.expiration_date)}`
-                                          : 'Not provided'}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <span className="text-slate-400">Premium: </span>
-                                      <strong className="text-slate-800">{formatCurrency(policy.total_premium ?? policy.premium)}</strong>
-                                    </div>
-                                    <div>
-                                      <span className="text-slate-400">Transaction Type: </span>
-                                      <strong>{policy.transaction_type || 'New'}</strong>
-                                    </div>
-
-                                    {/* Neutral Linked Personal Client Block for Company Policy Owners */}
-                                    {policy.linkedPersonalClient && (
-                                      <div className="mt-2.5 bg-slate-100/90 border border-slate-200/90 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                                        <div className="space-y-0.5 min-w-0">
-                                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">Linked Personal Client</span>
-                                          <div className="flex items-center gap-2 truncate">
-                                            <strong className="text-slate-900 font-bold truncate">{policy.linkedPersonalClient.full_name}</strong>
-                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-white text-slate-700 border border-slate-200 flex-shrink-0">
-                                              {policy.linkedPersonalClient.role === 'co_applicant' ? 'Co-Applicant' : 'Main Applicant'}
-                                            </span>
-                                          </div>
-                                        </div>
-                                        <Link
-                                          href={`/clients/${policy.linkedPersonalClient.id}`}
-                                          className="text-xs font-bold text-slate-700 hover:text-blue-600 bg-white hover:bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg transition-all shadow-xs inline-flex items-center justify-center flex-shrink-0"
-                                        >
-                                          View Client Profile
-                                        </Link>
+                                  {/* Dates & Premium */}
+                                  <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+                                    {card.effective_date && (
+                                      <div>
+                                        Term: <strong className="text-slate-800">{formatIsoToUsDate(card.effective_date)} {card.expiration_date ? 'to ' + formatIsoToUsDate(card.expiration_date) : ''}</strong>
+                                      </div>
+                                    )}
+                                    {card.premium > 0 && (
+                                      <div>
+                                        Premium: <strong className="text-emerald-600">{formatCurrency(card.premium)}</strong>
                                       </div>
                                     )}
                                   </div>
                                 </div>
 
-                                {/* Actions / Placeholders */}
-                                <div className="flex items-center gap-4 sm:justify-end text-xs text-slate-400 whitespace-nowrap">
-                                  <span>Documents: {docCounts[policy.id] || 0}</span>
-                                  <span>|</span>
-                                  <span>Notes: {noteCounts[policy.id] || 0}</span>
-                                  <Link
-                                    href={`/clients/${clientId}/policies/${policy.id}`}
-                                    className="text-blue-650 hover:text-blue-850 font-bold ml-2 bg-white border border-slate-100 px-3 py-1.5 rounded-lg shadow-sm hover:shadow transition-all"
+                                {/* Actions */}
+                                <div className="flex items-center gap-3 justify-end flex-shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleTabChange(card.targetTab);
+                                      setTimeout(() => {
+                                        const targetEl = document.getElementById('life-policy-' + card.id) || document.getElementById('policy-' + card.id);
+                                        if (targetEl) {
+                                          targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        }
+                                      }, 150);
+                                    }}
+                                    className="text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-white border border-slate-200 hover:border-indigo-200 px-4 py-2 rounded-xl shadow-xs transition-all flex items-center gap-1"
                                   >
-                                    View
-                                  </Link>
+                                    View Policy
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                                    </svg>
+                                  </button>
                                 </div>
                               </div>
                             ))}
@@ -3923,6 +4005,20 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           </div>
         );
       })()}
+
+      {activeTab === 'life' && client && (
+        !isLineEnabled('life') ? (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
+            <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
+            <p className="text-sm text-slate-300">The <strong>Life</strong> module is disabled for your agent profile.</p>
+          </div>
+        ) : (
+          <LifePolicyTab
+            clientId={clientId}
+            onPoliciesChanged={() => { fetchPersonalInformation(); }}
+          />
+        )
+      )}
 
       {activeTab === 'health' && client && (
         !isLineEnabled('health') ? (

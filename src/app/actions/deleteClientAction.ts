@@ -197,7 +197,22 @@ export async function deleteClientSecure(clientId: string, accessToken: string) 
       }
     }
 
-    // C. Signature Requests & Signature Files
+    // C. Life Policy Documents & Notes
+    const { data: lifePolicies } = await adminSupabase.from('life_policies').select('id').eq('client_id', clientId);
+    if (lifePolicies && lifePolicies.length > 0) {
+      const lpIds = lifePolicies.map((lp: any) => lp.id);
+      const { data: lpDocs } = await adminSupabase.from('life_policy_documents').select('storage_path').in('life_policy_id', lpIds);
+      (lpDocs || []).forEach((d: any) => addPath('life-documents', d.storage_path));
+
+      const { data: lpNotes } = await adminSupabase.from('life_policy_notes').select('id').in('life_policy_id', lpIds);
+      if (lpNotes && lpNotes.length > 0) {
+        const lpnIds = lpNotes.map((n: any) => n.id);
+        const { data: lpAtts } = await adminSupabase.from('life_policy_note_attachments').select('storage_path').in('note_id', lpnIds);
+        (lpAtts || []).forEach((a: any) => addPath('life-documents', a.storage_path));
+      }
+    }
+
+    // D. Signature Requests & Signature Files
     const { data: sigReqs } = await adminSupabase.from('signature_requests').select('id, final_file_path').eq('client_id', clientId);
     if (sigReqs && sigReqs.length > 0) {
       (sigReqs || []).forEach((r: any) => addPath('signed-documents', r.final_file_path));
