@@ -809,6 +809,14 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       if (error) throw error;
     }
 
+    if (['full_name', 'email', 'phone'].includes(fieldName) && value && String(value).trim().length > 0) {
+      await supabase
+        .from('clients')
+        .update({ [fieldName]: String(value).trim(), updated_at: new Date().toISOString() })
+        .eq('id', clientId);
+      await fetchClientDetails();
+    }
+
     setPersonalForm(prev => ({ ...prev, [fieldName]: value }));
     await fetchPersonalInformation();
   };

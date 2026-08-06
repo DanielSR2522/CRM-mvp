@@ -12,6 +12,7 @@ import {
 } from '@/lib/auth/navigationIntent';
 import DashboardArrivalGuard from '@/components/DashboardArrivalGuard';
 import { recordNavTrace } from '@/lib/auth/navTrace';
+import GlobalCrmSearch from '@/components/search/GlobalCrmSearch';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -361,21 +362,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         
         {/* Top White Navigation Bar */}
         <header className="hidden md:flex items-center justify-between px-6 py-2.5 bg-white border-b border-[#DCE2EA] sticky top-0 z-30 shadow-2xs">
-          {/* Search Field */}
-          <div className="w-80 relative">
-            <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#7C8799]">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            </span>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search clients, policies, leads..."
-              className="w-full bg-[#F8FAFC] border border-[#DCE2EA] focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] rounded-md pl-9 pr-3 py-1.5 text-xs text-[#172033] placeholder-[#7C8799] outline-none transition-all"
-            />
-          </div>
+          {/* Agent-Scoped Global Search */}
+          <GlobalCrmSearch />
 
           {/* User Info & Quick Actions */}
           <div className="flex items-center gap-3">

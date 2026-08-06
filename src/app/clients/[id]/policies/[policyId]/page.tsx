@@ -1315,36 +1315,9 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
 
       if (insertError) throw insertError;
 
-      // Upload pending attachments if any
-      const hasPending = pendingAttachments.length > 0;
-      let attachResult: { succeeded: string[]; failed: string[] } = { succeeded: [], failed: [] };
-
-      if (hasPending && insertedNote?.id) {
-        attachResult = await uploadNoteAttachments(
-          insertedNote.id,
-          policyId,
-          id,
-          session.user.id,
-          pendingAttachments
-        );
-
-        // Cleanup preview URLs
-        pendingAttachments.forEach(p => URL.revokeObjectURL(p.previewUrl));
-        setPendingAttachments([]);
-      }
-
       setNewNoteContent('');
       fetchNotes();
-
-      // Build success message
-      if (hasPending && attachResult.failed.length > 0) {
-        setNoteActionSuccess('Note added, but some attachments failed.');
-        setNoteActionError(`Failed to upload: ${attachResult.failed.join(', ')}`);
-      } else if (hasPending && attachResult.succeeded.length > 0) {
-        setNoteActionSuccess(`Note added with ${attachResult.succeeded.length} image(s).`);
-      } else {
-        setNoteActionSuccess('Note added successfully.');
-      }
+      setNoteActionSuccess('Note added successfully.');
 
       // Log activity event (non-blocking)
       try {
@@ -2425,60 +2398,15 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                   <textarea
                     value={newNoteContent}
                     onChange={e => setNewNoteContent(e.target.value)}
-                    onPaste={handleNotePaste}
-                    placeholder="Add a note to this policy... (You can paste screenshots here with Ctrl+V)"
+                    placeholder="Add a note to this policy..."
                     rows={3}
                     className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-3 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all resize-none font-sans"
                   />
 
-                  {/* Pending attachments previews */}
-                  {pendingAttachments.length > 0 && (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                      {pendingAttachments.map((att, idx) => (
-                        <div key={idx} className="relative group bg-white border border-slate-200 rounded-lg p-2 flex flex-col items-center">
-                          <img
-                            src={att.previewUrl}
-                            alt={att.displayName}
-                            className="w-full h-20 object-cover rounded-md mb-1.5"
-                          />
-                          <span className="text-[10px] text-slate-500 truncate w-full text-center font-sans" title={att.displayName}>
-                            {att.displayName}
-                          </span>
-                          <span className="text-[9px] text-slate-400 font-sans">
-                            {formatFileSize(att.file.size)}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => removePendingAttachment(idx)}
-                            className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full p-1 shadow-md hover:bg-rose-600 transition-colors active:scale-95"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="pt-2">
-                    <FileDropzone
-                      label="Drag files here or click to select"
-                      onFilesSelected={(files) => {
-                        files.forEach((f) => {
-                          const previewUrl = URL.createObjectURL(f);
-                          setPendingAttachments((prev) => [...prev, { file: f, displayName: f.name, previewUrl }]);
-                        });
-                      }}
-                      disabled={savingNote}
-                      multiple={true}
-                    />
-                  </div>
-
                   <div className="flex justify-end pt-2">
                     <button
                       type="submit"
-                      disabled={savingNote || (!newNoteContent.trim() && pendingAttachments.length === 0)}
+                      disabled={savingNote || !newNoteContent.trim()}
                       className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 disabled:opacity-50"
                     >
                       {savingNote ? 'Adding...' : 'Add Note'}
