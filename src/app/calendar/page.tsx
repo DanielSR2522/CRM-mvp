@@ -10,7 +10,6 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
-import esLocale from '@fullcalendar/core/locales/es';
 import type {
   ExtendedCalendarEventProps,
   AppointmentStatus,
@@ -579,14 +578,13 @@ export default function CalendarPage() {
                   right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
                 }}
                 buttonText={{
-                  today: 'Hoy',
-                  month: 'Mes',
-                  week: 'Semana',
-                  day: 'Día',
-                  list: 'Agenda',
+                  today: 'Today',
+                  month: 'Month',
+                  week: 'Week',
+                  day: 'Day',
+                  list: 'List',
                 }}
-                locales={[esLocale]}
-                locale="es"
+                locale="en"
                 firstDay={0}
                 selectable={true}
                 select={handleDateSelect}

@@ -11,6 +11,19 @@ import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateU
 import { formatDateMMDDYYYY, formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
 import FileDropzone from '@/components/ui/FileDropzone';
 import DatePicker from '@/components/ui/DatePicker';
+import {
+  InlineEditableText,
+  InlineEditablePhone,
+  InlineEditableSSN,
+  InlineEditableDate,
+  InlineEditableSelect,
+  InlineEditableTextarea,
+  InlineEditableAddress,
+} from '@/components/common/inline-edit';
+import SSNInput from '@/components/common/SSNInput';
+import PhoneInput from '@/components/common/PhoneInput';
+import { formatSSN } from '@/lib/formatters/ssn';
+import { formatUSPhone } from '@/lib/formatters/phone';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 
 declare global {
@@ -643,6 +656,113 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   };
 
   // Fetch Personal Information
+  
+  const savePersonalField = async (fieldName: string, value: any) => {
+    if (!isValidUuid(clientId)) return;
+    const { data: existing } = await supabase
+      .from('client_personal_information')
+      .select('id')
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    if (existing) {
+      const { error } = await supabase
+        .from('client_personal_information')
+        .update({ [fieldName]: value, updated_at: new Date().toISOString() })
+        .eq('client_id', clientId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('client_personal_information')
+        .insert({ client_id: clientId, [fieldName]: value });
+      if (error) throw error;
+    }
+
+    setPersonalForm(prev => ({ ...prev, [fieldName]: value }));
+    await fetchPersonalInformation();
+  };
+
+  
+
+
+  const saveResidenceField = async (fieldOrObject: string | Record<string, any>, val?: any) => {
+    if (!isValidUuid(clientId)) return;
+    let patch: Record<string, any> = {};
+    if (typeof fieldOrObject === 'string') {
+      patch[fieldOrObject] = val;
+    } else {
+      patch = { ...fieldOrObject };
+    }
+
+    const { data: existing } = await supabase
+      .from('client_residence_information')
+      .select('id')
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    if (existing) {
+      const { data: updated, error } = await supabase
+        .from('client_residence_information')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('client_id', clientId)
+        .select('*')
+        .maybeSingle();
+
+      if (error || !updated) throw error || new Error('Zero rows returned from residence update.');
+      setResidenceInfo(updated);
+    } else {
+      const { data: inserted, error } = await supabase
+        .from('client_residence_information')
+        .insert({ client_id: clientId, ...patch })
+        .select('*')
+        .maybeSingle();
+
+      if (error || !inserted) throw error || new Error('Zero rows returned from residence insert.');
+      setResidenceInfo(inserted);
+    }
+
+    setResidenceForm(prev => ({ ...prev, ...patch }));
+  };
+
+  const saveIncomeField = async (incomeId: string, fieldName: string, value: any) => {
+    const { data: updated, error } = await supabase
+      .from('client_income_information')
+      .update({ [fieldName]: value, updated_at: new Date().toISOString() })
+      .eq('id', incomeId)
+      .select('*')
+      .maybeSingle();
+
+    if (error || !updated) throw error || new Error('Zero rows returned from income update.');
+    setIncomeList(prev => prev.map(inc => inc.id === incomeId ? updated : inc));
+  };
+
+
+
+  const saveCoApplicantField = async (fieldName: string, value: any) => {
+    if (!isValidUuid(clientId)) return;
+    const { data: existing } = await supabase
+      .from('client_co_applicant_information')
+      .select('id')
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    if (existing) {
+      const { error } = await supabase
+        .from('client_co_applicant_information')
+        .update({ [fieldName]: value, updated_at: new Date().toISOString() })
+        .eq('client_id', clientId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('client_co_applicant_information')
+        .insert({ client_id: clientId, [fieldName]: value });
+      if (error) throw error;
+    }
+
+    setCoApplicantForm(prev => ({ ...prev, [fieldName]: value }));
+    await fetchCoApplicantInformation();
+  };
+
   const fetchPersonalInformation = async () => {
     try {
       setLoadingPersonal(true);
@@ -2640,39 +2760,15 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
               {/* PERSONAL INFO TAB CONTENT */}
               {activeTab === 'personal-info' && (
-                <div className="space-y-6">
+                <div className="space-y-6 font-sans">
                   
                   {/* SECTION 1: Personal Information Card */}
                   <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                      <h3 className="text-lg font-extrabold text-slate-900">Personal Information</h3>
-                      {!isEditingPersonal ? (
-                        <button
-                          onClick={() => setIsEditingPersonal(true)}
-                          className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1.5 rounded-lg transition-all"
-                        >
-                          Edit Info
-                        </button>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => {
-                              setIsEditingPersonal(false);
-                              setPersonalError(null);
-                            }}
-                            className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg transition-all"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={handleSavePersonal}
-                            disabled={savingPersonal}
-                            className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-all shadow-md disabled:opacity-50"
-                          >
-                            {savingPersonal ? 'Saving...' : 'Save'}
-                          </button>
-                        </div>
-                      )}
+                      <div>
+                        <h3 className="text-lg font-extrabold text-slate-900">Personal Information</h3>
+                        <p className="text-xs text-slate-400 mt-0.5">Click any field to edit directly.</p>
+                      </div>
                     </div>
 
                     {personalError && (
@@ -2689,120 +2785,61 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         </svg>
                       </div>
                     ) : (
-                      <form onSubmit={handleSavePersonal} className="space-y-8">
+                      <div className="space-y-8">
                         {/* Main Applicant Grid */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
                           {/* Left Column */}
                           <div className="space-y-4">
-                            <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Applicant Name</label>
-                              {isEditingPersonal ? (
-                                <input
-                                  type="text"
-                                  value={personalForm.full_name}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, full_name: e.target.value }))}
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                  required
-                                />
-                              ) : (
-                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.full_name || '-'}</span>
-                              )}
-                            </div>
+                            <InlineEditableText
+                              label="Applicant Name"
+                              value={personalForm.full_name}
+                              onSave={val => savePersonalField('full_name', val)}
+                            />
+
+                            <InlineEditableDate
+                              label="DOB"
+                              value={personalForm.date_of_birth}
+                              onSave={iso => savePersonalField('date_of_birth', iso || '')}
+                            />
 
                             <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">DOB</label>
-                              {isEditingPersonal ? (
-                                <input
-                                  type="text"
-                                  placeholder="MM/DD/YYYY"
-                                  value={personalForm.date_of_birth.includes('-') ? formatIsoToUsDate(personalForm.date_of_birth) : personalForm.date_of_birth}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, date_of_birth: formatAsDateInput(e.target.value) }))}
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                />
-                              ) : (
-                                <span className="font-semibold text-slate-800 block min-h-[20px]">
-                                  {personalForm.date_of_birth ? formatIsoToUsDate(personalForm.date_of_birth) : '-'}
-                                </span>
-                              )}
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</label>
-                              <span className="font-semibold text-slate-500 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center">
+                              <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</span>
+                              <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
                                 {calculateAge(personalForm.date_of_birth)}
                               </span>
                             </div>
 
-                            <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">SSN</label>
-                              {isEditingPersonal ? (
-                                <input
-                                  type="text"
-                                  value={personalForm.ssn}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, ssn: e.target.value }))}
-                                  placeholder="e.g. 000-00-0000"
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                />
-                              ) : (
-                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.ssn || '-'}</span>
-                              )}
-                            </div>
+                            <InlineEditableSSN
+                              label="SSN"
+                              value={personalForm.ssn}
+                              onSave={val => savePersonalField('ssn', val)}
+                            />
 
-                            <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Phone</label>
-                              {isEditingPersonal ? (
-                                <input
-                                  type="text"
-                                  value={personalForm.phone}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, phone: e.target.value }))}
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                />
-                              ) : (
-                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.phone || '-'}</span>
-                              )}
-                            </div>
+                            <InlineEditablePhone
+                              label="Primary Phone"
+                              value={personalForm.phone}
+                              onSave={val => savePersonalField('phone', val)}
+                            />
 
-                            <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Phone</label>
-                              {isEditingPersonal ? (
-                                <input
-                                  type="text"
-                                  value={personalForm.secondary_phone}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, secondary_phone: e.target.value }))}
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                />
-                              ) : (
-                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.secondary_phone || '-'}</span>
-                              )}
-                            </div>
+                            <InlineEditablePhone
+                              label="Secondary Phone"
+                              value={personalForm.secondary_phone}
+                              onSave={val => savePersonalField('secondary_phone', val)}
+                            />
 
-                            <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Email</label>
-                              {isEditingPersonal ? (
-                                <input
-                                  type="email"
-                                  value={personalForm.email}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, email: e.target.value }))}
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                />
-                              ) : (
-                                <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{personalForm.email || '-'}</span>
-                              )}
-                            </div>
+                            <InlineEditableText
+                              label="Primary Email"
+                              type="email"
+                              value={personalForm.email}
+                              onSave={val => savePersonalField('email', val)}
+                            />
 
-                            <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Email</label>
-                              {isEditingPersonal ? (
-                                <input
-                                  type="email"
-                                  value={personalForm.secondary_email}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, secondary_email: e.target.value }))}
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                />
-                              ) : (
-                                <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{personalForm.secondary_email || '-'}</span>
-                              )}
-                            </div>
+                            <InlineEditableText
+                              label="Secondary Email"
+                              type="email"
+                              value={personalForm.secondary_email}
+                              onSave={val => savePersonalField('secondary_email', val)}
+                            />
 
                             <div className="pt-2">
                               <div className="flex items-center space-x-3 p-4 bg-slate-50 border border-slate-200 rounded-xl">
@@ -2810,13 +2847,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                   type="checkbox"
                                   id="has_co_applicant"
                                   checked={personalForm.has_co_applicant}
-                                  onChange={e => {
-                                    if (isEditingPersonal) {
-                                      setPersonalForm(prev => ({ ...prev, has_co_applicant: e.target.checked }));
-                                    }
+                                  onChange={async (e) => {
+                                    const checked = e.target.checked;
+                                    setPersonalForm(prev => ({ ...prev, has_co_applicant: checked }));
+                                    await savePersonalField('has_co_applicant', checked);
                                   }}
-                                  disabled={!isEditingPersonal}
-                                  className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 disabled:opacity-50"
+                                  className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
                                 />
                                 <label htmlFor="has_co_applicant" className="text-sm font-bold text-slate-700 select-none cursor-pointer">
                                   Include Co-Applicant
@@ -2827,183 +2863,94 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
                           {/* Right Column */}
                           <div className="space-y-4">
-                            <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Gender</label>
-                              {isEditingPersonal ? (
-                                <select
-                                  value={personalForm.gender}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, gender: e.target.value as any }))}
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                >
-                                  <option value="">Select Gender</option>
-                                  <option value="Female">Female</option>
-                                  <option value="Male">Male</option>
-                                </select>
-                              ) : (
-                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.gender || '-'}</span>
-                              )}
-                            </div>
+                            <InlineEditableSelect
+                              label="Gender"
+                              value={personalForm.gender}
+                              options={[
+                                { label: 'Select Gender', value: '' },
+                                { label: 'Female', value: 'Female' },
+                                { label: 'Male', value: 'Male' },
+                              ]}
+                              onSave={val => savePersonalField('gender', val)}
+                            />
 
-                            <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Marital Status</label>
-                              {isEditingPersonal ? (
-                                <select
-                                  value={personalForm.marital_status}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, marital_status: e.target.value as any }))}
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                >
-                                  <option value="">Select Status</option>
-                                  <option value="Single">Single</option>
-                                  <option value="Married">Married</option>
-                                </select>
-                              ) : (
-                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.marital_status || '-'}</span>
-                              )}
-                            </div>
+                            <InlineEditableSelect
+                              label="Marital Status"
+                              value={personalForm.marital_status}
+                              options={[
+                                { label: 'Select Status', value: '' },
+                                { label: 'Single', value: 'Single' },
+                                { label: 'Married', value: 'Married' },
+                              ]}
+                              onSave={val => savePersonalField('marital_status', val)}
+                            />
 
-                            <div>
-                              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Immigration Status</label>
-                              {isEditingPersonal ? (
-                                <select
-                                  value={personalForm.immigration_status}
-                                  onChange={e => setPersonalForm(prev => ({ ...prev, immigration_status: e.target.value as any }))}
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                >
-                                  <option value="">Select Status</option>
-                                  <option value="Resident">Resident</option>
-                                  <option value="Work Permit">Work Permit</option>
-                                  <option value="Citizen">Citizen</option>
-                                  <option value="Other">Other</option>
-                                </select>
-                              ) : (
-                                <span className="font-semibold text-slate-800 block min-h-[20px]">{personalForm.immigration_status || '-'}</span>
-                              )}
-                            </div>
+                            <InlineEditableSelect
+                              label="Immigration Status"
+                              value={personalForm.immigration_status}
+                              options={[
+                                { label: 'Select Status', value: '' },
+                                { label: 'Resident', value: 'Resident' },
+                                { label: 'Work Permit', value: 'Work Permit' },
+                                { label: 'Citizen', value: 'Citizen' },
+                                { label: 'Other', value: 'Other' },
+                              ]}
+                              onSave={val => savePersonalField('immigration_status', val)}
+                            />
 
-                            {/* CONDITIONAL IMMIGRATION FIELDS DIRECTLY BELOW IMMIGRATION STATUS */}
-
-                            {/* Resident fields */}
+                            {/* CONDITIONAL IMMIGRATION FIELDS */}
                             {personalForm.immigration_status === 'Resident' && (
                               <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Alien Number</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="text"
-                                      value={personalForm.alien_number}
-                                      onChange={e => setPersonalForm(prev => ({ ...prev, alien_number: e.target.value }))}
-                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.alien_number || '-'}</span>
-                                  )}
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Card Number</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="text"
-                                      value={personalForm.card_number}
-                                      onChange={e => setPersonalForm(prev => ({ ...prev, card_number: e.target.value }))}
-                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.card_number || '-'}</span>
-                                  )}
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
-                                  {isEditingPersonal ? (
-                                    <DatePicker
-                                      value={personalForm.immigration_expiration_date}
-                                      onChange={iso => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: iso || '' }))}
-                                      placeholder="MM/DD/YYYY"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[16px]">
-                                      {formatDateMMDDYYYY(personalForm.immigration_expiration_date) || '-'}
-                                    </span>
-                                  )}
-                                </div>
+                                <InlineEditableText
+                                  label="Alien Number"
+                                  value={personalForm.alien_number}
+                                  onSave={val => savePersonalField('alien_number', val)}
+                                />
+                                <InlineEditableText
+                                  label="Card Number"
+                                  value={personalForm.card_number}
+                                  onSave={val => savePersonalField('card_number', val)}
+                                />
+                                <InlineEditableDate
+                                  label="Expiration Date"
+                                  value={personalForm.immigration_expiration_date}
+                                  onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
+                                />
                               </div>
                             )}
 
-                            {/* Work Permit fields */}
                             {personalForm.immigration_status === 'Work Permit' && (
                               <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Card Number</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="text"
-                                      value={personalForm.card_number}
-                                      onChange={e => setPersonalForm(prev => ({ ...prev, card_number: e.target.value }))}
-                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.card_number || '-'}</span>
-                                  )}
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">USCIS Number</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="text"
-                                      value={personalForm.uscis_number}
-                                      onChange={e => setPersonalForm(prev => ({ ...prev, uscis_number: e.target.value }))}
-                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.uscis_number || '-'}</span>
-                                  )}
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Category</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="text"
-                                      value={personalForm.immigration_category}
-                                      onChange={e => setPersonalForm(prev => ({ ...prev, immigration_category: e.target.value }))}
-                                      placeholder="e.g. C09"
-                                      className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[16px]">{personalForm.immigration_category || '-'}</span>
-                                  )}
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
-                                  {isEditingPersonal ? (
-                                    <DatePicker
-                                      value={personalForm.immigration_expiration_date}
-                                      onChange={iso => setPersonalForm(prev => ({ ...prev, immigration_expiration_date: iso || '' }))}
-                                      placeholder="MM/DD/YYYY"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[16px]">
-                                      {formatDateMMDDYYYY(personalForm.immigration_expiration_date) || '-'}
-                                    </span>
-                                  )}
-                                </div>
+                                <InlineEditableText
+                                  label="Card Number"
+                                  value={personalForm.card_number}
+                                  onSave={val => savePersonalField('card_number', val)}
+                                />
+                                <InlineEditableText
+                                  label="USCIS Number"
+                                  value={personalForm.uscis_number}
+                                  onSave={val => savePersonalField('uscis_number', val)}
+                                />
+                                <InlineEditableText
+                                  label="Category"
+                                  value={personalForm.immigration_category}
+                                  onSave={val => savePersonalField('immigration_category', val)}
+                                />
+                                <InlineEditableDate
+                                  label="Expiration Date"
+                                  value={personalForm.immigration_expiration_date}
+                                  onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
+                                />
                               </div>
                             )}
 
-                            {/* Other fields */}
                             {personalForm.immigration_status === 'Other' && (
                               <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
-                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Other Immigration Status Description</label>
-                                {isEditingPersonal ? (
-                                  <textarea
-                                    value={personalForm.immigration_other_description}
-                                    onChange={e => setPersonalForm(prev => ({ ...prev, immigration_other_description: e.target.value }))}
-                                    className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-3 py-2 text-slate-800 text-xs outline-none transition-all h-20 resize-none"
-                                    placeholder="e.g. Asylee, TPS"
-                                  />
-                                ) : (
-                                  <p className="font-semibold text-slate-700 leading-relaxed text-xs block min-h-[16px] whitespace-pre-line">
-                                    {personalForm.immigration_other_description || '-'}
-                                  </p>
-                                )}
+                                <InlineEditableTextarea
+                                  label="Other Immigration Status Description"
+                                  value={personalForm.immigration_other_description}
+                                  onSave={val => savePersonalField('immigration_other_description', val)}
+                                />
                               </div>
                             )}
                           </div>
@@ -3016,304 +2963,165 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
                               {/* Left Column */}
                               <div className="space-y-4">
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Co-Applicant Name</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="text"
-                                      value={coApplicantForm.full_name}
-                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, full_name: e.target.value }))}
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.full_name || '-'}</span>
-                                  )}
-                                </div>
+                                <InlineEditableText
+                                  label="Co-Applicant Name"
+                                  value={coApplicantForm.full_name}
+                                  onSave={val => saveCoApplicantField('full_name', val)}
+                                />
+
+                                <InlineEditableDate
+                                  label="DOB"
+                                  value={coApplicantForm.date_of_birth}
+                                  onSave={iso => saveCoApplicantField('date_of_birth', iso || '')}
+                                />
 
                                 <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">DOB</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="text"
-                                      placeholder="MM/DD/YYYY"
-                                      value={coApplicantForm.date_of_birth.includes('-') ? formatIsoToUsDate(coApplicantForm.date_of_birth) : coApplicantForm.date_of_birth}
-                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, date_of_birth: formatAsDateInput(e.target.value) }))}
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[20px]">
-                                      {coApplicantInfo?.date_of_birth ? formatIsoToUsDate(coApplicantInfo.date_of_birth) : '-'}
-                                    </span>
-                                  )}
-                                </div>
-
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</label>
-                                  <span className="font-semibold text-slate-500 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center">
-                                    {calculateAge(isEditingPersonal ? coApplicantForm.date_of_birth : (coApplicantInfo?.date_of_birth || ''))}
+                                  <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</span>
+                                  <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
+                                    {calculateAge(coApplicantForm.date_of_birth)}
                                   </span>
                                 </div>
 
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">SSN</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="text"
-                                      value={coApplicantForm.ssn}
-                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, ssn: e.target.value }))}
-                                      placeholder="e.g. 000-00-0000"
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.ssn || '-'}</span>
-                                  )}
-                                </div>
+                                <InlineEditableSSN
+                                  label="SSN"
+                                  value={coApplicantForm.ssn}
+                                  onSave={val => saveCoApplicantField('ssn', val)}
+                                />
 
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Phone</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="text"
-                                      value={coApplicantForm.primary_phone}
-                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, primary_phone: e.target.value }))}
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.primary_phone || '-'}</span>
-                                  )}
-                                </div>
+                                <InlineEditablePhone
+                                  label="Primary Phone"
+                                  value={coApplicantForm.primary_phone}
+                                  onSave={val => saveCoApplicantField('primary_phone', val)}
+                                />
 
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Phone</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="text"
-                                      value={coApplicantForm.secondary_phone}
-                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, secondary_phone: e.target.value }))}
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.secondary_phone || '-'}</span>
-                                  )}
-                                </div>
+                                <InlineEditablePhone
+                                  label="Secondary Phone"
+                                  value={coApplicantForm.secondary_phone}
+                                  onSave={val => saveCoApplicantField('secondary_phone', val)}
+                                />
 
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Primary Email</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="email"
-                                      value={coApplicantForm.primary_email}
-                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, primary_email: e.target.value }))}
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{coApplicantInfo?.primary_email || '-'}</span>
-                                  )}
-                                </div>
+                                <InlineEditableText
+                                  label="Primary Email"
+                                  type="email"
+                                  value={coApplicantForm.primary_email}
+                                  onSave={val => saveCoApplicantField('primary_email', val)}
+                                />
 
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Secondary Email</label>
-                                  {isEditingPersonal ? (
-                                    <input
-                                      type="email"
-                                      value={coApplicantForm.secondary_email}
-                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, secondary_email: e.target.value }))}
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                    />
-                                  ) : (
-                                    <span className="font-semibold text-slate-850 block min-h-[20px] truncate">{coApplicantInfo?.secondary_email || '-'}</span>
-                                  )}
-                                </div>
+                                <InlineEditableText
+                                  label="Secondary Email"
+                                  type="email"
+                                  value={coApplicantForm.secondary_email}
+                                  onSave={val => saveCoApplicantField('secondary_email', val)}
+                                />
                               </div>
 
                               {/* Right Column */}
                               <div className="space-y-4">
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Gender</label>
-                                  {isEditingPersonal ? (
-                                    <select
-                                      value={coApplicantForm.gender}
-                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, gender: e.target.value as any }))}
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                    >
-                                      <option value="">Select Gender</option>
-                                      <option value="Female">Female</option>
-                                      <option value="Male">Male</option>
-                                    </select>
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.gender || '-'}</span>
-                                  )}
-                                </div>
+                                <InlineEditableSelect
+                                  label="Gender"
+                                  value={coApplicantForm.gender}
+                                  options={[
+                                    { label: 'Select Gender', value: '' },
+                                    { label: 'Female', value: 'Female' },
+                                    { label: 'Male', value: 'Male' },
+                                  ]}
+                                  onSave={val => saveCoApplicantField('gender', val)}
+                                />
 
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Marital Status</label>
-                                  {isEditingPersonal ? (
-                                    <select
-                                      value={coApplicantForm.marital_status}
-                                      onChange={e => setCoApplicantForm(prev => ({ ...prev, marital_status: e.target.value as any }))}
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                    >
-                                      <option value="">Select Status</option>
-                                      <option value="Single">Single</option>
-                                      <option value="Married">Married</option>
-                                    </select>
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.marital_status || '-'}</span>
-                                  )}
-                                </div>
+                                <InlineEditableSelect
+                                  label="Marital Status"
+                                  value={coApplicantForm.marital_status}
+                                  options={[
+                                    { label: 'Select Status', value: '' },
+                                    { label: 'Single', value: 'Single' },
+                                    { label: 'Married', value: 'Married' },
+                                  ]}
+                                  onSave={val => saveCoApplicantField('marital_status', val)}
+                                />
 
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Immigration Status</label>
-                                  {isEditingPersonal ? (
-                                    <select
-                                      value={coApplicantForm.immigration_status}
-                                      onChange={e => {
-                                        const newStatus = e.target.value as any;
-                                        setCoApplicantForm(prev => {
-                                          const next = { ...prev, immigration_status: newStatus };
-                                          if (newStatus === 'Resident') { next.uscis_number = ''; next.immigration_category = ''; next.immigration_other_description = ''; }
-                                          else if (newStatus === 'Work Permit') { next.alien_number = ''; next.immigration_other_description = ''; }
-                                          else if (newStatus === 'Citizen') { next.alien_number = ''; next.card_number = ''; next.uscis_number = ''; next.immigration_category = ''; next.immigration_expiration_date = ''; next.immigration_other_description = ''; }
-                                          else if (newStatus === 'Other') { next.alien_number = ''; next.card_number = ''; next.uscis_number = ''; next.immigration_category = ''; next.immigration_expiration_date = ''; }
-                                          return next;
-                                        });
-                                      }}
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                                    >
-                                      <option value="">Select Status</option>
-                                      <option value="Resident">Resident</option>
-                                      <option value="Work Permit">Work Permit</option>
-                                      <option value="Citizen">Citizen</option>
-                                      <option value="Other">Other</option>
-                                    </select>
-                                  ) : (
-                                    <span className="font-semibold text-slate-800 block min-h-[20px]">{coApplicantInfo?.immigration_status || '-'}</span>
-                                  )}
-                                </div>
+                                <InlineEditableSelect
+                                  label="Immigration Status"
+                                  value={coApplicantForm.immigration_status}
+                                  options={[
+                                    { label: 'Select Status', value: '' },
+                                    { label: 'Resident', value: 'Resident' },
+                                    { label: 'Work Permit', value: 'Work Permit' },
+                                    { label: 'Citizen', value: 'Citizen' },
+                                    { label: 'Other', value: 'Other' },
+                                  ]}
+                                  onSave={val => saveCoApplicantField('immigration_status', val)}
+                                />
 
-                                {/* Co-Applicant Conditional Immigration Fields */}
-                                {['Resident', 'Work Permit', 'Other'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
-                                  <div className="space-y-4 pt-4 border-t border-slate-100">
-                                    {['Resident'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
-                                      <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Alien Number</label>
-                                        {isEditingPersonal ? (
-                                          <input type="text" value={coApplicantForm.alien_number} onChange={e => setCoApplicantForm(prev => ({ ...prev, alien_number: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
-                                        ) : (
-                                          <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.alien_number || '-'}</span>
-                                        )}
-                                      </div>
-                                    )}
+                                {coApplicantForm.immigration_status === 'Resident' && (
+                                  <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
+                                    <InlineEditableText
+                                      label="Alien Number"
+                                      value={coApplicantForm.alien_number}
+                                      onSave={val => saveCoApplicantField('alien_number', val)}
+                                    />
+                                    <InlineEditableText
+                                      label="Card Number"
+                                      value={coApplicantForm.card_number}
+                                      onSave={val => saveCoApplicantField('card_number', val)}
+                                    />
+                                    <InlineEditableDate
+                                      label="Expiration Date"
+                                      value={coApplicantForm.immigration_expiration_date}
+                                      onSave={iso => saveCoApplicantField('immigration_expiration_date', iso || '')}
+                                    />
+                                  </div>
+                                )}
 
-                                    {['Resident', 'Work Permit'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
-                                      <>
-                                        {coApplicantForm.immigration_status === 'Work Permit' && (
-                                          <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">USCIS Number</label>
-                                            {isEditingPersonal ? (
-                                              <input type="text" value={coApplicantForm.uscis_number} onChange={e => setCoApplicantForm(prev => ({ ...prev, uscis_number: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
-                                            ) : (
-                                              <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.uscis_number || '-'}</span>
-                                            )}
-                                          </div>
-                                        )}
-                                        <div>
-                                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Card Number</label>
-                                          {isEditingPersonal ? (
-                                            <input type="text" value={coApplicantForm.card_number} onChange={e => setCoApplicantForm(prev => ({ ...prev, card_number: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
-                                          ) : (
-                                            <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.card_number || '-'}</span>
-                                          )}
-                                        </div>
-                                        <div>
-                                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Expiration Date</label>
-                                          {isEditingPersonal ? (
-                                            <input type="text" placeholder="MM/DD/YYYY" value={coApplicantForm.immigration_expiration_date.includes('-') ? formatIsoToUsDate(coApplicantForm.immigration_expiration_date) : coApplicantForm.immigration_expiration_date} onChange={e => setCoApplicantForm(prev => ({ ...prev, immigration_expiration_date: formatAsDateInput(e.target.value) }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
-                                          ) : (
-                                            <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">
-                                              {coApplicantInfo?.immigration_expiration_date ? formatIsoToUsDate(coApplicantInfo.immigration_expiration_date) : '-'}
-                                            </span>
-                                          )}
-                                        </div>
-                                        {coApplicantForm.immigration_status === 'Work Permit' && (
-                                          <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Category</label>
-                                            {isEditingPersonal ? (
-                                              <input type="text" value={coApplicantForm.immigration_category} onChange={e => setCoApplicantForm(prev => ({ ...prev, immigration_category: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all" />
-                                            ) : (
-                                              <span className="font-semibold text-slate-700 text-sm block min-h-[20px]">{coApplicantInfo?.immigration_category || '-'}</span>
-                                            )}
-                                          </div>
-                                        )}
-                                      </>
-                                    )}
+                                {coApplicantForm.immigration_status === 'Work Permit' && (
+                                  <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
+                                    <InlineEditableText
+                                      label="Card Number"
+                                      value={coApplicantForm.card_number}
+                                      onSave={val => saveCoApplicantField('card_number', val)}
+                                    />
+                                    <InlineEditableText
+                                      label="USCIS Number"
+                                      value={coApplicantForm.uscis_number}
+                                      onSave={val => saveCoApplicantField('uscis_number', val)}
+                                    />
+                                    <InlineEditableText
+                                      label="Category"
+                                      value={coApplicantForm.immigration_category}
+                                      onSave={val => saveCoApplicantField('immigration_category', val)}
+                                    />
+                                    <InlineEditableDate
+                                      label="Expiration Date"
+                                      value={coApplicantForm.immigration_expiration_date}
+                                      onSave={iso => saveCoApplicantField('immigration_expiration_date', iso || '')}
+                                    />
+                                  </div>
+                                )}
 
-                                    {['Other'].includes(isEditingPersonal ? coApplicantForm.immigration_status : (coApplicantInfo?.immigration_status || '')) && (
-                                      <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Description</label>
-                                        {isEditingPersonal ? (
-                                          <textarea value={coApplicantForm.immigration_other_description} onChange={e => setCoApplicantForm(prev => ({ ...prev, immigration_other_description: e.target.value }))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 transition-all resize-y min-h-[80px]" placeholder="e.g. Asylee, TPS" />
-                                        ) : (
-                                          <p className="font-semibold text-slate-700 leading-relaxed text-xs block min-h-[16px] whitespace-pre-line">
-                                            {coApplicantInfo?.immigration_other_description || '-'}
-                                          </p>
-                                        )}
-                                      </div>
-                                    )}
+                                {coApplicantForm.immigration_status === 'Other' && (
+                                  <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
+                                    <InlineEditableTextarea
+                                      label="Other Description"
+                                      value={coApplicantForm.immigration_other_description}
+                                      onSave={val => saveCoApplicantField('immigration_other_description', val)}
+                                    />
                                   </div>
                                 )}
                               </div>
                             </div>
                           </div>
                         )}
-                      </form>
+                      </div>
                     )}
                   </div>
 
                   {/* SECTION 2: Residence Information Card */}
                   <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                      <h3 className="text-lg font-extrabold text-slate-900">Residence Information</h3>
-                      {!isEditingResidence ? (
-                        <button
-                          onClick={() => setIsEditingResidence(true)}
-                          className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1.5 rounded-lg transition-all"
-                        >
-                          Edit Info
-                        </button>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => {
-                              setIsEditingResidence(false);
-                              setResidenceError(null);
-                            }}
-                            className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg transition-all"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={handleSaveResidence}
-                            disabled={savingResidence}
-                            className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-all shadow-md disabled:opacity-50"
-                          >
-                            {savingResidence ? 'Saving...' : 'Save'}
-                          </button>
-                        </div>
-                      )}
+                      <div>
+                        <h3 className="text-lg font-extrabold text-slate-900">Residence Information</h3>
+                        <p className="text-xs text-slate-400 mt-0.5">Click any field to edit directly.</p>
+                      </div>
                     </div>
-
-                    {residenceError && (
-                      <div className="mb-4 p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm">
-                        {residenceError}
-                      </div>
-                    )}
-
-                    {googleMapsWarning && (
-                      <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-100 text-amber-700 text-xs leading-relaxed">
-                        {googleMapsWarning}
-                      </div>
-                    )}
 
                     {loadingResidence ? (
                       <div className="flex justify-center items-center py-10">
@@ -3323,94 +3131,41 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         </svg>
                       </div>
                     ) : (
-                      <form onSubmit={handleSaveResidence} className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-                        <div className="md:col-span-2">
-                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Address</label>
-                          {isEditingResidence ? (
-                            <input
-                              type="text"
-                              ref={autocompleteInputRef}
-                              value={residenceForm.address}
-                              onChange={e => setResidenceForm(prev => ({ ...prev, address: e.target.value }))}
-                              placeholder="Search address or enter manually"
-                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              required
-                            />
-                          ) : (
-                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.address || '-'}</span>
-                          )}
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">City</label>
-                          {isEditingResidence ? (
-                            <input
-                              type="text"
-                              value={residenceForm.city}
-                              onChange={e => setResidenceForm(prev => ({ ...prev, city: e.target.value }))}
-                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              required
-                            />
-                          ) : (
-                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.city || '-'}</span>
-                          )}
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">State</label>
-                          {isEditingResidence ? (
-                            <input
-                              type="text"
-                              value={residenceForm.state}
-                              onChange={e => setResidenceForm(prev => ({ ...prev, state: e.target.value }))}
-                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                            />
-                          ) : (
-                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.state || '-'}</span>
-                          )}
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">County</label>
-                          {isEditingResidence ? (
-                            <input
-                              type="text"
-                              value={residenceForm.county}
-                              onChange={e => setResidenceForm(prev => ({ ...prev, county: e.target.value }))}
-                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                            />
-                          ) : (
-                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.county || '-'}</span>
-                          )}
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">ZIP Code</label>
-                          {isEditingResidence ? (
-                            <input
-                              type="text"
-                              value={residenceForm.zip_code}
-                              onChange={e => setResidenceForm(prev => ({ ...prev, zip_code: e.target.value }))}
-                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                              required
-                            />
-                          ) : (
-                            <span className="font-semibold text-slate-800 block min-h-[20px]">{residenceInfo?.zip_code || '-'}</span>
-                          )}
-                        </div>
-                      </form>
+                      <InlineEditableAddress
+                        label=""
+                        data={{
+                          address: residenceForm.address,
+                          city: residenceForm.city,
+                          state: residenceForm.state,
+                          zip_code: residenceForm.zip_code,
+                          county: residenceForm.county,
+                        }}
+                        onSave={async (newData) => {
+                          await saveResidenceField({
+                            address: newData.address,
+                            city: newData.city,
+                            state: newData.state,
+                            zip_code: newData.zip_code,
+                            county: newData.county || '',
+                          });
+                        }}
+                      />
                     )}
                   </div>
 
                   {/* SECTION 3: Income Information Card */}
-                  <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6">
+                  <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                      <h3 className="text-lg font-extrabold text-slate-900">Income Information</h3>
+                      <div>
+                        <h3 className="text-lg font-extrabold text-slate-900">Income Information</h3>
+                        <p className="text-xs text-slate-400 mt-0.5">Manage income records for health eligibility and tax household.</p>
+                      </div>
                       <button
-                        onClick={handleOpenAddIncome}
-                        className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-all shadow-md active:scale-95"
+                        type="button"
+                        onClick={() => setIsAddIncomeOpen(true)}
+                        className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-2 rounded-xl transition-all shadow-md active:scale-95"
                       >
-                        Add Income
+                        + Add Income
                       </button>
                     </div>
 
@@ -3422,78 +3177,184 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         </svg>
                       </div>
                     ) : incomeList.length === 0 ? (
-                      <div className="text-center py-12">
-                        <svg className="w-10 h-10 text-slate-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="text-center py-10 border border-dashed border-slate-200 rounded-xl">
+                        <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <h4 className="text-sm font-semibold text-slate-700">No income records</h4>
-                        <p className="text-xs text-slate-400 mt-0.5">Register client employment or other income sources.</p>
+                        <h4 className="text-xs font-bold text-slate-700">No income records registered</h4>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Click "+ Add Income" above to add income details.</p>
                       </div>
                     ) : (
-                      <div className="space-y-3">
+                      <div className="space-y-4">
                         {incomeList.map((income) => (
                           <div
                             key={income.id}
-                            className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                            className="p-4 border border-slate-150 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                           >
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs flex-1">
-                              <div>
-                                <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-0.5">Relationship</span>
-                                <span className="font-semibold text-slate-800">{income.relationship_to_applicant}</span>
-                              </div>
-                              <div>
-                                <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-0.5">Employer / Source</span>
-                                <span className="font-semibold text-slate-800 truncate block">{income.employer_name || '-'}</span>
-                              </div>
-                              <div>
-                                <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-0.5">Income Type</span>
-                                <span className="font-semibold text-slate-850">{income.income_type}</span>
-                              </div>
-                              <div>
-                                <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-0.5">Amount</span>
-                                <strong className="text-emerald-700 font-extrabold text-sm">{formatCurrency(income.income)}</strong>
-                              </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 flex-1">
+                              <InlineEditableSelect
+                                label="Relationship"
+                                value={income.relationship_to_applicant}
+                                options={[
+                                  { label: 'Applicant', value: 'Applicant' },
+                                  { label: 'Spouse', value: 'Spouse' },
+                                  { label: 'Son/Daughter', value: 'Son/Daughter' },
+                                  { label: 'Mother', value: 'Mother' },
+                                  { label: 'Father', value: 'Father' },
+                                  { label: 'Other', value: 'Other' },
+                                ]}
+                                onSave={val => saveIncomeField(income.id, 'relationship_to_applicant', val)}
+                              />
+
+                              <InlineEditableSelect
+                                label="Income Type"
+                                value={income.income_type}
+                                options={[
+                                  { label: 'W2', value: 'W2' },
+                                  { label: '1099', value: '1099' },
+                                ]}
+                                onSave={val => saveIncomeField(income.id, 'income_type', val)}
+                              />
+
+                              <InlineEditableText
+                                label="Employer / Source"
+                                value={income.employer_name}
+                                onSave={val => saveIncomeField(income.id, 'employer_name', val)}
+                              />
+
+                              <InlineEditablePhone
+                                label="Employer Phone"
+                                value={income.employer_phone}
+                                onSave={val => saveIncomeField(income.id, 'employer_phone', val)}
+                              />
+
+                              <InlineEditableText
+                                label="Amount ($)"
+                                type="number"
+                                value={String(income.income || '')}
+                                onSave={val => saveIncomeField(income.id, 'income', Number(val))}
+                              />
                             </div>
-                            <div className="flex items-center gap-3 justify-end pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                              <button
-                                onClick={() => handleOpenEditIncome(income)}
-                                className="text-xs font-bold text-blue-600 hover:text-blue-800"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={() => handleDeleteIncome(income.id)}
-                                className="text-xs font-bold text-rose-500 hover:text-rose-700"
-                              >
-                                Delete
-                              </button>
-                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteIncome(income.id)}
+                              className="text-xs font-bold text-rose-500 hover:text-rose-700 p-1 self-end sm:self-center"
+                              title="Delete income record"
+                            >
+                              Delete
+                            </button>
                           </div>
                         ))}
                       </div>
                     )}
 
-                    {/* READ-ONLY TOTAL INCOME SUMMARY ROW */}
-                    {(() => {
-                      const calculatedTotalIncome = incomeList.reduce((sum, item) => {
-                        const val = Number(item.income);
-                        return sum + (!isNaN(val) && val > 0 ? val : 0);
-                      }, 0);
+                    {/* ADD INCOME MODAL */}
+                    {isAddIncomeOpen && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+                        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 border border-slate-100">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <h4 className="text-base font-extrabold text-slate-900">Add Income Record</h4>
+                            <button
+                              type="button"
+                              onClick={() => setIsAddIncomeOpen(false)}
+                              className="text-slate-400 hover:text-slate-600 font-bold"
+                            >
+                              ✕
+                            </button>
+                          </div>
 
-                      return (
-                        <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between px-4 py-3 bg-slate-50 border border-slate-200/70 rounded-xl font-sans">
-                          <span className="text-xs font-extrabold uppercase tracking-wider text-slate-600">Total Income</span>
-                          <span className="text-sm font-extrabold text-slate-900 font-mono">
-                            {formatCurrency(calculatedTotalIncome)}
-                          </span>
+                          {incomeError && (
+                            <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs font-semibold">
+                              {incomeError}
+                            </div>
+                          )}
+
+                          <div className="space-y-3 text-xs">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Relationship</label>
+                              <select
+                                value={incomeRelationship}
+                                onChange={e => setIncomeRelationship(e.target.value as any)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                              >
+                                <option value="Applicant">Applicant</option>
+                                <option value="Spouse">Spouse</option>
+                                <option value="Son/Daughter">Son/Daughter</option>
+                                <option value="Mother">Mother</option>
+                                <option value="Father">Father</option>
+                                <option value="Other">Other</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Income Type</label>
+                              <select
+                                value={incomeType}
+                                onChange={e => setIncomeType(e.target.value as any)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                              >
+                                <option value="W2">W2</option>
+                                <option value="1099">1099</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer / Source</label>
+                              <input
+                                type="text"
+                                value={incomeEmployerName}
+                                onChange={e => setIncomeEmployerName(e.target.value)}
+                                placeholder="e.g. Acme Corp"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer Phone</label>
+                              <PhoneInput
+                                value={incomeEmployerPhone}
+                                onChange={val => setIncomeEmployerPhone(val)}
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Annual Amount ($)</label>
+                              <input
+                                type="number"
+                                value={incomeAmount}
+                                onChange={e => setIncomeAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                                placeholder="e.g. 55000"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                                required
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={() => setIsAddIncomeOpen(false)}
+                              className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 rounded-xl"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleAddIncomeSubmit}
+                              disabled={incomeSaving}
+                              className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs disabled:opacity-50"
+                            >
+                              {incomeSaving ? 'Saving...' : 'Save Income'}
+                            </button>
+                          </div>
                         </div>
-                      );
-                    })()}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
-              {/* CLIENT DOCUMENTS TAB CONTENT WITH VISIBLE FILEDROPZONE */}
               {activeTab === 'documents' && (
                 <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
                   <div className="border-b border-slate-100 pb-4">

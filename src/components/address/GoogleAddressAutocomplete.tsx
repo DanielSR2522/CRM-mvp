@@ -5,7 +5,9 @@ import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
 
 export interface NormalizedAddress {
   streetAddress: string;
+  addressLine2?: string;
   city: string;
+  county?: string;
   state: string;
   postalCode: string;
   country: string;
@@ -27,13 +29,10 @@ interface GoogleAddressAutocompleteProps {
 }
 
 let isOptionsConfigured = false;
-let placesLibraryPromise: Promise<google.maps.PlacesLibrary> | null = null;
 
-function loadPlacesLibrary(): Promise<google.maps.PlacesLibrary> {
+function initOptions() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    return Promise.reject(new Error('NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is missing.'));
-  }
+  if (!apiKey) return false;
 
   if (!isOptionsConfigured) {
     setOptions({
@@ -42,17 +41,12 @@ function loadPlacesLibrary(): Promise<google.maps.PlacesLibrary> {
     });
     isOptionsConfigured = true;
   }
-
-  if (!placesLibraryPromise) {
-    placesLibraryPromise = importLibrary('places') as Promise<google.maps.PlacesLibrary>;
-  }
-
-  return placesLibraryPromise;
+  return true;
 }
 
 export function parseGooglePlace(place: google.maps.places.PlaceResult): NormalizedAddress {
   const components = place.address_components || [];
-  
+
   let streetNumber = '';
   let route = '';
   let locality = '';
@@ -64,7 +58,7 @@ export function parseGooglePlace(place: google.maps.places.PlaceResult): Normali
   let postalCodeSuffix = '';
   let country = '';
 
-  components.forEach(component => {
+  components.forEach((component) => {
     const types = component.types || [];
     if (types.includes('street_number')) {
       streetNumber = component.long_name;
@@ -123,6 +117,7 @@ export function parseGooglePlace(place: google.maps.places.PlaceResult): Normali
   return {
     streetAddress,
     city,
+    county: adminAreaLevel2,
     state: adminAreaLevel1,
     postalCode: fullPostalCode,
     country: country || 'United States',
@@ -145,21 +140,46 @@ export default function GoogleAddressAutocomplete({
 }: GoogleAddressAutocompleteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  const listenerRef = useRef<google.maps.MapsEventListener | null>(null);
+
+  const onChangeRef = useRef(onChange);
+  const onAddressSelectedRef = useRef(onAddressSelected);
+
+  const [googleError, setGoogleError] = useState<string | null>(null);
 
   useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!apiKey) {
-      console.warn('[GoogleAddressAutocomplete] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not defined in environment. Address autocomplete disabled, falling back to standard manual entry.');
+    onChangeRef.current = onChange;
+    onAddressSelectedRef.current = onAddressSelected;
+  }, [onChange, onAddressSelected]);
+
+  useEffect(() => {
+    const configured = initOptions();
+    if (!configured) {
       return;
     }
 
     let isMounted = true;
 
-    loadPlacesLibrary()
-      .then(placesLib => {
+    // Handle global Google Maps auth failure events gracefully
+    if (typeof window !== 'undefined') {
+      const prevHandler = (window as any).gm_authFailure;
+      (window as any).gm_authFailure = () => {
+        if (prevHandler) prevHandler();
+        if (isMounted) {
+          setGoogleError('Google Maps API Key Error (Check domain restrictions or billing)');
+        }
+      };
+    }
+
+    importLibrary('places')
+      .then((placesLib: any) => {
         if (!isMounted || !inputRef.current) return;
 
-        // Options: address types, US country restriction, required fields
+        if (listenerRef.current) {
+          google.maps.event.removeListener(listenerRef.current);
+          listenerRef.current = null;
+        }
+
         const options: google.maps.places.AutocompleteOptions = {
           types: ['address'],
           componentRestrictions: { country: 'us' },
@@ -169,49 +189,61 @@ export default function GoogleAddressAutocomplete({
         const autocomplete = new placesLib.Autocomplete(inputRef.current, options);
         autocompleteRef.current = autocomplete;
 
-        // Listen for place selection
-        autocomplete.addListener('place_changed', () => {
+        const listener = autocomplete.addListener('place_changed', () => {
           const place = autocomplete.getPlace();
           if (!place || !place.address_components) return;
 
           const parsed = parseGooglePlace(place);
-          
+
           if (parsed.streetAddress) {
-            onChange(parsed.streetAddress);
+            onChangeRef.current(parsed.streetAddress);
           } else if (place.formatted_address) {
-            onChange(place.formatted_address);
+            onChangeRef.current(place.formatted_address);
           }
 
-          if (onAddressSelected) {
-            onAddressSelected(parsed);
+          if (onAddressSelectedRef.current) {
+            onAddressSelectedRef.current(parsed);
           }
         });
+
+        listenerRef.current = listener;
       })
-      .catch(err => {
-        console.warn('[GoogleAddressAutocomplete] Failed to load Google Maps Places Library:', err?.message || err);
+      .catch((err: any) => {
+        console.warn('[GoogleAddressAutocomplete] importLibrary error:', err?.message || err);
+        if (isMounted) {
+          setGoogleError(`Google Places Error: ${err?.message || 'Failed to load places library'}`);
+        }
       });
 
     return () => {
       isMounted = false;
-      if (window.google?.maps?.event && autocompleteRef.current) {
-        window.google.maps.event.clearInstanceListeners(autocompleteRef.current);
+      if (listenerRef.current) {
+        google.maps.event.removeListener(listenerRef.current);
+        listenerRef.current = null;
       }
     };
-  }, [onChange, onAddressSelected]);
+  }, []);
 
   return (
-    <input
-      ref={inputRef}
-      type="text"
-      id={id}
-      name={name}
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      disabled={disabled}
-      required={required}
-      className={className}
-      autoComplete="off"
-    />
+    <div className="relative w-full">
+      <input
+        ref={inputRef}
+        type="text"
+        id={id}
+        name={name}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        required={required}
+        className={className}
+        autoComplete="off"
+      />
+      {googleError && (
+        <span className="block text-[10px] text-amber-600 font-semibold mt-1" title={googleError}>
+          ⚠️ {googleError} (Manual editing available)
+        </span>
+      )}
+    </div>
   );
 }

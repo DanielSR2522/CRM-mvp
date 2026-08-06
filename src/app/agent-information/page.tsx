@@ -6,10 +6,15 @@ import { supabase } from '@/lib/supabaseClient';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 import { ALL_BUSINESS_LINES, BusinessLine } from '@/lib/auth/businessLines';
 import GoogleAddressAutocomplete from '@/components/address/GoogleAddressAutocomplete';
-import PhoneInput from '@/components/common/PhoneInput';
+import {
+  InlineEditableText,
+  InlineEditablePhone,
+  InlineEditableSelect,
+  InlineEditableAddress,
+} from '@/components/common/inline-edit';
+import InlineEditActions from '@/components/common/inline-edit/InlineEditActions';
 
 interface AgentProfileForm {
-  // Agent Details
   first_name: string;
   last_name: string;
   email: string;
@@ -17,24 +22,20 @@ interface AgentProfileForm {
   npn_number: string;
   license_number: string;
 
-  // Agency Information
   agency_name: string;
   agency_email: string;
   agency_phone: string;
   website: string;
 
-  // Business Address
   address: string;
   city: string;
   state: string;
   zip_code: string;
   country: string;
 
-  // Contact Information
   preferred_contact_method: string;
   secondary_phone: string;
 
-  // Additional Settings
   timezone: string;
   language: string;
 }
@@ -69,6 +70,19 @@ export default function AgentInformationPage() {
   const [selectedLines, setSelectedLines] = useState<BusinessLine[]>([]);
   const [hasLoadedProfile, setHasLoadedProfile] = useState<boolean>(false);
 
+  // Address Inline Edit State
+  const [editingAddress, setEditingAddress] = useState<boolean>(false);
+  const [draftAddress, setDraftAddress] = useState<string>('');
+  const [draftCity, setDraftCity] = useState<string>('');
+  const [draftState, setDraftState] = useState<string>('');
+  const [draftZip, setDraftZip] = useState<string>('');
+  const [draftCountry, setDraftCountry] = useState<string>('United States');
+  const [savingAddress, setSavingAddress] = useState<boolean>(false);
+  const [addressError, setAddressError] = useState<string | null>(null);
+
+  // Business Lines Saving State
+  const [savingLines, setSavingLines] = useState<boolean>(false);
+
   // Form State
   const [form, setForm] = useState<AgentProfileForm>({
     first_name: '',
@@ -93,9 +107,13 @@ export default function AgentInformationPage() {
   });
 
   const [loading, setLoading] = useState<boolean>(true);
-  const [saving, setSaving] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<boolean>(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const flashSuccess = (msg: string) => {
+    setSuccessMsg(msg);
+    setTimeout(() => setSuccessMsg(null), 4000);
+  };
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -105,7 +123,6 @@ export default function AgentInformationPage() {
         if (!session?.user) return;
 
         const currentUserId = session.user.id;
-        console.log('AUTHENTICATED USER ID (loadProfile):', currentUserId);
         setUserId(currentUserId);
 
         const { data, error } = await supabase
@@ -115,22 +132,15 @@ export default function AgentInformationPage() {
           .maybeSingle();
 
         if (error) {
-          console.error('Error fetching agent profile:', {
-            code: error.code,
-            message: error.message,
-            details: error.details,
-            hint: error.hint
-          });
+          console.error('Error fetching agent profile:', error);
           setErrorMsg(`Error loading profile: ${error.message}`);
         }
 
         if (data) {
-          console.log('LOADED BUSINESS LINES:', data.business_lines);
           if (Array.isArray(data.business_lines)) {
             const valid = data.business_lines.filter((b: any): b is BusinessLine =>
               ALL_BUSINESS_LINES.some(a => a.id === b)
             );
-            console.log('setSelectedLines (loadProfile):', valid);
             setSelectedLines(valid);
             setHasLoadedProfile(true);
           }
@@ -178,118 +188,138 @@ export default function AgentInformationPage() {
     loadProfile();
   }, []);
 
-  // Sync context fallback only if profile has not populated selectedLines yet
   useEffect(() => {
     if (!businessLinesLoading && !hasLoadedProfile && businessLines && businessLines.length > 0) {
-      console.log('setSelectedLines (context fallback):', businessLines);
       setSelectedLines(businessLines);
     }
   }, [businessLines, businessLinesLoading, hasLoadedProfile]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setForm(prev => ({ ...prev, [name]: value }));
+  // ATOMIC SINGLE-FIELD PERSISTENCE FUNCTION
+  const saveProfileField = async (fieldOrPayload: string | Record<string, any>, value?: any) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUserId = session?.user?.id || userId;
+    if (!currentUserId) throw new Error('User session not found.');
+
+    let patch: Record<string, any> = {};
+    if (typeof fieldOrPayload === 'string') {
+      patch[fieldOrPayload] = value;
+    } else {
+      patch = { ...fieldOrPayload };
+    }
+
+    const nextFn = patch.first_name !== undefined ? patch.first_name : form.first_name;
+    const nextLn = patch.last_name !== undefined ? patch.last_name : form.last_name;
+    const computedName = `${(nextFn || '').trim()} ${(nextLn || '').trim()}`.trim() || session?.user?.email || 'Agent Profile';
+
+    const upsertPayload = {
+      id: currentUserId,
+      name: computedName,
+      first_name: form.first_name,
+      last_name: form.last_name,
+      email: form.email,
+      phone: form.phone,
+      npn_number: form.npn_number,
+      license_number: form.license_number,
+      agency_name: form.agency_name,
+      agency_email: form.agency_email,
+      agency_phone: form.agency_phone,
+      website: form.website,
+      address: form.address,
+      city: form.city,
+      state: form.state,
+      zip_code: form.zip_code,
+      country: form.country,
+      preferred_contact_method: form.preferred_contact_method,
+      secondary_phone: form.secondary_phone,
+      timezone: form.timezone,
+      language: form.language,
+      business_lines: selectedLines,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: updatedRow, error: profileErr } = await supabase
+      .from('profiles')
+      .upsert(upsertPayload, { onConflict: 'id' })
+      .select('*')
+      .maybeSingle();
+
+    if (profileErr || !updatedRow) {
+      throw profileErr || new Error('Zero rows returned from Supabase profiles upsert.');
+    }
+
+    setForm(prev => ({ ...prev, ...patch }));
+    flashSuccess('Field updated successfully!');
   };
 
+  // ATOMIC ADDRESS SAVE
+  const handleSaveAddress = async () => {
+    if (savingAddress) return;
+    setSavingAddress(true);
+    setAddressError(null);
+    try {
+      await saveProfileField({
+        address: draftAddress.trim(),
+        city: draftCity.trim(),
+        state: draftState.trim(),
+        zip_code: draftZip.trim(),
+        country: draftCountry.trim() || 'United States',
+      });
+      setEditingAddress(false);
+    } catch (err: any) {
+      setAddressError(err?.message || 'Failed to save address.');
+    } finally {
+      setSavingAddress(false);
+    }
+  };
+
+  const handleStartAddressEdit = () => {
+    setDraftAddress(form.address);
+    setDraftCity(form.city);
+    setDraftState(form.state);
+    setDraftZip(form.zip_code);
+    setDraftCountry(form.country || 'United States');
+    setAddressError(null);
+    setEditingAddress(true);
+  };
+
+  const handleCancelAddressEdit = () => {
+    setDraftAddress(form.address);
+    setDraftCity(form.city);
+    setDraftState(form.state);
+    setDraftZip(form.zip_code);
+    setDraftCountry(form.country || 'United States');
+    setAddressError(null);
+    setEditingAddress(false);
+  };
+
+  // BUSINESS LINES TOGGLE & SAVE
   const toggleLine = (lineId: BusinessLine) => {
     setSelectedLines(prev => {
       const next = prev.includes(lineId)
         ? prev.filter(l => l !== lineId)
         : [...prev, lineId];
-      console.log('setSelectedLines (toggleLine):', next);
       return next;
     });
   };
 
-  const handleSaveAll = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
+  const handleSaveBusinessLines = async () => {
+    setSavingLines(true);
     setErrorMsg(null);
-    setSuccessMsg(false);
-
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const currentUserId = session?.user?.id || userId;
-
-      if (!currentUserId) {
-        throw new Error('User session not found.');
-      }
-
-      console.log('AUTHENTICATED USER ID (save):', currentUserId);
-      console.log('SELECTED LINES BEFORE SAVE:', selectedLines);
-
-      const computedName = `${form.first_name.trim()} ${form.last_name.trim()}`.trim() || session?.user?.email || 'Agent Profile';
-
-      const upsertPayload = {
-        id: currentUserId,
-        name: computedName,
-        first_name: form.first_name.trim() || null,
-        last_name: form.last_name.trim() || null,
-        email: form.email.trim() || session?.user?.email || null,
-        phone: form.phone.trim() || null,
-        npn_number: form.npn_number.trim() || null,
-        license_number: form.license_number.trim() || null,
-        agency_name: form.agency_name.trim() || null,
-        agency_email: form.agency_email.trim() || null,
-        agency_phone: form.agency_phone.trim() || null,
-        website: form.website.trim() || null,
-        address: form.address.trim() || null,
-        city: form.city.trim() || null,
-        state: form.state.trim() || null,
-        zip_code: form.zip_code.trim() || null,
-        country: form.country.trim() || null,
-        preferred_contact_method: form.preferred_contact_method,
-        secondary_phone: form.secondary_phone.trim() || null,
-        timezone: form.timezone,
-        language: form.language,
-        business_lines: selectedLines,
-        updated_at: new Date().toISOString(),
-      };
-
-      console.log('EXACT SUPABASE UPSERT PAYLOAD:', upsertPayload);
-
-      const { data: updatedRow, error: profileErr } = await supabase
-        .from('profiles')
-        .upsert(upsertPayload, { onConflict: 'id' })
-        .select('id, business_lines')
-        .maybeSingle();
-
-      console.log('SUPABASE UPSERT RESULT:', { data: updatedRow, error: profileErr });
-
-      if (profileErr || !updatedRow) {
-        console.error('Supabase update error details:', {
-          code: profileErr?.code,
-          message: profileErr?.message,
-          details: profileErr?.details,
-          hint: profileErr?.hint
-        });
-        throw profileErr || new Error('Zero rows returned from Supabase profiles upsert.');
-      }
-
-      console.log('SAVED BUSINESS LINES:', updatedRow.business_lines);
-
-      // Verify saved returned row matches selectedLines
-      const savedSet = JSON.stringify(updatedRow.business_lines || []);
-      const expectedSet = JSON.stringify(selectedLines || []);
-      if (savedSet !== expectedSet) {
-        throw new Error(`Persisted database row (${savedSet}) does not match selected array (${expectedSet}).`);
-      }
-
+      await saveProfileField('business_lines', selectedLines);
       await saveBusinessLines(selectedLines);
-
-      setSuccessMsg(true);
-      setTimeout(() => setSuccessMsg(false), 4000);
+      flashSuccess('Business lines updated successfully!');
     } catch (err: any) {
-      console.error('Save agent information error:', err);
-      setErrorMsg(err?.message || 'Failed to save agent information.');
+      setErrorMsg(err?.message || 'Failed to update business lines.');
     } finally {
-      setSaving(false);
+      setSavingLines(false);
     }
   };
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 max-w-6xl mx-auto pb-10">
+      <div className="space-y-6 max-w-6xl mx-auto pb-10 font-sans">
         
         {/* Compact Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-[#DCE2EA] rounded-md p-5 shadow-2xs">
@@ -298,18 +328,9 @@ export default function AgentInformationPage() {
               Agent Information
             </h1>
             <p className="text-xs text-[#556176] mt-0.5">
-              Manage your agent credentials, agency details, business address, and module preferences.
+              Click any field to edit directly and save atomically.
             </p>
           </div>
-
-          <button
-            type="submit"
-            form="agent-info-form"
-            disabled={saving || loading}
-            className="crm-btn-primary self-start sm:self-auto text-xs px-4 py-2 disabled:opacity-50"
-          >
-            {saving ? 'Saving Changes...' : 'Save Changes'}
-          </button>
         </div>
 
         {loading ? (
@@ -317,7 +338,7 @@ export default function AgentInformationPage() {
             Loading agent information...
           </div>
         ) : (
-          <form id="agent-info-form" onSubmit={handleSaveAll} className="space-y-6">
+          <div className="space-y-6">
             
             {/* Status Messages */}
             {errorMsg && (
@@ -328,7 +349,7 @@ export default function AgentInformationPage() {
 
             {successMsg && (
               <div className="p-3.5 rounded-md bg-[#F0FDF4] border border-[#DCFCE7] text-[#15803D] text-xs font-semibold">
-                Agent information saved successfully!
+                {successMsg}
               </div>
             )}
 
@@ -345,88 +366,52 @@ export default function AgentInformationPage() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        First Name *
-                      </label>
-                      <input
-                        type="text"
-                        name="first_name"
-                        value={form.first_name}
-                        onChange={handleChange}
-                        required
-                        className="crm-input w-full"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Last Name *
-                      </label>
-                      <input
-                        type="text"
-                        name="last_name"
-                        value={form.last_name}
-                        onChange={handleChange}
-                        required
-                        className="crm-input w-full"
-                      />
-                    </div>
+                    <InlineEditableText
+                      label="First Name *"
+                      value={form.first_name}
+                      onSave={val => {
+                        if (!val) throw new Error('First Name is required');
+                        return saveProfileField('first_name', val);
+                      }}
+                    />
+                    <InlineEditableText
+                      label="Last Name *"
+                      value={form.last_name}
+                      onSave={val => {
+                        if (!val) throw new Error('Last Name is required');
+                        return saveProfileField('last_name', val);
+                      }}
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Email Address *
-                      </label>
-                      <input
-                        type="email"
-                        name="email"
-                        value={form.email}
-                        onChange={handleChange}
-                        required
-                        className="crm-input w-full"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Phone Number
-                      </label>
-                      <PhoneInput
-                        name="phone"
-                        value={form.phone}
-                        onChange={val => setForm(prev => ({ ...prev, phone: val }))}
-                      />
-                    </div>
+                    <InlineEditableText
+                      label="Email Address *"
+                      type="email"
+                      value={form.email}
+                      onSave={val => {
+                        if (!val || !val.includes('@')) throw new Error('Valid email address required');
+                        return saveProfileField('email', val);
+                      }}
+                    />
+                    <InlineEditablePhone
+                      label="Phone Number"
+                      value={form.phone}
+                      onSave={val => saveProfileField('phone', val)}
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        NPN Number
-                      </label>
-                      <input
-                        type="text"
-                        name="npn_number"
-                        value={form.npn_number}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        License Number
-                      </label>
-                      <input
-                        type="text"
-                        name="license_number"
-                        value={form.license_number}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      />
-                    </div>
+                    <InlineEditableText
+                      label="NPN Number"
+                      value={form.npn_number}
+                      onSave={val => saveProfileField('npn_number', val)}
+                    />
+                    <InlineEditableText
+                      label="License Number"
+                      value={form.license_number}
+                      onSave={val => saveProfileField('license_number', val)}
+                    />
                   </div>
                 </div>
 
@@ -437,57 +422,33 @@ export default function AgentInformationPage() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Agency Name
-                      </label>
-                      <input
-                        type="text"
-                        name="agency_name"
-                        value={form.agency_name}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Agency Email
-                      </label>
-                      <input
-                        type="email"
-                        name="agency_email"
-                        value={form.agency_email}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      />
-                    </div>
+                    <InlineEditableText
+                      label="Agency Name"
+                      value={form.agency_name}
+                      onSave={val => saveProfileField('agency_name', val)}
+                    />
+                    <InlineEditableText
+                      label="Agency Email"
+                      type="email"
+                      value={form.agency_email}
+                      onSave={val => {
+                        if (val && !val.includes('@')) throw new Error('Valid agency email required');
+                        return saveProfileField('agency_email', val);
+                      }}
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Agency Phone
-                      </label>
-                      <PhoneInput
-                        name="agency_phone"
-                        value={form.agency_phone}
-                        onChange={val => setForm(prev => ({ ...prev, agency_phone: val }))}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Website
-                      </label>
-                      <input
-                        type="text"
-                        name="website"
-                        value={form.website}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      />
-                    </div>
+                    <InlineEditablePhone
+                      label="Agency Phone"
+                      value={form.agency_phone}
+                      onSave={val => saveProfileField('agency_phone', val)}
+                    />
+                    <InlineEditableText
+                      label="Website"
+                      value={form.website}
+                      onSave={val => saveProfileField('website', val)}
+                    />
                   </div>
                 </div>
 
@@ -496,84 +457,25 @@ export default function AgentInformationPage() {
                   <div className="border-b border-[#E8ECF2] pb-3">
                     <h2 className="text-sm font-semibold text-[#172033]">Business Address</h2>
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-[#172033] mb-1">
-                      Street Address
-                    </label>
-                    <GoogleAddressAutocomplete
-                      id="address"
-                      name="address"
-                      value={form.address}
-                      onChange={val => setForm(prev => ({ ...prev, address: val }))}
-                      onAddressSelected={normalized => {
-                        console.log('[AgentInformation] Google Place Address selected:', normalized);
-                        setForm(prev => ({
-                          ...prev,
-                          address: normalized.streetAddress || prev.address,
-                          city: normalized.city || prev.city,
-                          state: normalized.state || prev.state,
-                          zip_code: normalized.postalCode || prev.zip_code,
-                          country: normalized.country || prev.country || 'United States',
-                        }));
-                      }}
-                      className="crm-input w-full"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                    <div className="col-span-2 sm:col-span-1">
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        City
-                      </label>
-                      <input
-                        type="text"
-                        name="city"
-                        value={form.city}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        State
-                      </label>
-                      <input
-                        type="text"
-                        name="state"
-                        value={form.state}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        ZIP Code
-                      </label>
-                      <input
-                        type="text"
-                        name="zip_code"
-                        value={form.zip_code}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-[#172033] mb-1">
-                      Country
-                    </label>
-                    <input
-                      type="text"
-                      name="country"
-                      value={form.country}
-                      onChange={handleChange}
-                      className="crm-input w-full"
-                    />
-                  </div>
+                  <InlineEditableAddress
+                    label=""
+                    data={{
+                      address: form.address,
+                      city: form.city,
+                      state: form.state,
+                      zip_code: form.zip_code,
+                      country: form.country,
+                    }}
+                    onSave={async (newData) => {
+                      await saveProfileField({
+                        address: newData.address,
+                        city: newData.city,
+                        state: newData.state,
+                        zip_code: newData.zip_code,
+                        country: newData.country || 'United States',
+                      });
+                    }}
+                  />
                 </div>
 
               </div>
@@ -588,32 +490,17 @@ export default function AgentInformationPage() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Preferred Contact Method
-                      </label>
-                      <select
-                        name="preferred_contact_method"
-                        value={form.preferred_contact_method}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      >
-                        {CONTACT_METHODS.map(method => (
-                          <option key={method} value={method}>{method}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Secondary Phone <span className="text-[#7C8799] font-normal">(optional)</span>
-                      </label>
-                      <PhoneInput
-                        name="secondary_phone"
-                        value={form.secondary_phone}
-                        onChange={val => setForm(prev => ({ ...prev, secondary_phone: val }))}
-                      />
-                    </div>
+                    <InlineEditableSelect
+                      label="Preferred Contact Method"
+                      value={form.preferred_contact_method}
+                      options={CONTACT_METHODS.map(m => ({ label: m, value: m }))}
+                      onSave={val => saveProfileField('preferred_contact_method', val)}
+                    />
+                    <InlineEditablePhone
+                      label="Secondary Phone"
+                      value={form.secondary_phone}
+                      onSave={val => saveProfileField('secondary_phone', val)}
+                    />
                   </div>
                 </div>
 
@@ -624,47 +511,38 @@ export default function AgentInformationPage() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Time Zone
-                      </label>
-                      <select
-                        name="timezone"
-                        value={form.timezone}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      >
-                        {TIMEZONES.map(tz => (
-                          <option key={tz} value={tz}>{tz}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-[#172033] mb-1">
-                        Language
-                      </label>
-                      <select
-                        name="language"
-                        value={form.language}
-                        onChange={handleChange}
-                        className="crm-input w-full"
-                      >
-                        {LANGUAGES.map(lang => (
-                          <option key={lang} value={lang}>{lang}</option>
-                        ))}
-                      </select>
-                    </div>
+                    <InlineEditableSelect
+                      label="Time Zone"
+                      value={form.timezone}
+                      options={TIMEZONES.map(tz => ({ label: tz, value: tz }))}
+                      onSave={val => saveProfileField('timezone', val)}
+                    />
+                    <InlineEditableSelect
+                      label="Language"
+                      value={form.language}
+                      options={LANGUAGES.map(lang => ({ label: lang, value: lang }))}
+                      onSave={val => saveProfileField('language', val)}
+                    />
                   </div>
                 </div>
 
                 {/* SECTION 6: BUSINESS LINES */}
                 <div className="crm-card p-5 space-y-4">
-                  <div className="border-b border-[#E8ECF2] pb-3">
-                    <h2 className="text-sm font-semibold text-[#172033]">Business Lines</h2>
-                    <p className="text-xs text-[#556176] mt-0.5">
-                      Only the selected business lines will be visible in your CRM.
-                    </p>
+                  <div className="border-b border-[#E8ECF2] pb-3 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-sm font-semibold text-[#172033]">Business Lines</h2>
+                      <p className="text-xs text-[#556176] mt-0.5">
+                        Only the selected business lines will be visible in your CRM.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSaveBusinessLines}
+                      disabled={savingLines}
+                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-semibold rounded-lg shadow-xs transition-all disabled:opacity-50"
+                    >
+                      {savingLines ? 'Saving...' : 'Save Lines'}
+                    </button>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -695,18 +573,7 @@ export default function AgentInformationPage() {
               </div>
             </div>
 
-            {/* BOTTOM SAVE BUTTON */}
-            <div className="flex justify-end pt-4 border-t border-[#DCE2EA]">
-              <button
-                type="submit"
-                disabled={saving || loading}
-                className="crm-btn-primary text-xs px-6 py-2.5 disabled:opacity-50"
-              >
-                {saving ? 'Saving Changes...' : 'Save Changes'}
-              </button>
-            </div>
-
-          </form>
+          </div>
         )}
       </div>
     </DashboardLayout>
