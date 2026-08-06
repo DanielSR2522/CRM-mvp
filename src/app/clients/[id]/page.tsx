@@ -899,31 +899,39 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       setLoadingPersonal(true);
       if (!isValidUuid(clientId)) {
         setPersonalInfo(null);
-        setLoadingPersonal(false);
         return;
       }
 
-      const { data, error } = await supabase
-        .from('client_personal_information')
-        .select('*')
-        .eq('client_id', clientId)
-        .maybeSingle();
+      const [personalRes, clientRes] = await Promise.all([
+        supabase
+          .from('client_personal_information')
+          .select('*')
+          .eq('client_id', clientId)
+          .maybeSingle(),
+        supabase
+          .from('clients')
+          .select('full_name, email, phone')
+          .eq('id', clientId)
+          .maybeSingle()
+      ]);
 
-      if (error) throw error;
+      if (personalRes.error) throw personalRes.error;
+      const data = personalRes.data;
+      const masterClient = clientRes.data;
+
       setPersonalInfo(data);
 
-      // Fallback order: client_personal_information.full_name -> clients.full_name -> ''
       const resolvedName = (data?.full_name && data.full_name.trim().length > 0)
         ? data.full_name
-        : (client?.full_name || '');
+        : (masterClient?.full_name || '');
 
       if (data) {
         setPersonalForm({
           full_name: resolvedName,
           date_of_birth: data.date_of_birth || '',
           ssn: data.ssn || '',
-          email: data.email || client?.email || '',
-          phone: data.phone || client?.phone || '',
+          email: data.email || masterClient?.email || '',
+          phone: data.phone || masterClient?.phone || '',
           secondary_phone: data.secondary_phone || '',
           secondary_email: data.secondary_email || '',
           has_co_applicant: data.has_co_applicant || false,
@@ -939,23 +947,33 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           immigration_other_description: data.immigration_other_description || '',
         });
       } else {
-        // Default values pre-filled from client master details
-        setPersonalForm(prev => ({
-          ...prev,
-          full_name: client?.full_name || '',
-          email: client?.email || '',
-          phone: client?.phone || '',
+        setPersonalForm({
+          full_name: masterClient?.full_name || '',
+          date_of_birth: '',
+          ssn: '',
+          email: masterClient?.email || '',
+          phone: masterClient?.phone || '',
           secondary_phone: '',
           secondary_email: '',
           has_co_applicant: false,
-        }));
+          gender: '',
+          marital_status: '',
+          born_in_usa: null,
+          immigration_status: '',
+          alien_number: '',
+          card_number: '',
+          uscis_number: '',
+          immigration_category: '',
+          immigration_expiration_date: '',
+          immigration_other_description: '',
+        });
       }
     } catch (err: any) {
       console.error('Error fetching personal info:', err);
     } finally {
       setLoadingPersonal(false);
     }
-  }, [clientId, client]);
+  }, [clientId]);
 
   // Fetch Residence Information
   const fetchCoApplicantInformation = async () => {
@@ -1028,17 +1046,26 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       setLoadingResidence(true);
       if (!isValidUuid(clientId)) {
         setResidenceInfo(null);
-        setLoadingResidence(false);
         return;
       }
 
-      const { data, error } = await supabase
-        .from('client_residence_information')
-        .select('*')
-        .eq('client_id', clientId)
-        .maybeSingle();
+      const [residenceRes, clientRes] = await Promise.all([
+        supabase
+          .from('client_residence_information')
+          .select('*')
+          .eq('client_id', clientId)
+          .maybeSingle(),
+        supabase
+          .from('clients')
+          .select('address')
+          .eq('id', clientId)
+          .maybeSingle()
+      ]);
 
-      if (error) throw error;
+      if (residenceRes.error) throw residenceRes.error;
+      const data = residenceRes.data;
+      const masterClient = clientRes.data;
+
       setResidenceInfo(data);
       if (data) {
         setResidenceForm({
@@ -1049,18 +1076,20 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           county: data.county || '',
         });
       } else {
-        // Pre-fill from master clients table if exists
-        setResidenceForm(prev => ({
-          ...prev,
-          address: client?.address || '',
-        }));
+        setResidenceForm({
+          address: masterClient?.address || '',
+          city: '',
+          state: '',
+          zip_code: '',
+          county: '',
+        });
       }
     } catch (err: any) {
       console.error('Error fetching residence info:', err);
     } finally {
       setLoadingResidence(false);
     }
-  }, [clientId, client]);
+  }, [clientId]);
 
   // Fetch Linked Company Policies
   const fetchLinkedCompanyPolicies = async () => {
@@ -1642,30 +1671,26 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   };
 
   useEffect(() => {
-    if (activeTab === 'timeline') {
-      fetchTimelineEvents();
-    }
-    if (activeTab === 'overview') {
-      fetchOverviewPolicies();
-    }
-  }, [activeTab, fetchOverviewPolicies]);
-
-  useEffect(() => {
+    if (!isValidUuid(clientId)) return;
     fetchClientDetails();
     fetchPolicies();
     fetchLinkedCompanyPolicies();
     fetchOverviewPolicies();
     fetchPersonalInformation();
     fetchResidenceInformation();
-  }, [clientId, fetchOverviewPolicies, fetchPersonalInformation, fetchResidenceInformation]);
+  }, [clientId]);
 
-  // Lazy load income/co-applicant modules only when personal-info tab is active
   useEffect(() => {
-    if (activeTab === 'personal-info' && client) {
+    if (!isValidUuid(clientId)) return;
+    if (activeTab === 'timeline') {
+      fetchTimelineEvents();
+    } else if (activeTab === 'overview') {
+      fetchOverviewPolicies();
+    } else if (activeTab === 'personal-info') {
       fetchIncomeInformation();
       fetchCoApplicantInformation();
     }
-  }, [activeTab, client]);
+  }, [activeTab, clientId]);
 
   const cleanCoApplicantPayload = (form: CoApplicantInformation) => {
     const cleaned = { ...form } as any;
