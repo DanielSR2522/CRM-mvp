@@ -20,11 +20,34 @@ export default function HealthDocuments({
 
   const [newSectionName, setNewSectionName] = useState('');
   const [uploadingSectionId, setUploadingSectionId] = useState<string | null>(null);
+  const [creatingSection, setCreatingSection] = useState(false);
 
   const loadDocsData = useCallback(async () => {
     try {
       setLoading(true);
-      const secs = await fetchHealthSections(healthPolicyId);
+      let secs = await fetchHealthSections(healthPolicyId);
+      
+      // Auto-create default "General Documents" folder if no section exists yet
+      if (secs.length === 0) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { data: defaultSec, error: defErr } = await supabase
+            .from('health_policy_document_sections')
+            .insert({
+              health_policy_id: healthPolicyId,
+              name: 'General Documents',
+              position: 0,
+              created_by: session.user.id
+            })
+            .select('*')
+            .maybeSingle();
+
+          if (!defErr && defaultSec) {
+            secs = [defaultSec];
+          }
+        }
+      }
+
       const docs = await fetchHealthDocuments(healthPolicyId);
       setSections(secs);
       setDocuments(docs);
@@ -42,16 +65,14 @@ export default function HealthDocuments({
   }, [healthPolicyId, addToast]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadDocsData();
-    }, 0);
-    return () => clearTimeout(timer);
+    loadDocsData();
   }, [loadDocsData]);
 
   const handleCreateSection = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSectionName.trim()) return;
+    if (!newSectionName.trim() || creatingSection) return;
 
+    setCreatingSection(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) throw new Error('Not authenticated.');
@@ -69,7 +90,7 @@ export default function HealthDocuments({
 
       if (error) throw error;
 
-      setSections([...sections, data]);
+      setSections(prev => [...prev, data]);
       setNewSectionName('');
       addToast({
         title: 'Section Created',
@@ -83,6 +104,8 @@ export default function HealthDocuments({
         description: message,
         type: 'error'
       });
+    } finally {
+      setCreatingSection(false);
     }
   };
 
@@ -106,16 +129,17 @@ export default function HealthDocuments({
       if (!session?.user) throw new Error('You must be logged in.');
 
       const documentId = crypto.randomUUID();
+      // Storage Path layout matching bucket RLS policy: session.user.id / clientId / healthPolicyId / documents / documentId / filename
       const storagePath = `${session.user.id}/${clientId}/${healthPolicyId}/documents/${documentId}/${file.name}`;
 
-      // Upload physical file
+      // Upload physical file to health-policy-documents bucket
       const { error: storageError } = await supabase.storage
         .from('health-policy-documents')
         .upload(storagePath, file, { cacheControl: '3600', upsert: false });
 
       if (storageError) throw storageError;
 
-      // Create metadata row
+      // Create metadata row in health_policy_documents
       const { error: dbError } = await supabase
         .from('health_policy_documents')
         .insert({
@@ -126,7 +150,7 @@ export default function HealthDocuments({
           display_name: file.name,
           original_filename: file.name,
           storage_path: storagePath,
-          mime_type: file.type,
+          mime_type: file.type || 'application/octet-stream',
           size_bytes: file.size
         });
 
@@ -136,15 +160,19 @@ export default function HealthDocuments({
         throw dbError;
       }
 
-      // Log action in Timeline
-      await supabase.from('client_timeline_events').insert({
+      // Log activity event in activity_events table
+      await supabase.from('activity_events').insert({
         client_id: clientId,
-        event_type: 'health_document_uploaded',
+        policy_id: null,
         actor_id: session.user.id,
-        details: {
+        event_type: 'health_document_uploaded',
+        title: 'Health Document Uploaded',
+        description: `Uploaded document "${file.name}"`,
+        metadata: {
           filename: file.name,
           size_bytes: file.size,
-          health_policy_id: healthPolicyId
+          health_policy_id: healthPolicyId,
+          document_id: documentId
         }
       });
 
@@ -153,7 +181,8 @@ export default function HealthDocuments({
         description: `Successfully uploaded "${file.name}".`,
         type: 'success'
       });
-      loadDocsData();
+
+      await loadDocsData();
     } catch (err) {
       console.error(err);
       const message = err instanceof Error ? err.message : 'Could not complete file upload.';
@@ -164,6 +193,8 @@ export default function HealthDocuments({
       });
     } finally {
       setUploadingSectionId(null);
+      // Reset input value
+      e.target.value = '';
     }
   };
 
@@ -210,14 +241,18 @@ export default function HealthDocuments({
 
       if (dbErr) throw dbErr;
 
-      // Log in Timeline
-      await supabase.from('client_timeline_events').insert({
+      // Log event in activity_events table
+      await supabase.from('activity_events').insert({
         client_id: clientId,
-        event_type: 'health_document_deleted',
+        policy_id: null,
         actor_id: session.user.id,
-        details: {
+        event_type: 'health_document_deleted',
+        title: 'Health Document Deleted',
+        description: `Deleted document "${doc.display_name}"`,
+        metadata: {
           filename: doc.display_name,
-          health_policy_id: healthPolicyId
+          health_policy_id: healthPolicyId,
+          document_id: doc.id
         }
       });
 
@@ -226,7 +261,8 @@ export default function HealthDocuments({
         description: `"${doc.display_name}" has been removed.`,
         type: 'success'
       });
-      loadDocsData();
+
+      await loadDocsData();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not remove document.';
       addToast({
@@ -245,8 +281,9 @@ export default function HealthDocuments({
       const sectionDocs = documents.filter(d => d.section_id === section.id);
 
       // Delete storage files inside the section
-      for (const doc of sectionDocs) {
-        await supabase.storage.from('health-policy-documents').remove([doc.storage_path]);
+      if (sectionDocs.length > 0) {
+        const paths = sectionDocs.map(d => d.storage_path);
+        await supabase.storage.from('health-policy-documents').remove(paths);
       }
 
       // Delete section (cascade deletes db metadata documents)
@@ -262,7 +299,8 @@ export default function HealthDocuments({
         description: `Folder "${section.name}" and its documents were removed.`,
         type: 'success'
       });
-      loadDocsData();
+
+      await loadDocsData();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Please try again.';
       addToast({
@@ -297,9 +335,10 @@ export default function HealthDocuments({
           />
           <button
             type="submit"
-            className="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all shadow-md shadow-blue-500/10"
+            disabled={creatingSection}
+            className="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-all shadow-md shadow-blue-500/10"
           >
-            Create Folder
+            {creatingSection ? 'Creating...' : 'Create Folder'}
           </button>
         </form>
       </div>
@@ -324,7 +363,7 @@ export default function HealthDocuments({
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <label className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5">
+                    <label className={`text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${uploadingSectionId === sec.id ? 'opacity-50 cursor-not-allowed' : ''}`}>
                       {uploadingSectionId === sec.id ? (
                         <>
                           <svg className="animate-spin h-3.5 w-3.5 text-blue-600" fill="none" viewBox="0 0 24 24">

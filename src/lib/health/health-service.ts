@@ -270,12 +270,31 @@ export async function revealHealthSecret(
 export async function fetchHealthNotes(healthPolicyId: string): Promise<HealthPolicyNote[]> {
   const { data, error } = await supabase
     .from('health_policy_notes')
-    .select('*, profiles(name, email)')
+    .select('*')
     .eq('health_policy_id', healthPolicyId)
     .order('created_at', { ascending: false });
 
   if (error) throw error;
-  return (data as HealthPolicyNote[]) || [];
+  if (!data || data.length === 0) return [];
+
+  const authorIds = Array.from(new Set(data.map(n => n.author_id).filter(Boolean)));
+  let profileMap: Record<string, { name: string | null; email: string | null }> = {};
+  if (authorIds.length > 0) {
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('id, name, email')
+      .in('id', authorIds);
+    if (profs) {
+      profs.forEach((p: any) => {
+        profileMap[p.id] = { name: p.name, email: p.email };
+      });
+    }
+  }
+
+  return data.map(n => ({
+    ...n,
+    profiles: profileMap[n.author_id] || null
+  })) as HealthPolicyNote[];
 }
 
 // --- Documents Helpers ---

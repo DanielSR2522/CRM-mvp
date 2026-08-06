@@ -8,22 +8,14 @@ interface HealthTimelineProps {
   addToast: (toast: { title: string; description: string; type: 'success' | 'error' | 'warning' }) => void;
 }
 
-interface TimelineEventDetails {
-  health_policy_id?: string;
-  filename?: string;
-  size_bytes?: number;
-}
-
 interface TimelineEvent {
   id: string;
   event_type: string;
-  actor_id: string;
-  details: TimelineEventDetails | null;
+  title: string;
+  description: string;
+  actor_name: string;
   created_at: string;
-  profiles?: {
-    name: string | null;
-    email: string | null;
-  } | null;
+  dedup_key: string;
 }
 
 export default function HealthTimeline({
@@ -37,28 +29,144 @@ export default function HealthTimeline({
   const loadTimelineEvents = useCallback(async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('client_timeline_events')
-        .select('*, profiles(name, email)')
-        .eq('client_id', clientId)
-        .in('event_type', [
-          'health_policy_created',
-          'health_policy_updated',
-          'health_document_uploaded',
-          'health_document_deleted',
-          'health_note_created',
-          'health_note_deleted'
-        ])
-        .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      const [activityRes, notesRes, docsRes, policyRes] = await Promise.all([
+        // 1. Activity events logged specifically for this policy or client with health_policy_id
+        supabase
+          .from('activity_events')
+          .select('*')
+          .eq('client_id', clientId)
+          .order('created_at', { ascending: false }),
 
-      // Filter events belonging to this specific policyId if present in details
-      const filtered = ((data as TimelineEvent[]) || []).filter(evt => {
-        return evt.details?.health_policy_id === healthPolicyId;
-      });
+        // 2. Direct health policy notes
+        supabase
+          .from('health_policy_notes')
+          .select('id, content, created_at, author_id')
+          .eq('health_policy_id', healthPolicyId)
+          .order('created_at', { ascending: false }),
 
-      setEvents(filtered);
+        // 3. Direct health policy documents
+        supabase
+          .from('health_policy_documents')
+          .select('id, display_name, created_at, uploaded_by')
+          .eq('health_policy_id', healthPolicyId)
+          .order('created_at', { ascending: false }),
+
+        // 4. Health policy row details
+        supabase
+          .from('health_policies')
+          .select('id, created_at, updated_at, active, company_2026, plan_id, renovation_status')
+          .eq('id', healthPolicyId)
+          .maybeSingle()
+      ]);
+
+      const normalized: TimelineEvent[] = [];
+      const seenKeys = new Set<string>();
+
+      // A. Process activity_events
+      if (activityRes.data) {
+        activityRes.data.forEach((item: any) => {
+          const isForThisPolicy = item.policy_id === healthPolicyId || item.metadata?.health_policy_id === healthPolicyId;
+          const isHealthType = String(item.event_type).startsWith('health_');
+
+          if (isForThisPolicy || isHealthType) {
+            // Deduplicate
+            const dedupKey = `activity_${item.id}`;
+            if (!seenKeys.has(dedupKey)) {
+              seenKeys.add(dedupKey);
+              normalized.push({
+                id: item.id,
+                event_type: item.event_type || 'health_event',
+                title: item.title || 'Health Policy Action',
+                description: item.description || (item.metadata?.filename ? `Document: ${item.metadata.filename}` : 'Health activity recorded.'),
+                actor_name: 'Agent',
+                created_at: item.created_at,
+                dedup_key: dedupKey
+              });
+            }
+          }
+        });
+      }
+
+      // B. Process health_policy_notes directly
+      if (notesRes.data) {
+        notesRes.data.forEach((note: any) => {
+          const dedupKey = `note_${note.id}`;
+          if (!seenKeys.has(dedupKey)) {
+            seenKeys.add(dedupKey);
+            const shortContent = note.content
+              ? (note.content.length > 60 ? `${note.content.slice(0, 60)}...` : note.content)
+              : 'Created health note';
+            normalized.push({
+              id: note.id,
+              event_type: 'health_note_created',
+              title: 'Health Note Created',
+              description: `Note: "${shortContent}"`,
+              actor_name: 'Agent',
+              created_at: note.created_at,
+              dedup_key: dedupKey
+            });
+          }
+        });
+      }
+
+      // C. Process health_policy_documents directly
+      if (docsRes.data) {
+        docsRes.data.forEach((doc: any) => {
+          const dedupKey = `doc_${doc.id}`;
+          if (!seenKeys.has(dedupKey)) {
+            seenKeys.add(dedupKey);
+            normalized.push({
+              id: doc.id,
+              event_type: 'health_document_uploaded',
+              title: 'Health Document Uploaded',
+              description: `Uploaded "${doc.display_name}"`,
+              actor_name: 'Agent',
+              created_at: doc.created_at,
+              dedup_key: dedupKey
+            });
+          }
+        });
+      }
+
+      // D. Process policy creation/update timestamps
+      if (policyRes.data) {
+        const pol = policyRes.data;
+        const createKey = `pol_create_${pol.id}`;
+        if (!seenKeys.has(createKey) && pol.created_at) {
+          seenKeys.add(createKey);
+          normalized.push({
+            id: createKey,
+            event_type: 'health_policy_created',
+            title: 'Health Policy Created',
+            description: `Health policy registered${pol.company_2026 ? ` (${pol.company_2026})` : ''}.`,
+            actor_name: 'Agent',
+            created_at: pol.created_at,
+            dedup_key: createKey
+          });
+        }
+
+        if (pol.updated_at && pol.updated_at !== pol.created_at) {
+          const updateKey = `pol_update_${pol.id}_${pol.updated_at.slice(0, 19)}`;
+          if (!seenKeys.has(updateKey)) {
+            seenKeys.add(updateKey);
+            normalized.push({
+              id: updateKey,
+              event_type: 'health_policy_updated',
+              title: 'Health Policy Updated',
+              description: `Policy details updated (Status: ${pol.active ? 'Enrolled' : 'Inactive'}).`,
+              actor_name: 'Agent',
+              created_at: pol.updated_at,
+              dedup_key: updateKey
+            });
+          }
+        }
+      }
+
+      // Sort newest first
+      normalized.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      setEvents(normalized);
     } catch (err) {
       console.error('Failed to load health timeline:', err);
       const message = err instanceof Error ? err.message : 'Could not load timeline events.';
@@ -73,33 +181,8 @@ export default function HealthTimeline({
   }, [clientId, healthPolicyId, addToast]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadTimelineEvents();
-    }, 0);
-    return () => clearTimeout(timer);
+    loadTimelineEvents();
   }, [loadTimelineEvents]);
-
-  const getEventText = (evt: TimelineEvent): string => {
-    const actor = evt.profiles?.name || evt.profiles?.email || 'Agent';
-    const details = evt.details || {};
-
-    switch (evt.event_type) {
-      case 'health_policy_created':
-        return `${actor} created the Health Policy.`;
-      case 'health_policy_updated':
-        return `${actor} updated the Health Policy details.`;
-      case 'health_document_uploaded':
-        return `${actor} uploaded document "${details.filename || 'file'}" to Health folder.`;
-      case 'health_document_deleted':
-        return `${actor} deleted document "${details.filename || 'file'}" from Health folder.`;
-      case 'health_note_created':
-        return `${actor} created a health note.`;
-      case 'health_note_deleted':
-        return `${actor} deleted a health note.`;
-      default:
-        return `${actor} performed health action: ${evt.event_type}.`;
-    }
-  };
 
   if (loading) {
     return (
@@ -125,9 +208,12 @@ export default function HealthTimeline({
               {/* Dot icon */}
               <div className="absolute -left-[31px] top-1 bg-white border-2 border-blue-500 rounded-full w-4 h-4" />
               <div className="space-y-1">
-                <span className="text-slate-700 text-sm block font-semibold">
-                  {getEventText(evt)}
+                <span className="text-slate-800 text-xs block font-bold">
+                  {evt.title}
                 </span>
+                <p className="text-slate-600 text-xs block">
+                  {evt.description}
+                </p>
                 <span className="text-[10px] text-slate-400 block">
                   {formatDateTimeToUs(evt.created_at)}
                 </span>

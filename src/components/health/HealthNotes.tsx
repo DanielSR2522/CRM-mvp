@@ -77,6 +77,9 @@ export default function HealthNotes({
           });
           setSignedUrls(urlMap);
         }
+      } else {
+        setSavedAttachments({});
+        setSignedUrls({});
       }
     } catch (err) {
       console.error('Failed to load notes:', err);
@@ -92,10 +95,7 @@ export default function HealthNotes({
   }, [healthPolicyId, addToast]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadNotesData();
-    }, 0);
-    return () => clearTimeout(timer);
+    loadNotesData();
   }, [loadNotesData]);
 
   // Intercept Paste (Ctrl+V) from Clipboard
@@ -143,9 +143,18 @@ export default function HealthNotes({
 
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!noteContent.trim() && attachments.length === 0) return;
+    if (!noteContent.trim() && attachments.length === 0) {
+      addToast({
+        title: 'Empty Note',
+        description: 'Please type a note message or attach an image before submitting.',
+        type: 'warning'
+      });
+      return;
+    }
 
+    if (saving) return;
     setSaving(true);
+
     const noteId = crypto.randomUUID();
     const uploadedPaths: string[] = [];
 
@@ -153,12 +162,12 @@ export default function HealthNotes({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) throw new Error('Not authenticated.');
 
-      // 1. Upload Attachments to private bucket
+      // 1. Upload Attachments to health-policy-documents bucket
       const attachResult = { succeeded: [] as string[], failed: [] as string[] };
 
       for (const att of attachments) {
         const attachmentId = crypto.randomUUID();
-        // Exact path layout required: auth.uid()/client_id/policy_id/notes/note_id/attachment_id/original_filename
+        // Path structure: auth.uid()/clientId/healthPolicyId/notes/noteId/attachmentId/filename
         const storagePath = `${session.user.id}/${clientId}/${healthPolicyId}/notes/${noteId}/${attachmentId}/${att.file.name}`;
 
         const { error: storageError } = await supabase.storage
@@ -181,7 +190,7 @@ export default function HealthNotes({
             display_name: att.file.name,
             original_filename: att.file.name,
             storage_path: storagePath,
-            mime_type: att.file.type,
+            mime_type: att.file.type || 'image/png',
             size_bytes: att.file.size
           });
 
@@ -196,11 +205,10 @@ export default function HealthNotes({
       }
 
       if (attachResult.failed.length > 0) {
-        // Rollback already uploaded files
         if (uploadedPaths.length > 0) {
           await supabase.storage.from('health-policy-documents').remove(uploadedPaths);
         }
-        throw new Error(`Failed to upload these attachments: ${attachResult.failed.join(', ')}`);
+        throw new Error(`Failed to upload attachments: ${attachResult.failed.join(', ')}`);
       }
 
       // 2. Create the note record in database
@@ -210,23 +218,25 @@ export default function HealthNotes({
           id: noteId,
           health_policy_id: healthPolicyId,
           author_id: session.user.id,
-          content: noteContent.trim() || 'Image attached'
+          content: noteContent.trim() || (attachments.length > 0 ? '[Image Attached]' : '')
         });
 
       if (noteError) {
-        // Rollback attachments
         if (uploadedPaths.length > 0) {
           await supabase.storage.from('health-policy-documents').remove(uploadedPaths);
         }
         throw noteError;
       }
 
-      // Log in Timeline
-      await supabase.from('client_timeline_events').insert({
+      // Log in activity_events table
+      await supabase.from('activity_events').insert({
         client_id: clientId,
-        event_type: 'health_note_created',
+        policy_id: null,
         actor_id: session.user.id,
-        details: {
+        event_type: 'health_note_created',
+        title: 'Health Note Created',
+        description: noteContent.trim() ? `Note: "${noteContent.trim().slice(0, 60)}${noteContent.trim().length > 60 ? '...' : ''}"` : 'Note added with attachment',
+        metadata: {
           note_id: noteId,
           has_attachments: attachments.length > 0,
           health_policy_id: healthPolicyId
@@ -244,8 +254,9 @@ export default function HealthNotes({
         type: 'success'
       });
 
-      loadNotesData();
+      await loadNotesData();
     } catch (err) {
+      console.error('Error adding health note:', err);
       const message = err instanceof Error ? err.message : 'Please try again.';
       addToast({
         title: 'Failed to Add Note',
@@ -265,33 +276,15 @@ export default function HealthNotes({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) throw new Error('Not authenticated.');
 
-      // Fetch all attachments for this note
       const noteAtts = savedAttachments[note.id] || [];
 
-      // 1. Attempt to delete all Storage objects first
-      const failedPaths: string[] = [];
-      const deletedPaths: string[] = [];
-
-      for (const att of noteAtts) {
-        const { error: storageErr } = await supabase.storage
-          .from('health-policy-documents')
-          .remove([att.storage_path]);
-
-        if (storageErr) {
-          console.error(`Failed to delete storage path: ${att.storage_path}`, storageErr);
-          failedPaths.push(att.display_name);
-        } else {
-          deletedPaths.push(att.storage_path);
-        }
+      // 1. Delete storage files first
+      if (noteAtts.length > 0) {
+        const paths = noteAtts.map(a => a.storage_path);
+        await supabase.storage.from('health-policy-documents').remove(paths);
       }
 
-      // 2. If any storage deletion fails, stop and report error
-      if (failedPaths.length > 0) {
-        // Rollback or report
-        throw new Error(`Storage deletion failed for attachment(s): ${failedPaths.join(', ')}. Note deletion aborted.`);
-      }
-
-      // 3. Delete the note (database cascade will clear note_attachments rows)
+      // 2. Delete the note (database cascade will clear health_policy_note_attachments rows)
       const { error: dbErr } = await supabase
         .from('health_policy_notes')
         .delete()
@@ -299,12 +292,15 @@ export default function HealthNotes({
 
       if (dbErr) throw dbErr;
 
-      // Log in Timeline
-      await supabase.from('client_timeline_events').insert({
+      // Log in activity_events table
+      await supabase.from('activity_events').insert({
         client_id: clientId,
-        event_type: 'health_note_deleted',
+        policy_id: null,
         actor_id: session.user.id,
-        details: {
+        event_type: 'health_note_deleted',
+        title: 'Health Note Deleted',
+        description: 'Deleted a health note',
+        metadata: {
           note_id: note.id,
           health_policy_id: healthPolicyId
         }
@@ -316,8 +312,9 @@ export default function HealthNotes({
         type: 'success'
       });
 
-      loadNotesData();
+      await loadNotesData();
     } catch (err) {
+      console.error('Error deleting health note:', err);
       const message = err instanceof Error ? err.message : 'Could not delete the note.';
       addToast({
         title: 'Delete Failed',
@@ -374,9 +371,9 @@ export default function HealthNotes({
             <button
               type="submit"
               disabled={saving}
-              className="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all shadow-md shadow-blue-500/10"
+              className="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-all shadow-md shadow-blue-500/10"
             >
-              Add Note
+              {saving ? 'Saving Note...' : 'Add Note'}
             </button>
           </div>
         </form>
