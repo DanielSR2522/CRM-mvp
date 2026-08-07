@@ -178,6 +178,9 @@ export type TemplateBlock =
 /** consent_template_versions.content — the CHECK requires a JSON object. */
 export interface TemplateContent {
   blocks: TemplateBlock[];
+  html?: string;
+  signing_config?: any;
+  imported?: any;
 }
 
 /** Blocks whose payload is a single free-text field carrying variables. */

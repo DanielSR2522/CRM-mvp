@@ -30,7 +30,7 @@ import type {
 } from './types';
 import { ALLOWED_VARIABLES } from './types';
 import { TOKEN_LOOKUP } from './variable-registry';
-import { canonicalize, isListBlock, isTextBlock, sha256Hex } from './template-blocks';
+import { canonicalize, isListBlock, isTextBlock, sha256Hex, normalizeVariableDelimiters } from './template-blocks';
 import { describeSupabaseError } from './template-service';
 
 class MergeServiceError extends Error {
@@ -48,7 +48,7 @@ class MergeServiceError extends Error {
  * Client & Agent data assembled from database tables:
  *   clients, client_personal_information, client_residence_information, profiles
  */
-export async function getClientMergeData(clientId: string): Promise<ClientMergeData> {
+export async function getClientMergeData(clientId: string, overrideAgentId?: string): Promise<ClientMergeData> {
   const { data: client, error: clientError } = await supabase
     .from('clients')
     .select('id, agent_id, full_name, email, phone, agency_name')
@@ -58,10 +58,12 @@ export async function getClientMergeData(clientId: string): Promise<ClientMergeD
   if (clientError) throw new MergeServiceError(describeSupabaseError(clientError));
   if (!client) throw new MergeServiceError('Client not found, or you do not have access to it.');
 
+  const effectiveAgentId = client.agent_id || overrideAgentId;
+
   const [personalResult, residenceResult, agentResult] = await Promise.all([
     supabase
       .from('client_personal_information')
-      .select('date_of_birth, ssn, secondary_phone, secondary_email, gender, marital_status, immigration_status, tax_members')
+      .select('email, phone, date_of_birth, ssn, secondary_phone, secondary_email, gender, marital_status, immigration_status, tax_members')
       .eq('client_id', clientId)
       .maybeSingle(),
     supabase
@@ -69,11 +71,11 @@ export async function getClientMergeData(clientId: string): Promise<ClientMergeD
       .select('address, city, zip_code, county, state')
       .eq('client_id', clientId)
       .maybeSingle(),
-    client.agent_id
+    effectiveAgentId
       ? supabase
           .from('profiles')
           .select('name, first_name, last_name, email, phone, agency_name, npn_number, license_number, state, address, city, zip_code, website')
-          .eq('id', client.agent_id)
+          .eq('id', effectiveAgentId)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
   ]);
@@ -93,12 +95,20 @@ export async function getClientMergeData(clientId: string): Promise<ClientMergeD
     }));
   }
 
+  const resolvedEmail = (personalResult.data?.email && personalResult.data.email.trim().length > 0)
+    ? personalResult.data.email.trim()
+    : (client.email ?? null);
+
+  const resolvedPhone = (personalResult.data?.phone && personalResult.data.phone.trim().length > 0)
+    ? personalResult.data.phone.trim()
+    : (client.phone ?? null);
+
   return {
     client_id: client.id,
-    agent_id: client.agent_id,
+    agent_id: client.agent_id || overrideAgentId || null,
     full_name: client.full_name ?? null,
-    email: client.email ?? null,
-    phone: client.phone ?? null,
+    email: resolvedEmail,
+    phone: resolvedPhone,
     agency_name: client.agency_name ?? null,
     date_of_birth: personalResult.data?.date_of_birth ?? null,
     ssn: personalResult.data?.ssn ?? null,
@@ -114,7 +124,7 @@ export async function getClientMergeData(clientId: string): Promise<ClientMergeD
     county: residenceResult.data?.county ?? null,
     agent_info: agentData
       ? {
-          full_name: agentData.name ?? (agentData.first_name ? `${agentData.first_name} ${agentData.last_name || ''}` : null),
+          full_name: agentData.name ?? (agentData.first_name ? `${agentData.first_name} ${agentData.last_name || ''}`.trim() : null),
           first_name: agentData.first_name ?? null,
           last_name: agentData.last_name ?? null,
           email: agentData.email ?? null,
@@ -193,7 +203,6 @@ export async function getPolicyMergeData(
       .maybeSingle();
 
     if (hpData) {
-      // FIX 1: Household income maps ONLY to hpData.household_income. Never calculate from plan_cost or premium!
       const realIncome = hpData.household_income !== null && hpData.household_income !== undefined
         ? Number(hpData.household_income)
         : null;
@@ -488,7 +497,10 @@ const TOKEN_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
  * Substitutes resolved tokens in a single string.
  */
 export function substitute(input: string, values: MergeValues): string {
-  return input.replace(TOKEN_PATTERN, (match, token: string) => {
+  if (typeof input !== 'string') return '';
+  const textWithBraces = normalizeVariableDelimiters(input);
+  return textWithBraces.replace(TOKEN_PATTERN, (match, rawToken: string) => {
+    const token = rawToken.replace(/^\{\{|\}\}$/g, '').trim();
     const value = values[token];
     return value === undefined ? match : value;
   });
@@ -498,21 +510,32 @@ export function renderTemplateContent(
   content: TemplateContent,
   values: MergeValues
 ): TemplateContent {
-  const blocks: TemplateBlock[] = content.blocks.map((block) => {
-    if (isTextBlock(block)) {
-      return { ...block, text: substitute(block.text, values) };
-    }
-    if (isListBlock(block)) {
-      return { ...block, items: block.items.map((item) => substitute(item, values)) };
-    }
-    return { ...block };
-  });
+  if (!content) return { blocks: [] };
 
-  return { blocks };
+  const safeBlocks: TemplateBlock[] = Array.isArray(content.blocks)
+    ? content.blocks.map((block) => {
+        if (!block) return block;
+        if (isTextBlock(block)) {
+          return { ...block, text: substitute(block.text || '', values) };
+        }
+        if (isListBlock(block)) {
+          return { ...block, items: (block.items || []).map((item) => substitute(item || '', values)) };
+        }
+        return { ...block };
+      })
+    : [];
+
+  const html = typeof content.html === 'string' ? substitute(content.html, values) : undefined;
+
+  return {
+    ...content,
+    ...(html ? { html } : {}),
+    blocks: safeBlocks,
+  };
 }
 
 export function renderConsentText(consentText: string, values: MergeValues): string {
-  return substitute(consentText, values);
+  return substitute(consentText || '', values);
 }
 
 // ---------------------------------------------------------------------------
@@ -520,13 +543,16 @@ export function renderConsentText(consentText: string, values: MergeValues): str
 // ---------------------------------------------------------------------------
 
 export function findUnresolvedVariables(
-  variablesUsed: string[],
+  variablesUsed: string[] | undefined | null,
   values: MergeValues,
   hasPolicy: boolean
 ): UnresolvedVariable[] {
   const unresolved: UnresolvedVariable[] = [];
+  const safeVariables = Array.isArray(variablesUsed) ? variablesUsed : [];
 
-  for (const token of variablesUsed) {
+  for (const rawToken of safeVariables) {
+    if (!rawToken) continue;
+    const token = rawToken.replace(/^\{\{|\}\}$/g, '').trim();
     if (values[token] !== undefined) continue;
 
     const registryVar = TOKEN_LOOKUP[token];
@@ -537,7 +563,7 @@ export function findUnresolvedVariables(
       unresolved.push({
         token,
         label,
-        reason: 'This document uses a policy field, but no policy was selected.',
+        reason: `This document uses a policy field (${token}), but no policy was selected.`,
         needsPolicy: true,
       });
       continue;
@@ -547,20 +573,19 @@ export function findUnresolvedVariables(
       unresolved.push({
         token,
         label,
-        reason: 'This variable is not supported and will appear as literal text.',
+        reason: `Variable ${token} is not recognized`,
         needsPolicy: false,
       });
-      continue;
+    } else {
+      unresolved.push({
+        token,
+        label,
+        reason: isPolicyToken
+          ? 'The selected policy has no value recorded for this field.'
+          : 'This client has no value recorded for this field.',
+        needsPolicy: false,
+      });
     }
-
-    unresolved.push({
-      token,
-      label,
-      reason: isPolicyToken
-        ? 'The selected policy has no value recorded for this field.'
-        : 'This client has no value recorded for this field.',
-      needsPolicy: false,
-    });
   }
 
   return unresolved;
@@ -578,10 +603,11 @@ export function buildMergeSnapshot(
   renderedConsentText: string,
   now: Date = new Date()
 ): MergeDataSnapshot {
+  const safeUnresolved = Array.isArray(unresolved) ? unresolved : [];
   return {
-    values,
-    unresolved: unresolved.map((u) => u.token).sort(),
-    rendered_consent_text: renderedConsentText,
+    values: values || {},
+    unresolved: safeUnresolved.map((u) => u.token).sort(),
+    rendered_consent_text: renderedConsentText || '',
     sources: { client_id: clientId, policy_id: policyId },
     captured_at: now.toISOString(),
     snapshot_version: 1,

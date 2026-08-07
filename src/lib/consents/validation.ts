@@ -91,7 +91,19 @@ export function validateTemplateDraft(draft: TemplateDraft): ValidationResult {
 export function validateContentShape(content: TemplateContent): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
-  if (!content || typeof content !== 'object' || !Array.isArray(content.blocks)) {
+  if (!content || typeof content !== 'object') {
+    issues.push({ field: 'content', message: 'Template content is malformed.' });
+    return issues;
+  }
+
+  if (content.html && typeof content.html === 'string') {
+    if (!content.html.trim()) {
+      issues.push({ field: 'content', message: 'Add content to the document — an empty template cannot be sent.' });
+    }
+    return issues;
+  }
+
+  if (!Array.isArray(content.blocks)) {
     issues.push({ field: 'content', message: 'Template content is malformed.' });
     return issues;
   }

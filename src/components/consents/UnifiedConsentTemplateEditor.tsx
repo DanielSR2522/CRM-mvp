@@ -86,10 +86,12 @@ export default function UnifiedConsentTemplateEditor({
   };
 
   const handleInsertVariable = (token: string) => {
+    const cleanToken = token.replace(/^\{\{|\}\}$/g, '').trim();
+    const formattedToken = `{{${cleanToken}}}`;
     if (editorRef.current) {
-      editorRef.current.chain().focus().insertContent(` ${token} `).run();
+      editorRef.current.chain().focus().insertContent(` ${formattedToken} `).run();
     } else {
-      setHtmlContent(prev => prev + ` ${token} `);
+      setHtmlContent(prev => prev + ` ${formattedToken} `);
     }
   };
 

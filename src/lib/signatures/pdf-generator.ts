@@ -335,8 +335,19 @@ export async function buildSignedPdf(input: SignedPdfInput): Promise<GeneratedPd
   layout.y -= 20;
 
   // ---- Body ------------------------------------------------------------
-  for (const block of input.content.blocks) {
-    drawBlock(layout, block, fonts);
+  const safeBlocks = Array.isArray(input.content?.blocks) ? input.content.blocks : [];
+  if (safeBlocks.length > 0) {
+    for (const block of safeBlocks) {
+      drawBlock(layout, block, fonts);
+    }
+  } else if (input.content?.html && typeof input.content.html === 'string') {
+    const plainText = input.content.html.replace(/<[^>]+>/g, '\n').replace(/\n+/g, '\n').trim();
+    for (const line of plainText.split('\n')) {
+      if (line.trim()) {
+        const lines = wrapText(line.trim(), fonts.regular, 10, CONTENT_WIDTH);
+        drawLines(layout, lines, fonts.regular, 10, 14, MARGIN);
+      }
+    }
   }
 
   // ---- Signature -------------------------------------------------------

@@ -160,7 +160,7 @@ export default function TemplateWorkspace({
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-extrabold text-slate-900">Document</h2>
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              {draft.content.blocks.length} block{draft.content.blocks.length === 1 ? '' : 's'}
+              {(draft.content?.blocks || []).length} block{(draft.content?.blocks || []).length === 1 ? '' : 's'}
             </span>
           </div>
 
