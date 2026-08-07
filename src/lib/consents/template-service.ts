@@ -15,7 +15,7 @@ import type {
   TemplateDraft,
   TemplateStatus,
 } from './types';
-import { computeContentHash, extractVariables, extractVariablesFromText, normalizeContent, normalizeText } from './template-blocks';
+import { computeContentHash, extractVariables, extractVariablesFromText, normalizeContent, normalizeText, sha256Hex, canonicalize } from './template-blocks';
 import { validateTemplateDraft, validateVariablesMatch } from './validation';
 
 // ---------------------------------------------------------------------------
@@ -419,6 +419,76 @@ export async function archiveTemplate(templateId: string): Promise<void> {
   return setTemplateStatus(templateId, 'archived');
 }
 
+export async function deleteTemplate(
+  templateId: string,
+  overrideClient?: any
+): Promise<{ deleted: boolean }> {
+  const clientToUse = overrideClient || supabase;
+
+  // 1. Fetch versions belonging to this template
+  const { data: versions, error: versionsErr } = await clientToUse
+    .from('consent_template_versions')
+    .select('id')
+    .eq('template_id', templateId);
+
+  if (versionsErr) {
+    throw new TemplateServiceError(describeSupabaseError(versionsErr));
+  }
+
+  const versionIds = (versions || []).map((v: { id: string }) => v.id);
+
+  // 2. Check if signature_requests reference either template_id OR any template_version_id
+  let hasRequests = false;
+
+  if (versionIds.length > 0) {
+    const { count: vReqCount, error: vReqErr } = await clientToUse
+      .from('signature_requests')
+      .select('id', { count: 'exact', head: true })
+      .in('template_version_id', versionIds);
+
+    if (!vReqErr && (vReqCount ?? 0) > 0) {
+      hasRequests = true;
+    }
+  }
+
+  const { count: tReqCount, error: tReqErr } = await clientToUse
+    .from('signature_requests')
+    .select('id', { count: 'exact', head: true })
+    .eq('template_id', templateId);
+
+  if (!tReqErr && (tReqCount ?? 0) > 0) {
+    hasRequests = true;
+  }
+
+  if (hasRequests) {
+    throw new TemplateServiceError(
+      'This template has been used and cannot be permanently deleted because its versions are required for audit history.'
+    );
+  }
+
+  // 3. Step 1: Delete unreferenced consent_template_versions
+  const { error: vErr } = await clientToUse
+    .from('consent_template_versions')
+    .delete()
+    .eq('template_id', templateId);
+
+  if (vErr) {
+    throw new TemplateServiceError(describeSupabaseError(vErr));
+  }
+
+  // 4. Step 2: Delete consent_templates row
+  const { error: tErr } = await clientToUse
+    .from('consent_templates')
+    .delete()
+    .eq('id', templateId);
+
+  if (tErr) {
+    throw new TemplateServiceError(describeSupabaseError(tErr));
+  }
+
+  return { deleted: true };
+}
+
 /**
  * Copies a template and its current version into a brand new draft.
  *
@@ -442,6 +512,136 @@ export async function duplicateTemplate(template: ConsentTemplate): Promise<stri
   });
 
   return outcome.templateId;
+}
+
+export async function saveTemplateDraft(params: {
+  id?: string;
+  internal_name: string;
+  public_title: string;
+  description?: string | null;
+  language: any;
+  htmlContent: string;
+  consentText: string;
+  imported?: {
+    source_type: 'docx' | 'txt' | 'pdf';
+    source_filename: string;
+    warning?: string;
+    is_scanned_pdf?: boolean;
+    imported_at: string;
+  };
+  overrideAgentId?: string;
+}): Promise<ConsentTemplate> {
+  let userId = params.overrideAgentId;
+  let clientToUse: any = supabase;
+
+  if (params.overrideAgentId) {
+    const { getSupabaseAdmin } = await import('@/lib/supabaseAdmin');
+    clientToUse = getSupabaseAdmin();
+  } else {
+    userId = await requireUserId();
+  }
+
+  const consent_text = params.consentText;
+
+  const content: Record<string, any> = {
+    html: params.htmlContent,
+    signing_config: {
+      require_signature: true,
+      automatic_signing_date: true,
+      require_consent_checkbox: true,
+      consent_statement: consent_text,
+    }
+  };
+
+  if (params.imported) {
+    content.imported = params.imported;
+  }
+
+  const variables_used = Array.from(
+    new Set([...extractVariablesFromText(params.htmlContent), ...extractVariablesFromText(consent_text)])
+  ).sort();
+
+  const content_hash = await sha256Hex(
+    canonicalize({ content, consent_text, variables_used })
+  );
+
+  if (!params.id) {
+    const { data: template, error: tErr } = await clientToUse
+      .from('consent_templates')
+      .insert({
+        agent_id: userId,
+        created_by: userId,
+        internal_name: params.internal_name,
+        public_title: params.public_title,
+        description: params.description || null,
+        language: params.language,
+        status: 'draft',
+        current_version: 1,
+      })
+      .select('*')
+      .single();
+
+    if (tErr || !template) throw new TemplateServiceError(describeSupabaseError(tErr));
+
+    const { error: vErr } = await clientToUse.from('consent_template_versions').insert({
+      template_id: template.id,
+      version_number: 1,
+      content,
+      consent_text,
+      variables_used,
+      content_hash,
+      created_by: userId,
+    });
+
+    if (vErr) {
+      await supabase.from('consent_templates').delete().eq('id', template.id);
+      throw new TemplateServiceError(describeSupabaseError(vErr));
+    }
+
+    return template as ConsentTemplate;
+  } else {
+    const template = await getTemplate(params.id);
+    await updateTemplateMeta(params.id, {
+      internal_name: params.internal_name,
+      public_title: params.public_title,
+      description: params.description || '',
+      language: params.language,
+    });
+
+    const currentVersion = await getCurrentVersion(template);
+    if (currentVersion) {
+      const used = await isVersionUsed(currentVersion.id);
+      if (!used) {
+        await supabase
+          .from('consent_template_versions')
+          .update({
+            content,
+            consent_text,
+            variables_used,
+            content_hash,
+          })
+          .eq('id', currentVersion.id);
+      } else {
+        const nextVer = template.current_version + 1;
+        await supabase.from('consent_template_versions').insert({
+          template_id: template.id,
+          version_number: nextVer,
+          content,
+          consent_text,
+          variables_used,
+          content_hash,
+          created_by: userId,
+        });
+        await supabase.from('consent_templates').update({ current_version: nextVer }).eq('id', template.id);
+      }
+    }
+
+    return getTemplate(params.id);
+  }
+}
+
+export async function publishTemplate(templateId: string): Promise<void> {
+  await setTemplateStatus(templateId, 'active');
 }
 
 export { TemplateServiceError };

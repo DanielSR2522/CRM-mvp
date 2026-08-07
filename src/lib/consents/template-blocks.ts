@@ -252,9 +252,38 @@ export function extractBlockText(block: TemplateBlock): string {
   return '';
 }
 
+export function contentToHtml(content: any): string {
+  if (!content) return '<p></p>';
+  if (content.html && typeof content.html === 'string') return content.html;
+  if (Array.isArray(content.blocks)) {
+    const htmlParts: string[] = [];
+    content.blocks.forEach((b: any) => {
+      if (b.type === 'heading') {
+        const lvl = b.level || 1;
+        htmlParts.push(`<h${lvl}>${b.text || ''}</h${lvl}>`);
+      } else if (b.type === 'paragraph' || b.type === 'consent' || b.type === 'footer') {
+        htmlParts.push(`<p>${b.text || ''}</p>`);
+      } else if (b.type === 'bullet_list') {
+        const items = (b.items || []).map((i: string) => `<li>${i}</li>`).join('');
+        htmlParts.push(`<ul>${items}</ul>`);
+      } else if (b.type === 'numbered_list') {
+        const items = (b.items || []).map((i: string) => `<li>${i}</li>`).join('');
+        htmlParts.push(`<ol>${items}</ol>`);
+      } else if (b.type === 'divider') {
+        htmlParts.push('<hr/>');
+      }
+    });
+    return htmlParts.join('') || '<p></p>';
+  }
+  return '<p></p>';
+}
+
 /** Every piece of text in the document that may carry variables. */
 export function collectAllText(content: TemplateContent): string {
-  return content.blocks.map(extractBlockText).filter(Boolean).join('\n');
+  if (content && typeof (content as any).html === 'string') {
+    return (content as any).html;
+  }
+  return (content.blocks || []).map(extractBlockText).filter(Boolean).join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -400,16 +429,21 @@ export function canonicalize(value: unknown): string {
  * worse than no save, because it would be stored as if it were real.
  */
 export async function sha256Hex(input: string): Promise<string> {
-  if (typeof crypto === 'undefined' || !crypto.subtle) {
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const bytes = new TextEncoder().encode(input);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  try {
+    const nodeCrypto = await import('crypto');
+    return nodeCrypto.createHash('sha256').update(input).digest('hex');
+  } catch (e) {
     throw new Error(
-      'Web Crypto is unavailable, so the content hash cannot be computed. This page must be served over HTTPS or from localhost.'
+      'Crypto digest is unavailable. Serve over HTTPS, localhost, or run in Node environment.'
     );
   }
-  const bytes = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
 }
 
 /**

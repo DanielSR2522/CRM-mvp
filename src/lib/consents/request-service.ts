@@ -258,16 +258,75 @@ export async function listActiveTemplates(): Promise<ConsentTemplate[]> {
   return (data ?? []) as ConsentTemplate[];
 }
 
-/** The policies belonging to one client, for the optional policy step. */
-export async function listClientPolicies(clientId: string) {
-  const { data, error } = await supabase
-    .from('policies')
-    .select('id, policy_number, policy_type, policy_subtype, company_name, status, effective_date, expiration_date')
-    .eq('client_id', clientId)
-    .order('created_at', { ascending: false });
+export interface ComprehensiveClientPolicy {
+  id: string;
+  policy_number: string | null;
+  policy_type: string | null;
+  policy_subtype: string | null;
+  company_name: string | null;
+  status: string | null;
+  effective_date: string | null;
+  expiration_date: string | null;
+  category: 'pc' | 'health' | 'life';
+}
 
-  if (error) throw new RequestServiceError(describeSupabaseError(error));
-  return data ?? [];
+/** The policies belonging to one client across P&C, Health, and Life. */
+export async function listClientPolicies(clientId: string): Promise<ComprehensiveClientPolicy[]> {
+  const [pcResult, healthResult, lifeResult] = await Promise.all([
+    supabase
+      .from('policies')
+      .select('id, policy_number, policy_type, policy_subtype, company_name, status, effective_date, expiration_date')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('health_policies')
+      .select('id, plan_id, plan_name, type_plan, company_2026, policy_status, effective_date')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('life_policies')
+      .select('id, policy_number, status, effective_date, expiration_date')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false }),
+  ]);
+
+  const pcPolicies: ComprehensiveClientPolicy[] = (pcResult.data || []).map((p) => ({
+    id: p.id,
+    policy_number: p.policy_number ?? null,
+    policy_type: p.policy_type ?? 'Property & Casualty',
+    policy_subtype: p.policy_subtype ?? null,
+    company_name: p.company_name ?? null,
+    status: p.status ?? 'Active',
+    effective_date: p.effective_date ?? null,
+    expiration_date: p.expiration_date ?? null,
+    category: 'pc',
+  }));
+
+  const healthPolicies: ComprehensiveClientPolicy[] = (healthResult.data || []).map((hp) => ({
+    id: hp.id,
+    policy_number: hp.plan_id ?? null,
+    policy_type: hp.type_plan || 'Health Insurance',
+    policy_subtype: 'ACA Health',
+    company_name: hp.company_2026 ?? null,
+    status: hp.policy_status ?? 'Active',
+    effective_date: hp.effective_date ?? null,
+    expiration_date: null,
+    category: 'health',
+  }));
+
+  const lifePolicies: ComprehensiveClientPolicy[] = (lifeResult.data || []).map((lp) => ({
+    id: lp.id,
+    policy_number: lp.policy_number ?? null,
+    policy_type: 'Life Insurance',
+    policy_subtype: null,
+    company_name: null,
+    status: lp.status ?? 'Active',
+    effective_date: lp.effective_date ?? null,
+    expiration_date: lp.expiration_date ?? null,
+    category: 'life',
+  }));
+
+  return [...pcPolicies, ...healthPolicies, ...lifePolicies];
 }
 
 // ---------------------------------------------------------------------------

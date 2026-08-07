@@ -213,48 +213,21 @@ export interface VariableGroup {
   variables: VariableDefinition[];
 }
 
-export const VARIABLE_GROUPS: VariableGroup[] = [
-  {
-    key: 'client',
-    label: 'Client',
-    variables: [
-      { token: 'client.full_name', label: 'Full name', source: 'clients.full_name', example: 'Maria Elena Pabon' },
-      { token: 'client.email', label: 'Email', source: 'clients.email', example: 'maria@example.com' },
-      { token: 'client.phone', label: 'Phone', source: 'clients.phone', example: '(305) 555-0148' },
-      { token: 'client.date_of_birth', label: 'Date of birth', source: 'client_personal_information.date_of_birth', example: '04/17/1985' },
-      { token: 'client.address', label: 'Address', source: 'client_residence_information.address', example: '820 NW 12th Ave' },
-      { token: 'client.city', label: 'City', source: 'client_residence_information.city', example: 'Miami' },
-      { token: 'client.zip_code', label: 'ZIP code', source: 'client_residence_information.zip_code', example: '33136' },
-      { token: 'client.county', label: 'County', source: 'client_residence_information.county', example: 'Miami-Dade' },
-    ],
-  },
-  {
-    key: 'policy',
-    label: 'Policy',
-    variables: [
-      { token: 'policy.policy_number', label: 'Policy number', source: 'policies.policy_number', example: 'FL-2210-88431' },
-      { token: 'policy.policy_type', label: 'Line of business', source: 'policies.policy_type', example: 'Homeowners' },
-      { token: 'policy.policy_subtype', label: 'Sub-type', source: 'policies.policy_subtype', example: 'HO3' },
-      { token: 'policy.company_name', label: 'Company', source: 'policies.company_name', example: 'Citizens Property' },
-      { token: 'policy.effective_date', label: 'Effective date', source: 'policies.effective_date', example: '01/01/2026' },
-      { token: 'policy.expiration_date', label: 'Expiration date', source: 'policies.expiration_date', example: '01/01/2027' },
-      { token: 'policy.full_premium', label: 'Full premium', source: 'COALESCE(policies.total_premium, policies.premium)', example: '$2,480.00' },
-    ],
-  },
-  {
-    key: 'system',
-    label: 'System',
-    variables: [
-      { token: 'current_date', label: "Today's date", source: 'Generated at send time', example: '07/16/2026' },
-      { token: 'current_year', label: 'Current year', source: 'Generated at send time', example: '2026' },
-    ],
-  },
-];
+import { VARIABLE_REGISTRY, ALL_REGISTERED_TOKENS } from './variable-registry';
+
+export const VARIABLE_GROUPS: VariableGroup[] = VARIABLE_REGISTRY.map((g) => ({
+  key: g.key,
+  label: g.label,
+  variables: g.variables.map((v) => ({
+    token: v.token,
+    label: v.label,
+    source: `${v.sourceTable}.${v.sourceField}`,
+    example: v.example,
+  })),
+}));
 
 /** Flat allow-list. Anything outside this set is rejected by validation. */
-export const ALLOWED_VARIABLES: string[] = VARIABLE_GROUPS.flatMap((g) =>
-  g.variables.map((v) => v.token)
-);
+export const ALLOWED_VARIABLES: string[] = ALL_REGISTERED_TOKENS;
 
 // ---------------------------------------------------------------------------
 // Signature requests
@@ -413,32 +386,91 @@ export interface MergeDataSnapshot {
   snapshot_version: 1;
 }
 
-/** Raw client data assembled from the three real tables. */
+/** Raw client data assembled from real tables. */
 export interface ClientMergeData {
   client_id: string;
   agent_id: string;
   full_name: string | null;
   email: string | null;
   phone: string | null;
+  secondary_email?: string | null;
+  secondary_phone?: string | null;
   date_of_birth: string | null;
+  gender?: string | null;
+  marital_status?: string | null;
+  immigration_status?: string | null;
+  ssn?: string | null;
   address: string | null;
+  address_line_2?: string | null;
   city: string | null;
+  state?: string | null;
   zip_code: string | null;
   county: string | null;
+  agency_name?: string | null;
+  agent_info?: {
+    full_name?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    agency_name?: string | null;
+    npn?: string | null;
+    license_number?: string | null;
+    license_state?: string | null;
+    business_address?: string | null;
+    city?: string | null;
+    state?: string | null;
+    zip_code?: string | null;
+    website?: string | null;
+  } | null;
 }
 
-/** Raw policy data. Absent when no policy is attached. */
+/** Raw policy data (P&C, Health, or Life). Absent when no policy is attached. */
 export interface PolicyMergeData {
   policy_id: string;
   client_id: string;
+  category: 'pc' | 'health' | 'life';
   policy_number: string | null;
   policy_type: string | null;
   policy_subtype: string | null;
   company_name: string | null;
+  writing_company?: string | null;
   effective_date: string | null;
   expiration_date: string | null;
-  /** COALESCE(total_premium, premium) — never annual_premium. */
   full_premium: number | null;
+  monthly_premium?: number | null;
+  status?: string | null;
+  ownership_type?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
+  payment_frequency?: string | null;
+  broker_name?: string | null;
+  // Health fields
+  plan_name?: string | null;
+  plan_id?: string | null;
+  application_number?: string | null;
+  marketplace_id?: string | null;
+  carrier?: string | null;
+  renovation_status?: string | null;
+  enrolled?: boolean | null;
+  tax_credit?: number | null;
+  household_income?: number | null;
+  tax_household_size?: number | null;
+  coverage_members_count?: number | null;
+  tax_members?: any[] | null;
+  npn?: string | null;
+  // Life fields
+  product_type?: string | null;
+  policy_date?: string | null;
+  face_amount?: number | null;
+  time_to_pay_premium?: string | null;
+  level_period?: string | null;
+  conversion_credit?: number | null;
+  beneficiaries_count?: number | null;
+  beneficiaries_names?: string | null;
+  total_beneficiary_percentage?: string | null;
 }
 
 /** One variable the document needs but could not be filled. */

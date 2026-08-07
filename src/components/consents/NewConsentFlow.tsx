@@ -135,6 +135,7 @@ export default function NewConsentFlow({
   const [policies, setPolicies] = useState<PolicyOption[]>([]);
   const [templateId, setTemplateId] = useState('');
   const [policyId, setPolicyId] = useState('');
+  const [templateSearch, setTemplateSearch] = useState('');
 
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [optionsError, setOptionsError] = useState<string | null>(null);
@@ -527,21 +528,40 @@ export default function NewConsentFlow({
                 >
                   Template <span className="text-rose-400">*</span>
                 </label>
-                <select
-                  id="consent-template"
-                  value={templateId}
-                  onChange={(e) => setTemplateId(e.target.value)}
-                  className="w-full text-sm text-slate-800 border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Select a template…</option>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.internal_name} · {LANGUAGE_LABELS[t.language]} · v{t.current_version}
-                    </option>
-                  ))}
-                </select>
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={templateSearch}
+                    onChange={(e) => setTemplateSearch(e.target.value)}
+                    placeholder="Search published templates..."
+                    className="w-full text-xs text-slate-800 border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <select
+                    id="consent-template"
+                    value={templateId}
+                    onChange={(e) => setTemplateId(e.target.value)}
+                    className="w-full text-sm text-slate-800 border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select a published template…</option>
+                    {templates
+                      .filter((t) =>
+                        templateSearch.trim()
+                          ? t.internal_name.toLowerCase().includes(templateSearch.toLowerCase()) ||
+                            (t.description || '').toLowerCase().includes(templateSearch.toLowerCase())
+                          : true
+                      )
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.internal_name} · {LANGUAGE_LABELS[t.language]} · v{t.current_version}
+                        </option>
+                      ))}
+                  </select>
+                </div>
                 {template?.description && (
-                  <p className="text-[10px] text-slate-400 mt-1">{template.description}</p>
+                  <div className="p-3 bg-blue-50/60 border border-blue-100 rounded-xl text-xs text-blue-900 mt-2 space-y-1">
+                    <p className="font-bold">{template.internal_name} (v{template.current_version})</p>
+                    <p className="text-[11px] text-blue-700">{template.description}</p>
+                  </div>
                 )}
               </div>
 
