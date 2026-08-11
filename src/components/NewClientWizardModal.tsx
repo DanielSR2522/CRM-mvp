@@ -48,32 +48,46 @@ export default function NewClientWizardModal({
 
   // Agents dropdown options
   const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  const [personalClientsList, setPersonalClientsList] = useState<{ id: string; full_name: string; email?: string; phone?: string; address?: string }[]>([]);
+  const [selectedContactClientId, setSelectedContactClientId] = useState<string>('');
 
   // UI state
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Load agents list for agent assignment dropdown
+  // Load agents list for agent assignment dropdown & personal clients for contact selector
   useEffect(() => {
-    async function loadAgents() {
+    async function loadData() {
       if (!isOpen) return;
       try {
-        const { data } = await supabase
-          .from('profiles')
-          .select('id, name, first_name, last_name, email');
+        const [agentsRes, clientsRes] = await Promise.all([
+          supabase.from('profiles').select('id, name, first_name, last_name, email'),
+          supabase.from('clients').select('id, full_name, email, phone, address, agency_name').order('full_name', { ascending: true })
+        ]);
         
-        if (data && data.length > 0) {
-          const list = data.map((p: any) => {
+        if (agentsRes.data && agentsRes.data.length > 0) {
+          const list = agentsRes.data.map((p: any) => {
             const full = `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.name || p.email || 'Agent';
             return { id: p.id, name: full };
           });
           setAgents(list);
         }
+
+        if (clientsRes.data) {
+          const personalOnly = clientsRes.data.filter((c: any) => !c.agency_name || c.agency_name.trim() === '');
+          setPersonalClientsList(personalOnly.map((c: any) => ({
+            id: c.id,
+            full_name: c.full_name,
+            email: c.email || '',
+            phone: c.phone || '',
+            address: c.address || ''
+          })));
+        }
       } catch (err) {
-        console.error('Error fetching profiles for agent dropdown:', err);
+        console.error('Error fetching wizard options:', err);
       }
     }
-    loadAgents();
+    loadData();
   }, [isOpen]);
 
   useEffect(() => {
@@ -92,6 +106,7 @@ export default function NewClientWizardModal({
     setLifeProductType('');
     setFullName('');
     setCompanyName('');
+    setSelectedContactClientId('');
     setEmail('');
     setPhone('');
     setDateOfBirth('');
@@ -121,8 +136,10 @@ export default function NewClientWizardModal({
     e.preventDefault();
     if (formSaving) return;
 
+    const isCompany = (policyType === 'property_casualty' && pcClientType === 'company');
+
     // Validate Step 3 fields
-    if (policyType === 'property_casualty' && pcClientType === 'company') {
+    if (isCompany) {
       if (!companyName.trim()) {
         setFormError('Company Name is required.');
         return;
@@ -159,10 +176,12 @@ export default function NewClientWizardModal({
       const formattedAddress = addrParts.length > 0 ? addrParts.join(', ') : null;
 
       // 1. Create Client Row in `clients`
+      // For Company clients: full_name stores Company Name (e.g. ABC Roofing LLC). agency_name remains null unless applicable.
+      // For Personal clients: full_name stores Personal Name.
       const clientPayload: any = {
         agent_id: activeAgentId,
-        full_name: fullName.trim(),
-        agency_name: (policyType === 'property_casualty' && pcClientType === 'company') ? companyName.trim() : null,
+        full_name: isCompany ? companyName.trim() : fullName.trim(),
+        agency_name: null,
         address: formattedAddress,
         email: email.trim() || null,
         phone: phone.trim() || null,
@@ -192,8 +211,10 @@ export default function NewClientWizardModal({
           });
       }
 
-      // 3. Save Personal Information
-      const parsedDob = parseDisplayDate(dateOfBirth);
+      // 3. Save Personal Information / Contact Person
+      // For Company clients: full_name stores Contact Person name (e.g. Daniel Rodriguez).
+      // Person-only fields (DOB, SSN, Gender, Marital Status, Co-Applicant) are explicitly null/false.
+      const parsedDob = isCompany ? null : parseDisplayDate(dateOfBirth);
       await supabase
         .from('client_personal_information')
         .insert({
@@ -201,7 +222,8 @@ export default function NewClientWizardModal({
           full_name: fullName.trim(),
           date_of_birth: parsedDob || null,
           email: email.trim() || null,
-          phone: phone.trim() || null
+          phone: phone.trim() || null,
+          has_co_applicant: false
         });
 
       // 4. Policy Type Initialization
@@ -469,7 +491,12 @@ export default function NewClientWizardModal({
           {step === 3 && (
             <form id="wizard-client-form" onSubmit={handleSubmit} className="space-y-4">
               {policyType === 'property_casualty' && pcClientType === 'company' ? (
-                <>
+                <div className="space-y-4">
+                  <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-3 text-xs text-blue-800 space-y-1">
+                    <span className="font-extrabold uppercase tracking-wider text-[10px] text-blue-600 block">Commercial Company Profile</span>
+                    <p>Creating a Company client profile. Enter Company details below and optionally link an existing Personal client as Contact Person.</p>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Company Name *</label>
@@ -477,24 +504,59 @@ export default function NewClientWizardModal({
                         type="text"
                         value={companyName}
                         onChange={e => setCompanyName(e.target.value)}
-                        placeholder="e.g. Acme Commercial Corp"
+                        placeholder="e.g. ABC Roofing LLC"
                         className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
                         required
                       />
                     </div>
+
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Contact Person Name *</label>
-                      <input
-                        type="text"
-                        value={fullName}
-                        onChange={e => setFullName(e.target.value)}
-                        placeholder="e.g. John Doe (Manager)"
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                        required
-                      />
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Select Existing Personal Contact (Optional)</label>
+                      <select
+                        value={selectedContactClientId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setSelectedContactClientId(id);
+                          if (id) {
+                            const match = personalClientsList.find(c => c.id === id);
+                            if (match) {
+                              setFullName(match.full_name || '');
+                              if (match.email) setEmail(match.email);
+                              if (match.phone) setPhone(match.phone);
+                              if (match.address) {
+                                const parts = match.address.split(',').map(s => s.trim());
+                                if (parts.length >= 1) setStreetAddress(parts[0]);
+                                if (parts.length >= 2) setCity(parts[1]);
+                                if (parts.length >= 3) setState(parts[2].split(' ')[0]);
+                                if (parts.length >= 3 && parts[2].split(' ').length > 1) setZipCode(parts[2].split(' ')[1]);
+                              }
+                            }
+                          }
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-4 py-2 text-slate-800 text-sm outline-none transition-all"
+                      >
+                        <option value="">-- Add New Contact Person --</option>
+                        {personalClientsList.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.full_name} {c.email ? `(${c.email})` : ''}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
-                </>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Contact Person Name *</label>
+                    <input
+                      type="text"
+                      value={fullName}
+                      onChange={e => setFullName(e.target.value)}
+                      placeholder="e.g. Daniel Rodriguez"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                      required
+                    />
+                  </div>
+                </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>

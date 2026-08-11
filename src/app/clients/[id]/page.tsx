@@ -7,6 +7,8 @@ import DashboardLayout from '@/components/DashboardLayout';
 import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
 import LifePolicyTab from '@/components/life/LifePolicyTab';
+import UnifiedNotesManager from '@/components/notes/UnifiedNotesManager';
+import { getAssignedAgentDisplay } from '@/lib/auth/agentDisplay';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
 import { formatDateMMDDYYYY, formatDateTimeMMDDYYYY, isoDateToMMDDYYYY } from '@/lib/formatters/date';
@@ -362,50 +364,54 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       }
     });
 
-    // 2. Health policies (only active = true)
-    (healthPoliciesOverview || []).forEach((h: any) => {
-      if (h.active === true) {
-        cards.push({
-          id: h.id,
-          businessLine: 'health',
-          businessLineLabel: 'Health',
-          policy_type: h.plan_name || 'Health Plan',
-          company_name: h.company_2026 || 'Marketplace Carrier',
-          policy_number: h.plan_id || h.application_number || 'N/A',
-          status: 'Active',
-          effective_date: h.effective_date || null,
-          expiration_date: null,
-          premium: Number(h.plan_cost || 0),
-          targetTab: 'health',
-          updated_at: h.updated_at || h.created_at || new Date().toISOString(),
-        });
-      }
-    });
+    // 2. Health policies (only if direct client owner)
+    if (!client || client.agent_id === currentUserId) {
+      (healthPoliciesOverview || []).forEach((h: any) => {
+        if (h.active === true) {
+          cards.push({
+            id: h.id,
+            businessLine: 'health',
+            businessLineLabel: 'Health',
+            policy_type: h.plan_name || 'Health Plan',
+            company_name: h.company_2026 || 'Marketplace Carrier',
+            policy_number: h.plan_id || h.application_number || 'N/A',
+            status: 'Active',
+            effective_date: h.effective_date || null,
+            expiration_date: null,
+            premium: Number(h.plan_cost || 0),
+            targetTab: 'health',
+            updated_at: h.updated_at || h.created_at || new Date().toISOString(),
+          });
+        }
+      });
+    }
 
-    // 3. Life policies (only with at least one product having a non-empty company name)
-    (lifePolicies || []).forEach((l: any) => {
-      const prods = l.life_policy_products || [];
-      const qualifyingProd = prods.find(
-        (prod: any) => prod.company && typeof prod.company === 'string' && prod.company.trim().length > 0
-      );
+    // 3. Life policies (only if direct client owner)
+    if (!client || client.agent_id === currentUserId) {
+      (lifePolicies || []).forEach((l: any) => {
+        const prods = l.life_policy_products || [];
+        const qualifyingProd = prods.find(
+          (prod: any) => prod.company && typeof prod.company === 'string' && prod.company.trim().length > 0
+        );
 
-      if (qualifyingProd) {
-        cards.push({
-          id: l.id,
-          businessLine: 'life',
-          businessLineLabel: 'Life Insurance',
-          policy_type: qualifyingProd.product_type || 'Life Policy',
-          company_name: qualifyingProd.company.trim(),
-          policy_number: qualifyingProd.policy_number || 'N/A',
-          status: 'Active',
-          effective_date: qualifyingProd.policy_date || null,
-          expiration_date: null,
-          premium: Number(qualifyingProd.monthly_premium || 0),
-          targetTab: 'life',
-          updated_at: l.updated_at || l.created_at || new Date().toISOString(),
-        });
-      }
-    });
+        if (qualifyingProd) {
+          cards.push({
+            id: l.id,
+            businessLine: 'life',
+            businessLineLabel: 'Life Insurance',
+            policy_type: qualifyingProd.product_type || 'Life Policy',
+            company_name: qualifyingProd.company.trim(),
+            policy_number: qualifyingProd.policy_number || 'N/A',
+            status: 'Active',
+            effective_date: qualifyingProd.policy_date || null,
+            expiration_date: null,
+            premium: Number(qualifyingProd.monthly_premium || 0),
+            targetTab: 'life',
+            updated_at: l.updated_at || l.created_at || new Date().toISOString(),
+          });
+        }
+      });
+    }
 
     return cards.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
   })();
@@ -516,6 +522,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   // Linking state
   const [selectedCompanyPolicy, setSelectedCompanyPolicy] = useState<any | null>(null);
+  const [selectedCompanyProfile, setSelectedCompanyProfile] = useState<any | null>(null);
   const [isConfirmLinkOpen, setIsConfirmLinkOpen] = useState(false);
   const [linkedPersonRole, setLinkedPersonRole] = useState<'main_applicant' | 'co_applicant'>('main_applicant');
   const [linkingPolicy, setLinkingPolicy] = useState(false);
@@ -1209,7 +1216,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
   };
 
-  // Search Company Policies
+  // Search Company Policies (Grouped by Commercial Client Profile)
   const handleSearchCompany = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setCompanySearchLoading(true);
@@ -1217,17 +1224,17 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     setHasSearchedCompany(true);
 
     try {
-      // 1. Query company policies using real table columns only
+      // 1. Query commercial policies using real table columns only
       const { data: rawPolicies, error: policiesErr } = await supabase
         .from('policies')
-        .select('id, client_id, policy_number, policy_type, policy_subtype, company_name, writing_company, policy_ownership_type')
+        .select('id, client_id, policy_number, policy_type, policy_subtype, company_name, writing_company, status, effective_date, expiration_date, policy_ownership_type')
         .eq('policy_ownership_type', 'company');
 
       if (policiesErr) throw policiesErr;
 
       const policiesList = rawPolicies || [];
 
-      // 2. Load related client details
+      // 2. Load related commercial client details
       const clientIds = Array.from(new Set(policiesList.map((p: any) => p.client_id).filter(Boolean)));
       let clientMap: Record<string, any> = {};
       if (clientIds.length > 0) {
@@ -1242,36 +1249,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
         }
       }
 
-      // 3. Merge policies and clients
-      const merged = policiesList.map((p: any) => ({
-        ...p,
-        client: clientMap[p.client_id] || null,
-      }));
-
-      // 4. Filter matching search query case-insensitively
-      const q = companySearchQuery.trim().toLowerCase();
-      const filtered = merged.filter((item: any) => {
-        if (!q) return true;
-        const pNum = (item.policy_number || '').toLowerCase();
-        const cName = (item.client?.full_name || '').toLowerCase();
-        const cAgency = (item.client?.agency_name || '').toLowerCase();
-        const cEmail = (item.client?.email || '').toLowerCase();
-        const cPhone = (item.client?.phone || '').toLowerCase();
-        return pNum.includes(q) || cName.includes(q) || cAgency.includes(q) || cEmail.includes(q) || cPhone.includes(q);
-      });
-
-      // 5. Deduplicate by policy ID
-      const uniqueResults: any[] = [];
-      const seenIds = new Set<string>();
-      filtered.forEach((item: any) => {
-        if (!seenIds.has(item.id)) {
-          seenIds.add(item.id);
-          uniqueResults.push(item);
-        }
-      });
-
-      // 6. Fetch link status from personal_commercial_policy_links
-      const policyIds = uniqueResults.map((item: any) => item.id);
+      // 3. Fetch link status from personal_commercial_policy_links for all commercial policies
+      const policyIds = policiesList.map((item: any) => item.id);
       let linksMap: Record<string, string> = {};
       if (policyIds.length > 0) {
         const { data: linksData } = await supabase
@@ -1286,7 +1265,47 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
         }
       }
 
-      setCompanySearchResults(uniqueResults);
+      // 4. Attach client & link status to each policy, then group by client_id
+      const groupsMap: Record<string, { client: any; policies: any[] }> = {};
+
+      policiesList.forEach((p: any) => {
+        const cid = p.client_id;
+        if (!cid) return;
+        if (!groupsMap[cid]) {
+          groupsMap[cid] = {
+            client: clientMap[cid] || { id: cid, full_name: 'Commercial Client' },
+            policies: []
+          };
+        }
+        groupsMap[cid].policies.push({
+          ...p,
+          linkOwnerId: linksMap[p.id] || null
+        });
+      });
+
+      // 5. Filter matching search query case-insensitively across client & policy fields
+      const q = companySearchQuery.trim().toLowerCase();
+      const groupedResults = Object.values(groupsMap).filter((group: any) => {
+        if (!q) return true;
+        const cName = (group.client?.full_name || '').toLowerCase();
+        const cAgency = (group.client?.agency_name || '').toLowerCase();
+        const cEmail = (group.client?.email || '').toLowerCase();
+        const cPhone = (group.client?.phone || '').toLowerCase();
+        
+        const clientMatches = cName.includes(q) || cAgency.includes(q) || cEmail.includes(q) || cPhone.includes(q);
+        if (clientMatches) return true;
+
+        // Check if any policy in group matches
+        return group.policies.some((p: any) => {
+          const pNum = (p.policy_number || '').toLowerCase();
+          const pType = (p.policy_type || '').toLowerCase();
+          const pSubtype = (p.policy_subtype || '').toLowerCase();
+          const pCompany = (p.company_name || p.writing_company || '').toLowerCase();
+          return pNum.includes(q) || pType.includes(q) || pSubtype.includes(q) || pCompany.includes(q);
+        });
+      });
+
+      setCompanySearchResults(groupedResults);
       setCompanyLinksMap(linksMap);
     } catch (err: any) {
       console.error('Error searching company policies:', err);
@@ -1297,33 +1316,60 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
   };
 
-  // Confirm and Execute Link Commercial Policy
+  // Confirm and Execute Link Commercial Client Profile & Eligible Policies
   const handleConfirmLinkPolicy = async () => {
-    if (!selectedCompanyPolicy || !selectedCompanyPolicy.id) return;
+    const profile = selectedCompanyProfile;
+    if (!profile || !profile.policies?.length) return;
     setLinkingPolicy(true);
     setLinkError(null);
     setCompanySearchSuccess(null);
 
     try {
-      const { data, error } = await supabase.rpc('link_commercial_policy', {
-        p_personal_client_id: clientId,
-        p_commercial_policy_id: selectedCompanyPolicy.id,
-        p_linked_person_role: linkedPersonRole,
-      });
-
-      if (error) throw error;
-      if (data && data.success === false) {
-        throw new Error(data.error || 'Failed to link company policy');
+      const eligiblePolicies = profile.policies.filter((p: any) => !p.linkOwnerId);
+      if (eligiblePolicies.length === 0) {
+        setLinkError('No available policies to link in this profile.');
+        setLinkingPolicy(false);
+        return;
       }
 
+      // Controlled execution tracking success/failure for each eligible policy
+      const results = await Promise.allSettled(
+        eligiblePolicies.map((p: any) =>
+          supabase.rpc('link_commercial_policy', {
+            p_personal_client_id: clientId,
+            p_commercial_policy_id: p.id,
+            p_linked_person_role: linkedPersonRole,
+          })
+        )
+      );
+
+      let succeededCount = 0;
+      let failedCount = 0;
+
+      results.forEach((res) => {
+        if (res.status === 'fulfilled' && !res.value.error && res.value.data?.success !== false) {
+          succeededCount++;
+        } else {
+          failedCount++;
+        }
+      });
+
       setIsConfirmLinkOpen(false);
-      setSelectedCompanyPolicy(null);
-      setCompanySearchSuccess('Company policy successfully linked!');
+      setSelectedCompanyProfile(null);
+
+      if (failedCount === 0) {
+        setCompanySearchSuccess(`Successfully linked ${succeededCount} commercial policy/policies!`);
+      } else if (succeededCount > 0) {
+        setCompanySearchSuccess(`Linked ${succeededCount} policy/policies. ${failedCount} failed.`);
+      } else {
+        setCompanySearchError(`Failed to link eligible policies.`);
+      }
+
       await fetchLinkedCompanyPolicies();
       await handleSearchCompany();
     } catch (err: any) {
-      console.error('Error linking company policy:', err);
-      setLinkError(err?.message || 'Failed to link company policy.');
+      console.error('Error linking company profile:', err);
+      setLinkError(err?.message || 'Failed to link company profile.');
     } finally {
       setLinkingPolicy(false);
     }
@@ -2175,10 +2221,14 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   };
 
   const getAgentDisplayName = () => {
-    if (agentProfile?.name) {
-      return agentProfile.name;
-    }
-    return currentUserEmail || 'Agent';
+    const rawName = agentProfile?.name || currentUserEmail || 'Agent';
+    const isEligiblePcClient = Boolean(policies && policies.length > 0);
+    return getAssignedAgentDisplay({
+      clientAgentId: client?.agent_id,
+      currentUserId,
+      isEligiblePcClient,
+      fallbackName: rawName
+    });
   };
 
   const formatCurrency = (val: number) => {
@@ -2233,6 +2283,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     return matchesSearch && matchesStatus && matchesLob && matchesCompany;
   });
 
+  const isCompanyClient = Boolean(
+    (policies && policies.some((p: any) => p.policy_ownership_type === 'company')) ||
+    (!personalInfo?.date_of_birth && !personalInfo?.ssn && !personalInfo?.gender && !personalInfo?.marital_status && personalInfo?.full_name && personalInfo?.full_name !== client?.full_name)
+  );
+
   return (
     <DashboardLayout>
       <div className="w-full space-y-6">
@@ -2274,13 +2329,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               <aside className="w-full lg:w-[280px] bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 flex-shrink-0 lg:sticky lg:top-6 relative">
                 <div className="flex items-start justify-between">
                   <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client Profile</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      {isCompanyClient ? 'Company Profile' : 'Client Profile'}
+                    </span>
                     <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">
-                      {loadingClient || loadingPersonal
-                        ? 'Loading...'
-                        : ((personalInfo?.full_name && personalInfo.full_name.trim().length > 0)
-                            ? personalInfo.full_name.trim()
-                            : (client?.full_name || '-'))}
+                      {loadingClient ? 'Loading...' : (client?.full_name || personalInfo?.full_name || '-')}
                     </h2>
                   </div>
                   <button
@@ -2296,14 +2349,22 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
 
               <div className="border-t border-slate-100 pt-5 space-y-4">
+                {isCompanyClient && (
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Contact Person</span>
+                    <span className="text-sm font-semibold text-slate-800 block mt-1">{personalInfo?.full_name || '-'}</span>
+                  </div>
+                )}
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Assigned Agent</span>
                   <span className="text-sm font-semibold text-slate-800 block mt-1">{getAgentDisplayName()}</span>
                 </div>
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Agency</span>
-                  <span className="text-sm font-semibold text-slate-800 block mt-1">{client?.agency_name || '-'}</span>
-                </div>
+                {client?.agency_name && (
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Agency</span>
+                    <span className="text-sm font-semibold text-slate-800 block mt-1">{client.agency_name}</span>
+                  </div>
+                )}
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email Address</span>
                   {(() => {
@@ -2485,82 +2546,86 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         <p className="text-[11px] text-slate-400 font-medium">No company policies found.</p>
                       </div>
                     ) : companySearchResults.length > 0 ? (
-                      <div className="space-y-3 pt-1">
-                        {companySearchResults.map((result) => {
-                          const clientInfo = result.client || {};
-                          const linkOwnerId = companyLinksMap[result.id];
-                          let badgeLabel = 'Available';
-                          let badgeStyle = 'bg-emerald-50 text-emerald-700 border-emerald-100';
+                      <div className="space-y-4 pt-1">
+                        {companySearchResults.map((group) => {
+                          const clientInfo = group.client || {};
+                          const clientNameDisplay = clientInfo.agency_name || clientInfo.full_name || 'Commercial Client';
+                          const contactDisplay = [clientInfo.email, clientInfo.phone].filter(Boolean).join(' • ');
 
-                          if (linkOwnerId) {
-                            if (linkOwnerId === clientId) {
-                              badgeLabel = 'Linked to this client';
-                              badgeStyle = 'bg-blue-50 text-blue-700 border-blue-100';
-                            } else {
-                              badgeLabel = 'Unavailable';
-                              badgeStyle = 'bg-amber-50 text-amber-700 border-amber-100';
-                            }
-                          }
-
-                          const clientNameDisplay = clientInfo.full_name || '-';
-                          const policyNumDisplay = result.policy_number || '-';
-                          const lobDisplay = result.policy_type ? (result.policy_subtype ? `${result.policy_type} (${result.policy_subtype})` : result.policy_type) : '-';
-                          const companyDisplay = result.writing_company || result.company_name || '-';
-                          const emailDisplay = clientInfo.email || '-';
-                          const phoneDisplay = clientInfo.phone || '-';
+                          const eligibleCount = group.policies.filter((p: any) => !p.linkOwnerId).length;
 
                           return (
-                            <div key={result.id} className="bg-slate-50/80 border border-slate-100 rounded-xl p-3 space-y-2 text-xs">
-                              <div className="flex items-start justify-between gap-1.5">
-                                <div className="min-w-0">
-                                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Company / Client</span>
-                                  <h5 className="font-extrabold text-slate-900 text-xs truncate">{clientNameDisplay}</h5>
-                                </div>
-                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border flex-shrink-0 ${badgeStyle}`}>
-                                  {badgeLabel}
+                            <div key={clientInfo.id} className="bg-slate-50/90 border border-slate-200/80 rounded-xl p-3 space-y-2.5 text-xs shadow-xs">
+                              {/* Group Client Header */}
+                              <div className="border-b border-slate-200/60 pb-2 space-y-0.5">
+                                <span className="text-[9px] font-extrabold text-blue-600 uppercase tracking-wider block">Company / Client</span>
+                                <h5 className="font-extrabold text-slate-900 text-xs">{clientNameDisplay}</h5>
+                                {clientInfo.agency_name && clientInfo.full_name && clientInfo.agency_name !== clientInfo.full_name && (
+                                  <p className="text-[10px] text-slate-500 font-medium">Contact: {clientInfo.full_name}</p>
+                                )}
+                                {contactDisplay && (
+                                  <p className="text-[10px] text-slate-400 font-mono">{contactDisplay}</p>
+                                )}
+                              </div>
+
+                              {/* Commercial P&C Policies Group List */}
+                              <div className="space-y-1.5">
+                                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
+                                  Commercial P&C Policies ({group.policies.length})
                                 </span>
+                                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                                  {group.policies.map((p: any) => {
+                                    const linkOwnerId = p.linkOwnerId;
+                                    let badgeLabel = 'Available';
+                                    let badgeStyle = 'bg-emerald-50 text-emerald-700 border-emerald-100';
+
+                                    if (linkOwnerId) {
+                                      if (linkOwnerId === clientId) {
+                                        badgeLabel = 'Linked';
+                                        badgeStyle = 'bg-blue-50 text-blue-700 border-blue-100';
+                                      } else {
+                                        badgeLabel = 'Unavailable';
+                                        badgeStyle = 'bg-rose-50 text-rose-700 border-rose-100 font-bold';
+                                      }
+                                    }
+
+                                    const lobDisplay = p.policy_type ? (p.policy_subtype ? `${p.policy_type} (${p.policy_subtype})` : p.policy_type) : 'Commercial P&C';
+                                    const companyDisplay = p.writing_company || p.company_name || 'Carrier Unspecified';
+
+                                    return (
+                                      <div key={p.id} className="bg-white border border-slate-100 rounded-lg p-2 text-[11px] space-y-1">
+                                        <div className="flex items-center justify-between gap-1">
+                                          <span className="font-extrabold text-slate-800 truncate">{lobDisplay}</span>
+                                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border flex-shrink-0 ${badgeStyle}`}>
+                                            {badgeLabel}
+                                          </span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-500 text-[10px]">
+                                          <span>#{p.policy_number || 'N/A'}</span>
+                                          <span className="truncate max-w-[110px]">{companyDisplay}</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
 
-                              <div className="space-y-1 text-[11px] border-t border-slate-100 pt-1.5 text-slate-600">
-                                <div className="flex justify-between gap-2">
-                                  <span className="text-slate-400">Policy #:</span>
-                                  <span className="font-semibold text-slate-800 truncate">{policyNumDisplay}</span>
-                                </div>
-                                <div className="flex justify-between gap-2">
-                                  <span className="text-slate-400">LOB:</span>
-                                  <span className="font-semibold text-slate-800 truncate">{lobDisplay}</span>
-                                </div>
-                                <div className="flex justify-between gap-2">
-                                  <span className="text-slate-400">Company:</span>
-                                  <span className="font-semibold text-slate-700 truncate">{companyDisplay}</span>
-                                </div>
-                                <div className="flex justify-between gap-2">
-                                  <span className="text-slate-400">Email:</span>
-                                  <span className="font-medium text-slate-700 truncate">{emailDisplay}</span>
-                                </div>
-                                <div className="flex justify-between gap-2">
-                                  <span className="text-slate-400">Phone:</span>
-                                  <span className="font-medium text-slate-700 truncate">{phoneDisplay}</span>
-                                </div>
+                              {/* Profile Action Button */}
+                              <div className="pt-2 border-t border-slate-200/60">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedCompanyProfile(group);
+                                    setLinkedPersonRole('main_applicant');
+                                    setLinkError(null);
+                                    setIsConfirmLinkOpen(true);
+                                  }}
+                                  className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-[11px] font-bold py-1.5 rounded-lg transition-all shadow-xs flex items-center justify-center gap-1"
+                                >
+                                  <span>Select Client Profile</span>
+                                  <span className="text-[10px] opacity-90">({eligibleCount} avail)</span>
+                                </button>
                               </div>
-
-                              {/* Select Policy Button (Only for Available status) */}
-                              {!linkOwnerId && (
-                                <div className="pt-1.5 border-t border-slate-100">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedCompanyPolicy(result);
-                                      setLinkedPersonRole('main_applicant');
-                                      setLinkError(null);
-                                      setIsConfirmLinkOpen(true);
-                                    }}
-                                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-[11px] font-bold py-1.5 rounded-lg transition-all shadow-xs"
-                                  >
-                                    Select Policy
-                                  </button>
-                                </div>
-                              )}
                             </div>
                           );
                         })}
@@ -3153,13 +3218,22 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               {activeTab === 'personal-info' && (
                 <div className="space-y-6 font-sans">
                   
-                  {/* SECTION 1: Personal Information Card */}
+                  {/* SECTION 1: Personal or Company Information Card */}
                   <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
                       <div>
-                        <h3 className="text-lg font-extrabold text-slate-900">Personal Information</h3>
-                        <p className="text-xs text-slate-400 mt-0.5">Click any field to edit directly.</p>
+                        <h3 className="text-lg font-extrabold text-slate-900">
+                          {isCompanyClient ? 'Company Information' : 'Personal Information'}
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {isCompanyClient ? 'Commercial P&C Entity Profile. Click any field to edit directly.' : 'Click any field to edit directly.'}
+                        </p>
                       </div>
+                      {isCompanyClient && (
+                        <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-100">
+                          Commercial Company
+                        </span>
+                      )}
                     </div>
 
                     {personalError && (
@@ -3174,6 +3248,71 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                         </svg>
+                      </div>
+                    ) : isCompanyClient ? (
+                      <div className="space-y-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-6">
+                          {/* Left Column */}
+                          <div className="space-y-4">
+                            <InlineEditableText
+                              label="Company Name"
+                              value={client?.full_name || ''}
+                              onSave={async (val) => {
+                                if (!val.trim()) return;
+                                const { error } = await supabase.from('clients').update({ full_name: val.trim() }).eq('id', clientId);
+                                if (!error) setClient((prev: any) => prev ? { ...prev, full_name: val.trim() } : prev);
+                              }}
+                            />
+
+                            <InlineEditableText
+                              label="Contact Person Name"
+                              value={personalForm.full_name || ''}
+                              onSave={val => savePersonalField('full_name', val)}
+                            />
+
+                            <InlineEditableText
+                              label="Primary Email"
+                              type="email"
+                              value={personalForm.email || client?.email || ''}
+                              onSave={async (val) => {
+                                await savePersonalField('email', val);
+                                await supabase.from('clients').update({ email: val || null }).eq('id', clientId);
+                              }}
+                            />
+
+                            <InlineEditablePhone
+                              label="Primary Phone"
+                              value={personalForm.phone || client?.phone || ''}
+                              onSave={async (val) => {
+                                await savePersonalField('phone', val);
+                                await supabase.from('clients').update({ phone: val || null }).eq('id', clientId);
+                              }}
+                            />
+                          </div>
+
+                          {/* Right Column */}
+                          <div className="space-y-4">
+                            <InlineEditableText
+                              label="Secondary Email"
+                              type="email"
+                              value={personalForm.secondary_email || ''}
+                              onSave={val => savePersonalField('secondary_email', val)}
+                            />
+
+                            <InlineEditablePhone
+                              label="Secondary Phone"
+                              value={personalForm.secondary_phone || ''}
+                              onSave={val => savePersonalField('secondary_phone', val)}
+                            />
+
+                            <div>
+                              <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Business Address</span>
+                              <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
+                                {[residenceInfo?.address, residenceInfo?.city, residenceInfo?.state, residenceInfo?.zip_code].filter(Boolean).join(', ') || client?.address || 'No business address registered'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     ) : (
                       <div className="space-y-8">
@@ -3918,205 +4057,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
               )}
 
-              {/* CLIENT NOTES TAB CONTENT WITH VISIBLE FILEDROPZONE */}
+              {/* UNIFIED CRM NOTES CENTER */}
               {activeTab === 'notes' && (
-                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
-                  <div className="border-b border-slate-100 pb-4">
-                    <h3 className="text-lg font-extrabold text-slate-900">Client Notes & Attachments</h3>
-                    <p className="text-xs text-slate-500 mt-1">Post notes, thread replies, and attach images or documents.</p>
-                  </div>
-
-                  {/* Top-level Note Composer with Visible FileDropzone */}
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (!clientNoteBody.trim() && clientNoteFiles.length === 0 && clientNotePasted.length === 0) return;
-                      try {
-                        setClientNotePosting(true);
-                        const { data: { user } } = await supabase.auth.getUser();
-                        if (!user) throw new Error('Not authenticated');
-
-                        const { data: noteRec } = await supabase
-                          .from('client_notes')
-                          .insert({
-                            client_id: clientId,
-                            author_id: user.id,
-                            content: clientNoteBody.trim(),
-                          })
-                          .select()
-                          .single();
-
-                        const allFiles = [...clientNoteFiles, ...clientNotePasted.map(p => p.file)];
-                        for (const f of allFiles) {
-                          const cleanName = f.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-                          const storagePath = `${user.id}/${clientId}/notes/${Date.now()}-${cleanName}`;
-                          await supabase.storage.from('client-documents').upload(storagePath, f);
-                        }
-
-                        setClientNoteBody('');
-                        setClientNoteFiles([]);
-                        setClientNotePasted([]);
-                        loadClientNotes();
-                      } catch (err: any) {
-                        console.error('Note post error:', err);
-                      } finally {
-                        setClientNotePosting(false);
-                      }
-                    }}
-                    className="bg-slate-50 border border-slate-200/80 rounded-xl p-5 space-y-4"
-                  >
-                    <textarea
-                      rows={3}
-                      value={clientNoteBody}
-                      onChange={(e) => setClientNoteBody(e.target.value)}
-                      onPaste={(e) => {
-                        const items = e.clipboardData?.items;
-                        if (!items) return;
-                        for (let i = 0; i < items.length; i++) {
-                          if (items[i].type.startsWith('image/')) {
-                            const file = items[i].getAsFile();
-                            if (file) {
-                              const previewUrl = URL.createObjectURL(file);
-                              setClientNotePasted(prev => [...prev, { id: crypto.randomUUID(), file, previewUrl }]);
-                            }
-                          }
-                        }
-                      }}
-                      placeholder="Type a note... (You can paste screenshots here with Ctrl+V)"
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-800 outline-none focus:border-blue-500 resize-none font-sans"
-                    />
-
-                    {/* Pasted Screenshot Previews */}
-                    {clientNotePasted.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {clientNotePasted.map(p => (
-                          <div key={p.id} className="relative bg-white border border-blue-200 rounded-xl p-1 flex items-center gap-2">
-                            <img src={p.previewUrl} alt="pasted screenshot" className="w-10 h-10 object-cover rounded-lg" />
-                            <span className="text-[10px] font-bold text-blue-600">Pasted Image</span>
-                            <button
-                              type="button"
-                              onClick={() => setClientNotePasted(prev => prev.filter(x => x.id !== p.id))}
-                              className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center ml-1"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Visible FileDropzone under top-level note textarea */}
-                    <div className="pt-1">
-                      <FileDropzone
-                        label="Drag attachments here or click to select"
-                        multiple={true}
-                        disabled={clientNotePosting}
-                        selectedFiles={clientNoteFiles}
-                        onFilesSelected={(newFiles) => setClientNoteFiles(prev => [...prev, ...newFiles])}
-                        onRemoveFile={(index) => setClientNoteFiles(prev => prev.filter((_, i) => i !== index))}
-                      />
-                    </div>
-
-                    <div className="flex justify-end pt-2">
-                      <button
-                        type="submit"
-                        disabled={clientNotePosting || (!clientNoteBody.trim() && clientNoteFiles.length === 0 && clientNotePasted.length === 0)}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow transition-all disabled:opacity-50"
-                      >
-                        {clientNotePosting ? 'Posting...' : 'Post Note'}
-                      </button>
-                    </div>
-                  </form>
-
-                  {/* Client Notes List with Threaded Reply Composer featuring FileDropzone */}
-                  {clientNotesLoading ? (
-                    <div className="text-center py-8 text-xs text-slate-400">Loading notes...</div>
-                  ) : clientNotesList.length === 0 ? (
-                    <div className="text-center py-12 border border-dashed border-slate-200 rounded-xl text-slate-400 text-xs">
-                      No notes posted for this client yet.
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {clientNotesList.map(note => (
-                        <div key={note.id} className="bg-slate-50/70 border border-slate-150 rounded-xl p-4 space-y-3">
-                          <div className="flex items-center justify-between text-xs text-slate-400">
-                            <span className="font-bold text-slate-700">{note.author_name || 'Agent'}</span>
-                            <span>{formatDateTimeMMDDYYYY(note.created_at)}</span>
-                          </div>
-                          <p className="text-xs text-slate-800 whitespace-pre-wrap font-sans">{note.content}</p>
-
-                          {/* Reply Toggle & Reply Composer */}
-                          <div>
-                            <button
-                              type="button"
-                              onClick={() => setReplyingNoteId(replyingNoteId === note.id ? null : note.id)}
-                              className="text-xs font-bold text-blue-600 hover:underline"
-                            >
-                              Reply
-                            </button>
-
-                            {replyingNoteId === note.id && (
-                              <div className="mt-3 pl-4 border-l-2 border-blue-200 space-y-3">
-                                <textarea
-                                  rows={2}
-                                  value={clientReplyBody}
-                                  onChange={(e) => setClientReplyBody(e.target.value)}
-                                  placeholder="Write a reply..."
-                                  className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:border-blue-500 resize-none font-sans"
-                                />
-
-                                {/* Visible FileDropzone under reply textarea */}
-                                <FileDropzone
-                                  label="Drag reply attachments here or click to select"
-                                  multiple={true}
-                                  disabled={clientNotePosting}
-                                  selectedFiles={clientReplyFiles}
-                                  onFilesSelected={(newFiles) => setClientReplyFiles(prev => [...prev, ...newFiles])}
-                                  onRemoveFile={(index) => setClientReplyFiles(prev => prev.filter((_, i) => i !== index))}
-                                />
-
-                                <div className="flex justify-end gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setReplyingNoteId(null);
-                                      setClientReplyBody('');
-                                      setClientReplyFiles([]);
-                                    }}
-                                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg"
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      if (!clientReplyBody.trim() && clientReplyFiles.length === 0) return;
-                                      const { data: { user } } = await supabase.auth.getUser();
-                                      if (!user) return;
-                                      await supabase.from('client_notes').insert({
-                                        client_id: clientId,
-                                        author_id: user.id,
-                                        parent_note_id: note.id,
-                                        content: clientReplyBody.trim(),
-                                      });
-                                      setReplyingNoteId(null);
-                                      setClientReplyBody('');
-                                      setClientReplyFiles([]);
-                                      loadClientNotes();
-                                    }}
-                                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg"
-                                  >
-                                    Post Reply
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <UnifiedNotesManager
+                  clientId={clientId}
+                  policiesList={policies}
+                  currentUserId={currentUserId}
+                />
               )}
 
               {/*
@@ -4301,7 +4248,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               })()}
 
       {activeTab === 'life' && client && (
-        !isLineEnabled('life') ? (
+        client.agent_id !== currentUserId ? (
+          <div className="bg-rose-50 border border-rose-100 rounded-2xl p-8 text-center space-y-3 font-sans">
+            <h4 className="text-lg font-bold text-rose-800">Private Owner Module</h4>
+            <p className="text-sm text-rose-600 font-medium">The <strong>Life</strong> module is private to the primary client owner.</p>
+          </div>
+        ) : !isLineEnabled('life') ? (
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
             <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
             <p className="text-sm text-slate-300">The <strong>Life</strong> module is disabled for your agent profile.</p>
@@ -4315,7 +4267,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       )}
 
       {activeTab === 'health' && client && (
-        !isLineEnabled('health') ? (
+        client.agent_id !== currentUserId ? (
+          <div className="bg-rose-50 border border-rose-100 rounded-2xl p-8 text-center space-y-3 font-sans">
+            <h4 className="text-lg font-bold text-rose-800">Private Owner Module</h4>
+            <p className="text-sm text-rose-600 font-medium">The <strong>Health</strong> module is private to the primary client owner.</p>
+          </div>
+        ) : !isLineEnabled('health') ? (
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
             <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
             <p className="text-sm text-slate-300">The <strong>Health</strong> module is disabled for your agent profile.</p>
@@ -4657,16 +4614,16 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
       
       {/* Modal: Confirm Company Policy Link */}
-      {isConfirmLinkOpen && selectedCompanyPolicy && (
+      {isConfirmLinkOpen && selectedCompanyProfile && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-xl max-w-md w-full p-6 space-y-5 animate-scaleUp">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-xl max-w-md w-full p-6 space-y-4 animate-scaleUp max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-base font-extrabold text-slate-900">Confirm Company Policy Link</h3>
+              <h3 className="text-base font-extrabold text-slate-900">Confirm Commercial Profile Link</h3>
               <button
                 type="button"
                 onClick={() => {
                   setIsConfirmLinkOpen(false);
-                  setSelectedCompanyPolicy(null);
+                  setSelectedCompanyProfile(null);
                   setLinkError(null);
                 }}
                 className="text-slate-400 hover:text-slate-600 transition-colors p-1"
@@ -4677,94 +4634,152 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               </button>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Are you sure you want to link this company policy to the current personal client?
-            </p>
-
-            {/* Policy Summary Card */}
+            {/* Summary Header */}
             <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5 space-y-2 text-xs">
               <div className="flex justify-between gap-2">
-                <span className="text-slate-400">Company / Client:</span>
-                <span className="font-extrabold text-slate-900 truncate">{selectedCompanyPolicy.client?.full_name || '-'}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-400">Policy Number:</span>
-                <span className="font-semibold text-slate-800 truncate">{selectedCompanyPolicy.policy_number || '-'}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-400">Policy Type / LOB:</span>
-                <span className="font-semibold text-slate-800 truncate">
-                  {selectedCompanyPolicy.policy_type ? (selectedCompanyPolicy.policy_subtype ? `${selectedCompanyPolicy.policy_type} (${selectedCompanyPolicy.policy_subtype})` : selectedCompanyPolicy.policy_type) : '-'}
+                <span className="text-slate-400 font-medium">Commercial Client:</span>
+                <span className="font-extrabold text-slate-900 truncate">
+                  {selectedCompanyProfile.client?.agency_name || selectedCompanyProfile.client?.full_name || 'Commercial Client'}
                 </span>
               </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-400">Carrier / Writing Co:</span>
-                <span className="font-semibold text-slate-700 truncate">{selectedCompanyPolicy.writing_company || selectedCompanyPolicy.company_name || '-'}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-400">Primary Email:</span>
-                <span className="font-medium text-slate-700 truncate">{selectedCompanyPolicy.client?.email || '-'}</span>
-              </div>
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-400">Primary Phone:</span>
-                <span className="font-medium text-slate-700 truncate">{selectedCompanyPolicy.client?.phone || '-'}</span>
-              </div>
+              {selectedCompanyProfile.client?.email && (
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-400 font-medium">Email:</span>
+                  <span className="font-semibold text-slate-700 truncate">{selectedCompanyProfile.client.email}</span>
+                </div>
+              )}
+              {selectedCompanyProfile.client?.phone && (
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-400 font-medium">Phone:</span>
+                  <span className="font-semibold text-slate-700 truncate">{selectedCompanyProfile.client.phone}</span>
+                </div>
+              )}
             </div>
 
-            {/* Role Selection */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-700">Linked Person Role</label>
-              <select
-                value={linkedPersonRole}
-                onChange={(e) => setLinkedPersonRole(e.target.value as 'main_applicant' | 'co_applicant')}
-                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-              >
-                <option value="main_applicant">Main Applicant</option>
-                {personalInfo?.has_co_applicant === true && (
-                  <option value="co_applicant">Co-Applicant</option>
-                )}
-              </select>
-            </div>
+            {/* Policy Breakdown Badges & List */}
+            {(() => {
+              const total = selectedCompanyProfile.policies.length;
+              const eligible = selectedCompanyProfile.policies.filter((p: any) => !p.linkOwnerId).length;
+              const linked = selectedCompanyProfile.policies.filter((p: any) => p.linkOwnerId === clientId).length;
+              const conflict = selectedCompanyProfile.policies.filter((p: any) => p.linkOwnerId && p.linkOwnerId !== clientId).length;
 
-            {linkError && (
-              <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs">
-                {linkError}
-              </div>
-            )}
+              return (
+                <div className="space-y-3 text-xs">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                    <span>Commercial P&C Policies ({total})</span>
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-100 font-extrabold">
+                        {eligible} avail
+                      </span>
+                      {linked > 0 && (
+                        <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100 font-extrabold">
+                          {linked} linked
+                        </span>
+                      )}
+                      {conflict > 0 && (
+                        <span className="bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full border border-rose-100 font-extrabold">
+                          {conflict} unavail
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
-            {/* Modal Buttons */}
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsConfirmLinkOpen(false);
-                  setSelectedCompanyPolicy(null);
-                  setLinkError(null);
-                }}
-                disabled={linkingPolicy}
-                className="border border-slate-200 hover:bg-slate-50 text-slate-600 font-semibold rounded-xl px-4 py-2 text-xs transition-all disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmLinkPolicy}
-                disabled={linkingPolicy}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl px-4 py-2 text-xs transition-all shadow-md shadow-blue-500/10 disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {linkingPolicy ? (
-                  <>
-                    <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    <span>Linking...</span>
-                  </>
-                ) : (
-                  'Confirm Link'
-                )}
-              </button>
-            </div>
+                  {/* Policy List */}
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1 border border-slate-100 rounded-xl p-2 bg-slate-50/50">
+                    {selectedCompanyProfile.policies.map((p: any) => {
+                      const linkOwnerId = p.linkOwnerId;
+                      let badgeLabel = 'Available';
+                      let badgeStyle = 'bg-emerald-50 text-emerald-700 border-emerald-100';
+
+                      if (linkOwnerId) {
+                        if (linkOwnerId === clientId) {
+                          badgeLabel = 'Already Linked';
+                          badgeStyle = 'bg-blue-50 text-blue-700 border-blue-100';
+                        } else {
+                          badgeLabel = 'Unavailable';
+                          badgeStyle = 'bg-rose-50 text-rose-700 border-rose-100 font-extrabold';
+                        }
+                      }
+
+                      const lobDisplay = p.policy_type ? (p.policy_subtype ? `${p.policy_type} (${p.policy_subtype})` : p.policy_type) : 'Commercial P&C';
+                      const companyDisplay = p.writing_company || p.company_name || 'Carrier Unspecified';
+
+                      return (
+                        <div key={p.id} className="bg-white border border-slate-200/80 rounded-lg p-2.5 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-extrabold text-slate-900 text-xs">{lobDisplay}</span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold border ${badgeStyle}`}>
+                              {badgeLabel}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-slate-500 text-[11px]">
+                            <span>Policy #: <strong>{p.policy_number || 'N/A'}</strong></span>
+                            <span className="truncate max-w-[140px]">{companyDisplay}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Role Selection */}
+                  <div className="space-y-1.5 pt-1">
+                    <label className="block text-xs font-bold text-slate-700">Linked Person Role</label>
+                    <select
+                      value={linkedPersonRole}
+                      onChange={(e) => setLinkedPersonRole(e.target.value as 'main_applicant' | 'co_applicant')}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-800 text-xs outline-none transition-all"
+                    >
+                      <option value="main_applicant">Main Applicant</option>
+                      {personalInfo?.has_co_applicant === true && (
+                        <option value="co_applicant">Co-Applicant</option>
+                      )}
+                    </select>
+                  </div>
+
+                  {linkError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs">
+                      {linkError}
+                    </div>
+                  )}
+
+                  {/* Modal Buttons */}
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsConfirmLinkOpen(false);
+                        setSelectedCompanyProfile(null);
+                        setLinkError(null);
+                      }}
+                      disabled={linkingPolicy}
+                      className="border border-slate-200 hover:bg-slate-50 text-slate-600 font-semibold rounded-xl px-4 py-2 text-xs transition-all disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmLinkPolicy}
+                      disabled={linkingPolicy || eligible === 0}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl px-4 py-2 text-xs transition-all shadow-md shadow-blue-500/10 disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {linkingPolicy ? (
+                        <>
+                          <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          <span>Linking...</span>
+                        </>
+                      ) : eligible === 0 ? (
+                        <span>All Policies Linked</span>
+                      ) : (
+                        <span>Link {eligible} Available Policy/Policies</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

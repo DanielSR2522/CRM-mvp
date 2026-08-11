@@ -41,7 +41,6 @@ export default function ConsentPreviewModal({
         const { data } = await supabase
           .from('clients')
           .select('id, full_name, agency_name')
-          .eq('agent_id', session.user.id)
           .order('full_name', { ascending: true });
 
         if (data) {

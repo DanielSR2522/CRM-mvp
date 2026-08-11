@@ -124,7 +124,6 @@ export default function CalendarPage() {
         const { data: clientsData, error: clientsErr } = await supabase
           .from('clients')
           .select('id, full_name, email, phone')
-          .eq('agent_id', user.id)
           .order('full_name', { ascending: true });
 
         if (!clientsErr && clientsData) {

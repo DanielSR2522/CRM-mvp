@@ -82,20 +82,25 @@ export default function GlobalCrmSearch() {
         const agentId = session.user.id;
         const q = trimmed;
 
-        // 1. Fetch Agent's Clients for client-linked policy filters
-        const { data: agentClients } = await supabase
+        // 1. Fetch Accessible Clients for client-linked policy filters
+        const { data: rawAgentClients } = await supabase
           .from('clients')
-          .select('id, full_name, agency_name, email, phone, address')
-          .eq('agent_id', agentId);
+          .select('id, full_name, agency_name, email, phone, address, agent_id, policies(id)');
+
+        const agentClients = (rawAgentClients || []).filter((c: any) => {
+          if (c.agent_id === agentId) return true;
+          return Array.isArray(c.policies) && c.policies.length > 0;
+        });
 
         const clientMap = new Map((agentClients || []).map(c => [c.id, c.full_name || 'Client']));
         const agentClientIds = Array.from(clientMap.keys());
+        const ownerClientIds = Array.from(new Set((rawAgentClients || []).filter((c: any) => c.agent_id === agentId).map(c => c.id)));
 
-        // 2. Parallel queries across all CRM modules (Strictly Agent-Scoped)
+        // 2. Parallel queries across all CRM modules
         const [
-          clientsRes,
+          rawClientsRes,
           leadsRes,
-          companiesRes,
+          rawCompaniesRes,
           pcRes,
           healthRes,
           lifePolRes
@@ -103,10 +108,9 @@ export default function GlobalCrmSearch() {
           // Clients
           supabase
             .from('clients')
-            .select('id, full_name, agency_name, email, phone, address')
-            .eq('agent_id', agentId)
+            .select('id, full_name, agency_name, email, phone, address, agent_id, policies(id)')
             .or(`full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,address.ilike.%${q}%,agency_name.ilike.%${q}%`)
-            .limit(5),
+            .limit(10),
 
           // Leads
           supabase
@@ -120,7 +124,6 @@ export default function GlobalCrmSearch() {
           supabase
             .from('clients')
             .select('id, full_name, agency_name, email, phone')
-            .eq('agent_id', agentId)
             .not('agency_name', 'is', null)
             .or(`agency_name.ilike.%${q}%,full_name.ilike.%${q}%`)
             .limit(5),
@@ -135,22 +138,22 @@ export default function GlobalCrmSearch() {
                 .limit(5)
             : Promise.resolve({ data: [] }),
 
-          // Health Policies
-          agentClientIds.length > 0
+          // Health Policies (Owner-Private)
+          ownerClientIds.length > 0
             ? supabase
                 .from('health_policies')
                 .select('id, client_id, plan_name, company_2026, renovation_status, plan_id, application_number')
-                .in('client_id', agentClientIds)
+                .in('client_id', ownerClientIds)
                 .or(`plan_name.ilike.%${q}%,company_2026.ilike.%${q}%,renovation_status.ilike.%${q}%,plan_id.ilike.%${q}%,application_number.ilike.%${q}%`)
                 .limit(5)
             : Promise.resolve({ data: [] }),
 
-          // Life Policies
-          agentClientIds.length > 0
+          // Life Policies (Owner-Private)
+          ownerClientIds.length > 0
             ? supabase
                 .from('life_policies')
                 .select('id, client_id')
-                .in('client_id', agentClientIds)
+                .in('client_id', ownerClientIds)
             : Promise.resolve({ data: [] })
         ]);
 
@@ -176,7 +179,12 @@ export default function GlobalCrmSearch() {
         }
 
         // Map Clients Results
-        const clientItems: SearchResultItem[] = (clientsRes.data || []).map((c: any) => ({
+        const clientsResData = (rawClientsRes.data || []).filter((c: any) => {
+          if (c.agent_id === agentId) return true;
+          return Array.isArray(c.policies) && c.policies.length > 0;
+        });
+
+        const clientItems: SearchResultItem[] = clientsResData.map((c: any) => ({
           id: c.id,
           category: 'clients',
           title: c.full_name || 'Unnamed Client',
@@ -199,7 +207,12 @@ export default function GlobalCrmSearch() {
         });
 
         // Map Companies Results
-        const companyItems: SearchResultItem[] = (companiesRes.data || []).map((c: any) => ({
+        const companiesResData = (rawCompaniesRes.data || []).filter((c: any) => {
+          if (c.agent_id === agentId) return true;
+          return Array.isArray(c.policies) && c.policies.length > 0;
+        });
+
+        const companyItems: SearchResultItem[] = companiesResData.map((c: any) => ({
           id: c.id,
           category: 'companies',
           title: c.agency_name || c.full_name || 'Company',

@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
+import UnifiedNotesManager from '@/components/notes/UnifiedNotesManager';
+import { NoteCategory } from '@/lib/notes/types';
 import { supabase } from '@/lib/supabaseClient';
 import { LINES_OF_BUSINESS } from '@/constants/linesOfBusiness';
 import {
@@ -2375,182 +2377,19 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
               );
             })()}
 
-            {activeMenuTab === 'notes' && (
-              <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
-                <div className="flex items-center justify-between border-b border-slate-50 pb-4">
-                  <h3 className="text-lg font-extrabold text-slate-900 font-sans">Policy Notes</h3>
-                </div>
-
-                {noteActionError && (
-                  <div className="p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm">
-                    {noteActionError}
-                  </div>
-                )}
-
-                {noteActionSuccess && (
-                  <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm">
-                    {noteActionSuccess}
-                  </div>
-                )}
-
-                {/* Add Note Form */}
-                <form onSubmit={handleAddNote} className="space-y-4">
-                  <textarea
-                    value={newNoteContent}
-                    onChange={e => setNewNoteContent(e.target.value)}
-                    placeholder="Add a note to this policy..."
-                    rows={3}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-3 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all resize-none font-sans"
-                  />
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      type="submit"
-                      disabled={savingNote || !newNoteContent.trim()}
-                      className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 disabled:opacity-50"
-                    >
-                      {savingNote ? 'Adding...' : 'Add Note'}
-                    </button>
-                  </div>
-                </form>
-
-                {/* Notes List */}
-                {notesLoading ? (
-                  <div className="flex justify-center items-center py-10">
-                    <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                  </div>
-                ) : notes.length === 0 ? (
-                  <div className="text-center py-12 border border-dashed border-slate-200 rounded-2xl">
-                    <p className="text-sm text-slate-400 font-sans">No notes have been added to this policy yet.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {notes.map(note => {
-                      const isEditing = editingNoteId === note.id;
-                      const authorDisplay = note.profiles?.name || note.profiles?.email || 'Agent';
-                      const isEdited = new Date(note.updated_at).getTime() !== new Date(note.created_at).getTime();
-
-                      const formattedDateTime = formatDateTimeMMDDYYYY(note.created_at);
-
-                      return (
-                        <div key={note.id} className="bg-slate-50/50 border border-slate-100 rounded-xl p-4 space-y-2">
-                          <div className="flex items-center justify-between text-xs text-slate-400 font-sans">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-slate-700">{authorDisplay}</span>
-                              <span>•</span>
-                              <span>{formattedDateTime}</span>
-                              {isEdited && <span className="text-[10px] bg-slate-200 text-slate-650 px-1.5 py-0.5 rounded">Edited</span>}
-                            </div>
-                            <div className="flex items-center gap-3">
-                              {!isEditing && note.author_id === currentUserId && (
-                                <>
-                                  <button
-                                    onClick={() => {
-                                      setEditingNoteId(note.id);
-                                      setEditingNoteContent(note.content);
-                                    }}
-                                    className="text-slate-500 hover:text-blue-600 transition-colors font-bold"
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeleteNote(note.id)}
-                                    className="text-rose-500 hover:text-rose-700 transition-colors font-bold"
-                                  >
-                                    Delete
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          {isEditing ? (
-                            <div className="space-y-2 pt-2">
-                              <textarea
-                                value={editingNoteContent}
-                                onChange={e => setEditingNoteContent(e.target.value)}
-                                rows={3}
-                                className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-3 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all resize-none font-sans"
-                              />
-                              <div className="flex justify-end gap-2">
-                                <button
-                                  onClick={() => {
-                                    setEditingNoteId(null);
-                                    setEditingNoteContent('');
-                                  }}
-                                  className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-white border border-slate-150 px-3 py-1.5 rounded-lg transition-all font-sans"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  onClick={() => handleEditNoteSubmit(note.id)}
-                                  disabled={savingNote || !editingNoteContent.trim()}
-                                  className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-all shadow-md disabled:opacity-50 font-sans"
-                                >
-                                  {savingNote ? 'Saving...' : 'Save Changes'}
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              <p className="text-sm text-slate-700 whitespace-pre-wrap pt-1 font-sans">{note.content}</p>
-                              {noteAttachments[note.id] && noteAttachments[note.id].length > 0 && (
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-2">
-                                  {noteAttachments[note.id].map(att => (
-                                    <div
-                                      key={att.id}
-                                      className="relative group bg-white border border-slate-250/60 rounded-lg p-2 flex flex-col items-center shadow-xs"
-                                    >
-                                      {/* Clickable signed URL thumbnail */}
-                                      <div
-                                        onClick={() => openAttachmentSignedUrl(att.storage_path)}
-                                        className="w-full h-16 bg-slate-50 rounded-md overflow-hidden flex items-center justify-center cursor-pointer hover:opacity-85 transition-opacity"
-                                      >
-                                        <div className="flex flex-col items-center text-slate-400">
-                                          <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                          </svg>
-                                          <span className="text-[8px] mt-0.5 text-slate-500 font-sans">View Image</span>
-                                        </div>
-                                      </div>
-                                      <span
-                                        onClick={() => openAttachmentSignedUrl(att.storage_path)}
-                                        className="text-[10px] text-slate-600 truncate w-full text-center font-bold mt-1.5 cursor-pointer hover:text-blue-600 hover:underline font-sans"
-                                        title={att.display_name}
-                                      >
-                                        {att.display_name}
-                                      </span>
-                                      <span className="text-[9px] text-slate-400 font-sans">
-                                        {formatFileSize(att.size_bytes)}
-                                      </span>
-
-                                      {/* Deletion of individual attachment */}
-                                      <button
-                                        type="button"
-                                        disabled={deletingAttachmentId === att.id}
-                                        onClick={() => handleDeleteAttachment(att)}
-                                        className="absolute -top-1.5 -right-1.5 bg-rose-50 border border-rose-100 hover:bg-rose-100 text-rose-600 rounded-full p-1 shadow-sm transition-colors disabled:opacity-50"
-                                        title="Delete attachment"
-                                      >
-                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                      </button>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+            {activeMenuTab === 'notes' && policy && (
+              <UnifiedNotesManager
+                clientId={policy.client_id}
+                inferredCategory={
+                  (policy.policy_type?.toLowerCase().includes('health')
+                    ? 'health'
+                    : policy.policy_type?.toLowerCase().includes('life')
+                    ? 'life'
+                    : 'property_casualty') as NoteCategory
+                }
+                policyId={policyId}
+                currentUserId={currentUserId}
+              />
             )}
 
             {activeMenuTab === 'summary' && (

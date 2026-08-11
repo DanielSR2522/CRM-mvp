@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import { supabase } from '@/lib/supabaseClient';
-import { LINES_OF_BUSINESS } from '@/constants/linesOfBusiness';
+import { LINES_OF_BUSINESS, COMMERCIAL_LINES_OF_BUSINESS, PERSONAL_LINES_OF_BUSINESS } from '@/constants/linesOfBusiness';
 import { usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
 import DatePicker from '@/components/ui/DatePicker';
 
@@ -18,6 +18,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
   // States
   const [clientName, setClientName] = useState('');
+  const [isCompanyClient, setIsCompanyClient] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -40,13 +41,23 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
     const fetchClient = async () => {
       try {
         setLoading(true);
-        const { data, error } = await supabase
-          .from('clients')
-          .select('full_name')
-          .eq('id', id)
-          .single();
-        if (error) throw error;
-        setClientName(data?.full_name || '');
+        const [clientRes, personalRes, policiesRes] = await Promise.all([
+          supabase.from('clients').select('full_name, agency_name').eq('id', id).single(),
+          supabase.from('client_personal_information').select('full_name, date_of_birth, ssn').eq('client_id', id).maybeSingle(),
+          supabase.from('policies').select('policy_ownership_type').eq('client_id', id)
+        ]);
+
+        const clientData = clientRes.data;
+        const personalData = personalRes.data;
+        const existingPolicies = policiesRes.data || [];
+
+        const isCompany = Boolean(
+          (existingPolicies.some(p => p.policy_ownership_type === 'company')) ||
+          (!personalData?.date_of_birth && !personalData?.ssn && personalData?.full_name && personalData?.full_name !== clientData?.full_name)
+        );
+
+        setClientName(clientData?.full_name || '');
+        setIsCompanyClient(isCompany);
       } catch (err: any) {
         console.error('Error fetching client name:', err);
       } finally {
@@ -135,6 +146,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
           premium: totalPremium === '' ? 0 : Number(totalPremium), // Keep synced with legacy column
           annual_premium: annualPremium === '' ? 0 : Number(annualPremium),
           status: policyStatus,
+          policy_ownership_type: isCompanyClient ? 'company' : 'personal',
           updated_at: new Date().toISOString(),
         })
         .select('id')
@@ -171,6 +183,8 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
     }
   };
 
+  const availableLobs = isCompanyClient ? COMMERCIAL_LINES_OF_BUSINESS : PERSONAL_LINES_OF_BUSINESS;
+
   return (
     <DashboardLayout>
       <div className="max-w-7xl mx-auto space-y-6">
@@ -196,7 +210,9 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
         ) : (
           <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
             <div className="flex items-center justify-between border-b border-slate-50 pb-4">
-              <h3 className="text-lg font-extrabold text-slate-900">Add New Policy</h3>
+              <h3 className="text-lg font-extrabold text-slate-900">
+                Add New {isCompanyClient ? 'Commercial Company' : 'Personal'} Policy
+              </h3>
               <div className="flex items-center gap-2">
                 <Link
                   href={`/clients/${id}`}
@@ -234,7 +250,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                     required
                   >
                     <option value="">Select Option</option>
-                    {LINES_OF_BUSINESS.map(opt => (
+                    {availableLobs.map(opt => (
                       <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>

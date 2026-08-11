@@ -9,6 +9,7 @@ import { formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
 import { formatUSPhone } from '@/lib/formatters/phone';
 import PhoneInput from '@/components/common/PhoneInput';
 import NewClientWizardModal from '@/components/NewClientWizardModal';
+import { getAssignedAgentDisplay } from '@/lib/auth/agentDisplay';
 
 interface Client {
   id: string;
@@ -66,11 +67,18 @@ export default function ClientsPage() {
       const { data, error } = await supabase
         .from('clients')
         .select('*, policies(id)')
-        .eq('agent_id', user.id)
         .order('full_name', { ascending: true });
 
       if (error) throw error;
-      setClients(data || []);
+
+      // Scoped P&C filter: Amanda/Laura only see non-owned shared clients if they have at least 1 P&C policy
+      const pcFilteredData = (data || []).filter((client: any) => {
+        if (client.agent_id === user.id) return true;
+        const hasPcPolicy = Array.isArray(client.policies) && client.policies.length > 0;
+        return hasPcPolicy;
+      });
+
+      setClients(pcFilteredData);
     } catch (err: any) {
       console.error('Error fetching clients:', err);
     } finally {
@@ -256,6 +264,7 @@ export default function ClientsPage() {
                     <th className="px-6 py-4">Client Name</th>
                     <th className="px-6 py-4">Email</th>
                     <th className="px-6 py-4">Phone</th>
+                    <th className="px-6 py-4">Assigned Agent</th>
                     <th className="px-6 py-4 text-center">Policies</th>
                     <th className="px-6 py-4">Last Updated</th>
                     <th className="px-6 py-4 text-right">Actions</th>
@@ -279,6 +288,16 @@ export default function ClientsPage() {
                       </td>
                       <td className="px-6 py-4 text-slate-600">{client.email || '-'}</td>
                       <td className="px-6 py-4 text-slate-600">{formatUSPhone(client.phone) || '-'}</td>
+                      <td className="px-6 py-4 text-slate-700 text-xs font-bold">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-800 border border-slate-200">
+                          {getAssignedAgentDisplay({
+                            clientAgentId: client.agent_id,
+                            currentUserId: currentUser?.id,
+                            isEligiblePcClient: Boolean(client.policies && client.policies.length > 0),
+                            fallbackName: 'Agent'
+                          })}
+                        </span>
+                      </td>
                       <td className="px-6 py-4 text-center">
                         <span className="inline-flex items-center justify-center bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full text-xs font-bold border border-blue-100">
                           {client.policies?.length || 0}

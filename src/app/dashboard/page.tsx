@@ -122,14 +122,19 @@ export default function DashboardPage() {
 
       const { data: clientsData, error: clientsErr } = await supabase
         .from('clients')
-        .select('id, full_name')
-        .eq('agent_id', user.id);
+        .select('id, full_name, agent_id, policies(id)');
 
       if (clientsErr) throw clientsErr;
-      setClients(clientsData || []);
 
-      if (clientsData && clientsData.length > 0) {
-        const clientIds = clientsData.map((c) => c.id);
+      const pcEligibleClients = (clientsData || []).filter((c: any) => {
+        if (c.agent_id === user.id) return true;
+        return Array.isArray(c.policies) && c.policies.length > 0;
+      });
+
+      setClients(pcEligibleClients);
+
+      if (pcEligibleClients && pcEligibleClients.length > 0) {
+        const clientIds = pcEligibleClients.map((c) => c.id);
         const { data: policiesData, error: polErr } = await supabase
           .from('policies')
           .select('id, client_id, policy_type, policy_number, company_name, expiration_date, status')

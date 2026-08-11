@@ -529,6 +529,12 @@ export async function saveTemplateDraft(params: {
     is_scanned_pdf?: boolean;
     imported_at: string;
   };
+  signing_config?: {
+    require_signature?: boolean;
+    automatic_signing_date?: boolean;
+    require_consent_checkbox?: boolean;
+    consent_statement?: string;
+  };
   overrideAgentId?: string;
 }): Promise<ConsentTemplate> {
   let userId = params.overrideAgentId;
@@ -545,7 +551,7 @@ export async function saveTemplateDraft(params: {
 
   const content: Record<string, any> = {
     html: params.htmlContent,
-    signing_config: {
+    signing_config: params.signing_config || {
       require_signature: true,
       automatic_signing_date: true,
       require_consent_checkbox: true,

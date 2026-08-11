@@ -1,52 +1,60 @@
-export const LINES_OF_BUSINESS = [
+export const COMMERCIAL_LINES_OF_BUSINESS = [
   "Commercial Package",
   "Auto (Commercial)",
-  "Auto (Personal)",
   "Bond",
   "Business Owners",
   "Commercial Property",
-  "Comprehensive Personal Liability",
-  "Condominium",
   "Crime",
   "Cyber Liability",
   "Directors and Officers",
-  "Dwelling Fire",
   "Equipment Breakdown",
   "Errors & Emissions",
   "Event Liability",
-  "Excess Flood",
   "Excess Liability",
-  "Fine Arts",
-  "Jewelry",
-  "Flood",
   "Garage & Dealers",
   "General Liability",
-  "Homeowners",
   "Inland Marine (Commercial)",
-  "Inland Marine (Personal)",
   "Builders Risk",
-  "Liability Gap",
-  "Specialty a la Carte Homeowners Coverages",
   "Lessor's Risk",
   "Liquor Liability",
   "Malpractice",
   "Miscellaneous Professional Liability",
-  "Mobile Home",
-  "Motorcycle",
   "Motor Truck Cargo",
   "Ocean Marine (Commercial)",
-  "Notary Bond",
-  "Renters / HO4",
   "Truckers",
   "Umbrella (Commercial)",
+  "Workers Compensation"
+];
+
+export const PERSONAL_LINES_OF_BUSINESS = [
+  "Auto (Personal)",
+  "Homeowners",
+  "Comprehensive Personal Liability",
+  "Condominium",
+  "Dwelling Fire",
+  "Excess Flood",
+  "Fine Arts",
+  "Jewelry",
+  "Flood",
+  "Inland Marine (Personal)",
+  "Liability Gap",
+  "Specialty a la Carte Homeowners Coverages",
+  "Mobile Home",
+  "Motorcycle",
+  "Notary Bond",
+  "Renters / HO4",
   "Umbrella (Personal)",
   "Vacant Property",
   "Wind Only Policy",
-  "Workers Compensation",
   "Scheduled Watches Policy",
   "Travel Trailer",
   "Watercraft (Small Boat)",
   "Yacht"
+];
+
+export const LINES_OF_BUSINESS = [
+  ...COMMERCIAL_LINES_OF_BUSINESS,
+  ...PERSONAL_LINES_OF_BUSINESS
 ];
 
 // Compile-time or load-time length safety check

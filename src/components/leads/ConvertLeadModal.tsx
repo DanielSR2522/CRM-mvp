@@ -53,11 +53,10 @@ export default function ConvertLeadModal({ lead, onClose, onSuccess }: ConvertLe
         return;
       }
 
-      // Fetch all clients owned by authenticated agent
+      // Fetch all accessible clients
       const { data: allClients, error: fetchErr } = await supabase
         .from('clients')
-        .select('id, full_name, email, phone, address')
-        .eq('agent_id', user.id);
+        .select('id, full_name, email, phone, address');
 
       if (fetchErr) throw fetchErr;
 
