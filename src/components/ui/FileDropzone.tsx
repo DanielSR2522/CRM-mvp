@@ -15,7 +15,7 @@ export interface FileDropzoneProps {
   error?: string | null;
 }
 
-const DEFAULT_MAX_SIZE = 15 * 1024 * 1024; // 15MB
+const DEFAULT_MAX_SIZE = 20 * 1024 * 1024; // 20MB
 const DEFAULT_ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.txt';
 
 export default function FileDropzone({
@@ -177,8 +177,8 @@ export default function FileDropzone({
           </div>
           <div>
             <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{label}</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Supports PDF, Word, Excel, Images, and TXT (Max 15MB)
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-sans">
+              Supports PDF, Word, Excel, Images, and TXT (Max {Math.round(maxSizeBytes / (1024 * 1024))}MB)
             </p>
           </div>
         </div>

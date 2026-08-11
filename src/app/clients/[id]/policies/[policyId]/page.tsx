@@ -941,6 +941,60 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
     }
   };
 
+  // Handle direct file upload (auto-creating General section if zero sections exist)
+  const handleDirectOrSectionUpload = async (targetSectionId: string | null, filesList: File[] | FileList | null) => {
+    if (!filesList) return;
+    const filesArray = Array.isArray(filesList) ? filesList : Array.from(filesList);
+    if (filesArray.length === 0) return;
+
+    let activeSectionId = targetSectionId;
+
+    if (!activeSectionId) {
+      // Check loaded sections
+      const generalSec = sections.find(s => s.name === 'General') || sections[0];
+      if (generalSec) {
+        activeSectionId = generalSec.id;
+      } else {
+        // Auto-create a single General section for zero-section policies
+        setSavingSection(true);
+        setNoteActionError(null);
+        setNoteActionSuccess(null);
+
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session?.user) throw new Error('You must be logged in.');
+
+          const { data: newSec, error: secErr } = await supabase
+            .from('policy_document_sections')
+            .insert({
+              policy_id: policyId,
+              name: 'General',
+              position: 0,
+              created_by: session.user.id
+            })
+            .select()
+            .single();
+
+          if (secErr) throw secErr;
+
+          activeSectionId = newSec.id;
+          setSections([newSec]);
+        } catch (err: any) {
+          console.error('Error auto-creating General section:', err);
+          setNoteActionError(err?.message || 'Failed to initialize document section.');
+          setSavingSection(false);
+          return;
+        } finally {
+          setSavingSection(false);
+        }
+      }
+    }
+
+    if (activeSectionId) {
+      await handleFileUpload(activeSectionId, filesArray);
+    }
+  };
+
   // Rename document section
   const handleRenameSection = async (sectionId: string) => {
     if (!renamingSectionName.trim()) return;
@@ -1997,15 +2051,33 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
             {/* TAB CONTENT DETAILS */}
             {activeMenuTab === 'documents' && (
               <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
-                <div className="flex items-center justify-between border-b border-slate-50 pb-4">
+                <div className="flex flex-wrap items-center justify-between border-b border-slate-50 pb-4 gap-3">
                   <h3 className="text-lg font-extrabold text-slate-900 font-sans">Policy Documents</h3>
-                  <button
-                    onClick={handleAddSection}
-                    disabled={savingSection || sections.length >= 10}
-                    className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 disabled:opacity-50 font-sans"
-                  >
-                    Add Section
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <label className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 cursor-pointer disabled:opacity-50 font-sans">
+                      <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                      </svg>
+                      Upload Document
+                      <input
+                        type="file"
+                        multiple
+                        disabled={savingSection}
+                        className="hidden"
+                        onChange={(e) => {
+                          handleDirectOrSectionUpload(null, e.target.files);
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+                    <button
+                      onClick={handleAddSection}
+                      disabled={savingSection || sections.length >= 10}
+                      className="inline-flex items-center justify-center bg-slate-100 hover:bg-slate-200 active:scale-[0.98] text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl transition-all disabled:opacity-50 font-sans"
+                    >
+                      Add Section
+                    </button>
+                  </div>
                 </div>
 
                 {noteActionError && (
@@ -2028,11 +2100,36 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                     </svg>
                   </div>
                 ) : sections.length === 0 ? (
-                  <div className="text-center py-20 border border-dashed border-slate-200 rounded-2xl">
-                    <svg className="w-12 h-12 text-slate-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 13h6m-3-3v6m-9 1V4a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                  <div className="text-center py-12 px-6 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-4">
+                    <svg className="w-12 h-12 text-slate-300 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
-                    <p className="text-sm text-slate-450 font-sans">No document sections found. Click "Add Section" to get started.</p>
+                    <div>
+                      <h4 className="text-sm font-extrabold text-slate-800 font-sans">No documents uploaded yet</h4>
+                      <p className="text-xs text-slate-450 font-sans mt-1">Upload policy files directly or organize them into custom sections.</p>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                      <label className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 cursor-pointer font-sans">
+                        Select Files to Upload
+                        <input
+                          type="file"
+                          multiple
+                          disabled={savingSection}
+                          className="hidden"
+                          onChange={(e) => {
+                            handleDirectOrSectionUpload(null, e.target.files);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                      <button
+                        onClick={handleAddSection}
+                        disabled={savingSection || sections.length >= 10}
+                        className="inline-flex items-center justify-center bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl transition-all font-sans"
+                      >
+                        Create Section
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-6">
