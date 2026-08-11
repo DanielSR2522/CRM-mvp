@@ -54,6 +54,23 @@ interface Client {
   agent?: AgentProfile | null;
 }
 
+export interface UnifiedClientDocument {
+  id: string;
+  source: 'general' | 'property_casualty' | 'life' | 'health';
+  sourceLabel: string;
+  clientId: string;
+  policyId?: string;
+  displayName: string;
+  originalFilename: string;
+  storagePath: string;
+  createdAt: string;
+  documentType?: string;
+  sizeBytes?: number;
+  mimeType?: string;
+  bucket: 'policy-documents' | 'life-documents' | 'health-policy-documents';
+  canDelete: boolean;
+}
+
 interface Policy {
   id: string;
   client_id: string;
@@ -267,6 +284,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [timelineFilter, setTimelineFilter] = useState<'all' | 'policies' | 'notes' | 'documents' | 'consents'>('all');
   const [noteCounts, setNoteCounts] = useState<{ [policyId: string]: number }>({});
+
   const [docCounts, setDocCounts] = useState<{ [policyId: string]: number }>({});
   // Client Documents & Notes States
   const [clientDocDisplayName, setClientDocDisplayName] = useState('');
@@ -275,9 +293,10 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [clientDocFile, setClientDocFile] = useState<File | null>(null);
   const [clientDocUploading, setClientDocUploading] = useState(false);
   const [clientDocError, setClientDocError] = useState<string | null>(null);
-  const [clientDocsList, setClientDocsList] = useState<any[]>([]);
+  const [clientDocsList, setClientDocsList] = useState<UnifiedClientDocument[]>([]);
   const [clientDocsLoading, setClientDocsLoading] = useState(false);
   const [isClientDocModalOpen, setIsClientDocModalOpen] = useState(false);
+  const [docFilterCategory, setDocFilterCategory] = useState<'all' | 'general' | 'property_casualty' | 'life' | 'health'>('all');
 
   const [clientNoteBody, setClientNoteBody] = useState('');
   const [clientNoteFiles, setClientNoteFiles] = useState<File[]>([]);
@@ -293,9 +312,145 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const loadClientDocuments = useCallback(async () => {
     try {
       setClientDocsLoading(true);
-      const { data } = await supabase.from('client_documents').select('*').eq('client_id', clientId).order('created_at', { ascending: false });
-      setClientDocsList(data || []);
-    } catch {
+      const unifiedDocs: UnifiedClientDocument[] = [];
+
+      // 1. General client_documents
+      const generalPromise = supabase
+        .from('client_documents')
+        .select('*')
+        .eq('client_id', clientId)
+        .order('created_at', { ascending: false });
+
+      // 2. P&C policy_documents
+      const pcPromise = supabase
+        .from('policies')
+        .select('id, policy_number, policy_type, policy_documents(*)')
+        .eq('client_id', clientId);
+
+      // 3. Life life_policy_documents
+      const lifePromise = supabase
+        .from('life_policies')
+        .select('id, policy_number, life_policy_documents(*)')
+        .eq('client_id', clientId);
+
+      // 4. Health health_policy_documents
+      const healthPromise = supabase
+        .from('health_policies')
+        .select('id, plan_name, health_policy_documents(*)')
+        .eq('client_id', clientId);
+
+      const [genRes, pcRes, lifeRes, healthRes] = await Promise.allSettled([
+        generalPromise,
+        pcPromise,
+        lifePromise,
+        healthPromise
+      ]);
+
+      // Process General
+      if (genRes.status === 'fulfilled' && genRes.value.data) {
+        genRes.value.data.forEach((d: any) => {
+          unifiedDocs.push({
+            id: d.id,
+            source: 'general',
+            sourceLabel: 'General',
+            clientId: d.client_id,
+            displayName: d.display_name || d.original_filename,
+            originalFilename: d.original_filename,
+            storagePath: d.storage_path,
+            createdAt: d.created_at,
+            documentType: d.document_type || 'General Document',
+            sizeBytes: d.size_bytes,
+            mimeType: d.mime_type,
+            bucket: 'policy-documents',
+            canDelete: true,
+          });
+        });
+      } else if (genRes.status === 'rejected') {
+        console.error('General client documents load error:', genRes.reason);
+      }
+
+      // Process P&C
+      if (pcRes.status === 'fulfilled' && pcRes.value.data) {
+        pcRes.value.data.forEach((p: any) => {
+          (p.policy_documents || []).forEach((d: any) => {
+            unifiedDocs.push({
+              id: d.id,
+              source: 'property_casualty',
+              sourceLabel: `P&C (${p.policy_type || p.policy_number || 'Policy'})`,
+              clientId,
+              policyId: p.id,
+              displayName: d.display_name || d.original_filename,
+              originalFilename: d.original_filename,
+              storagePath: d.storage_path,
+              createdAt: d.created_at,
+              documentType: 'Policy Document',
+              sizeBytes: d.size_bytes,
+              mimeType: d.mime_type,
+              bucket: 'policy-documents',
+              canDelete: true,
+            });
+          });
+        });
+      } else if (pcRes.status === 'rejected') {
+        console.error('P&C policy documents load error:', pcRes.reason);
+      }
+
+      // Process Life
+      if (lifeRes.status === 'fulfilled' && lifeRes.value.data) {
+        lifeRes.value.data.forEach((lp: any) => {
+          (lp.life_policy_documents || []).forEach((d: any) => {
+            unifiedDocs.push({
+              id: d.id,
+              source: 'life',
+              sourceLabel: `Life (${lp.policy_number || 'Policy'})`,
+              clientId,
+              policyId: lp.id,
+              displayName: d.file_name,
+              originalFilename: d.file_name,
+              storagePath: d.storage_path,
+              createdAt: d.created_at,
+              documentType: 'Life Document',
+              sizeBytes: d.file_size || undefined,
+              mimeType: d.file_type || undefined,
+              bucket: 'life-documents',
+              canDelete: true,
+            });
+          });
+        });
+      } else if (lifeRes.status === 'rejected') {
+        console.error('Life policy documents load error:', lifeRes.reason);
+      }
+
+      // Process Health
+      if (healthRes.status === 'fulfilled' && healthRes.value.data) {
+        healthRes.value.data.forEach((hp: any) => {
+          (hp.health_policy_documents || []).forEach((d: any) => {
+            unifiedDocs.push({
+              id: d.id,
+              source: 'health',
+              sourceLabel: `Health (${hp.plan_name || 'Policy'})`,
+              clientId,
+              policyId: hp.id,
+              displayName: d.file_name || d.original_filename || 'Health Document',
+              originalFilename: d.original_filename || d.file_name,
+              storagePath: d.storage_path,
+              createdAt: d.created_at,
+              documentType: 'Health Document',
+              sizeBytes: d.file_size_bytes || undefined,
+              mimeType: d.mime_type || undefined,
+              bucket: 'health-policy-documents',
+              canDelete: true,
+            });
+          });
+        });
+      } else if (healthRes.status === 'rejected') {
+        console.error('Health policy documents load error:', healthRes.reason);
+      }
+
+      unifiedDocs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setClientDocsList(unifiedDocs);
+    } catch (err: any) {
+      console.error('Unified client documents aggregation error:', err);
       setClientDocsList([]);
     } finally {
       setClientDocsLoading(false);
@@ -3887,11 +4042,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               )}
 
               {activeTab === 'documents' && (
-                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
+                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 font-sans">
                   <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-4 gap-3">
                     <div>
-                      <h3 className="text-lg font-extrabold text-slate-900 font-sans">Client Documents</h3>
-                      <p className="text-xs text-slate-500 mt-1 font-sans">Upload and manage files attached to this client profile.</p>
+                      <h3 className="text-lg font-extrabold text-slate-900 font-sans">Unified Document Center</h3>
+                      <p className="text-xs text-slate-500 mt-1 font-sans">View and manage all general, policy, life, and health documents for this client.</p>
                     </div>
                     <button
                       onClick={() => {
@@ -3907,13 +4062,72 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
                       </svg>
-                      Upload Document
+                      Upload General Document
+                    </button>
+                  </div>
+
+                  {/* Category Filter Chips */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1 font-sans">
+                    <button
+                      type="button"
+                      onClick={() => setDocFilterCategory('all')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        docFilterCategory === 'all'
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      All ({clientDocsList.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDocFilterCategory('general')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        docFilterCategory === 'general'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      General ({clientDocsList.filter((d) => d.source === 'general').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDocFilterCategory('property_casualty')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        docFilterCategory === 'property_casualty'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      Property & Casualty ({clientDocsList.filter((d) => d.source === 'property_casualty').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDocFilterCategory('life')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        docFilterCategory === 'life'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      Life ({clientDocsList.filter((d) => d.source === 'life').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDocFilterCategory('health')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        docFilterCategory === 'health'
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      Health ({clientDocsList.filter((d) => d.source === 'health').length})
                     </button>
                   </div>
 
                   {/* Client Documents List */}
                   {clientDocsLoading ? (
-                    <div className="text-center py-12 text-xs text-slate-400 font-sans">Loading documents...</div>
+                    <div className="text-center py-12 text-xs text-slate-400 font-sans">Loading unified documents...</div>
                   ) : clientDocsList.length === 0 ? (
                     <div className="text-center py-12 px-6 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3">
                       <svg className="w-10 h-10 text-slate-300 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3931,43 +4145,91 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         }}
                         className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-sm font-sans"
                       >
-                        Upload Document
+                        Upload General Document
                       </button>
                     </div>
                   ) : (
                     <div className="divide-y divide-slate-100">
-                      {clientDocsList.map((doc) => (
-                        <div key={doc.id} className="py-3.5 flex items-center justify-between gap-4">
-                          <div className="min-w-0 flex-1">
-                            <h5 className="font-bold text-slate-800 text-sm font-sans truncate">{doc.display_name}</h5>
-                            <p className="text-xs text-slate-400 mt-0.5 font-sans">
-                              {doc.original_filename} • {doc.document_type}
-                            </p>
+                      {clientDocsList
+                        .filter((doc) => docFilterCategory === 'all' || doc.source === docFilterCategory)
+                        .map((doc) => (
+                          <div key={`${doc.source}-${doc.id}`} className="py-3.5 flex items-center justify-between gap-4">
+                            <div className="min-w-0 flex-1 flex items-start gap-3">
+                              <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 text-slate-500 mt-0.5 flex-shrink-0">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                </svg>
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h5 className="font-bold text-slate-900 text-sm font-sans truncate">{doc.displayName}</h5>
+                                  <span
+                                    className={`px-2 py-0.5 text-[10px] font-extrabold rounded-full tracking-wide uppercase font-sans ${
+                                      doc.source === 'general'
+                                        ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                                        : doc.source === 'property_casualty'
+                                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                        : doc.source === 'life'
+                                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    }`}
+                                  >
+                                    {doc.sourceLabel}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-400 mt-0.5 font-sans">
+                                  {doc.originalFilename} • {isoDateToMMDDYYYY(doc.createdAt)}
+                                  {doc.sizeBytes ? ` • ${(doc.sizeBytes / 1024).toFixed(1)} KB` : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const { data } = await supabase.storage.from(doc.bucket).createSignedUrl(doc.storagePath, 3600);
+                                    if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+                                  } catch (err: any) {
+                                    alert(`Failed to download document: ${err.message || err}`);
+                                  }
+                                }}
+                                className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors font-sans"
+                              >
+                                Download
+                              </button>
+                              {doc.canDelete && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (!confirm(`Are you sure you want to delete "${doc.displayName}"?`)) return;
+                                    try {
+                                      const { error: storageErr } = await supabase.storage.from(doc.bucket).remove([doc.storagePath]);
+                                      if (storageErr) console.warn('Storage deletion warning:', storageErr);
+
+                                      if (doc.source === 'general') {
+                                        await supabase.from('client_documents').delete().eq('id', doc.id);
+                                      } else if (doc.source === 'property_casualty') {
+                                        await supabase.from('policy_documents').delete().eq('id', doc.id);
+                                      } else if (doc.source === 'life') {
+                                        await supabase.from('life_policy_documents').delete().eq('id', doc.id);
+                                      } else if (doc.source === 'health') {
+                                        await supabase.from('health_policy_documents').delete().eq('id', doc.id);
+                                      }
+
+                                      loadClientDocuments();
+                                    } catch (err: any) {
+                                      alert(`Failed to delete document: ${err.message || err}`);
+                                    }
+                                  }}
+                                  className="text-xs font-bold text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-colors font-sans"
+                                >
+                                  Delete
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={async () => {
-                                const { data } = await supabase.storage.from('policy-documents').createSignedUrl(doc.storage_path, 3600);
-                                if (data?.signedUrl) window.open(data.signedUrl, '_blank');
-                              }}
-                              className="text-xs font-bold text-blue-600 hover:text-blue-800 font-sans transition-colors"
-                            >
-                              Download
-                            </button>
-                            <button
-                              onClick={async () => {
-                                if (!confirm(`Are you sure you want to delete "${doc.display_name}"?`)) return;
-                                await supabase.storage.from('policy-documents').remove([doc.storage_path]);
-                                await supabase.from('client_documents').delete().eq('id', doc.id);
-                                loadClientDocuments();
-                              }}
-                              className="text-xs font-bold text-rose-500 hover:text-rose-700 font-sans transition-colors"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        ))}
                     </div>
                   )}
 

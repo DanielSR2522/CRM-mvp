@@ -25,6 +25,7 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
   const [loading, setLoading] = useState<boolean>(true);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
 
   const loadDocuments = useCallback(async () => {
     setLoading(true);
@@ -80,6 +81,7 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
 
       await loadDocuments();
       if (onDocumentsChange) onDocumentsChange();
+      setIsModalOpen(false);
     } catch (err: any) {
       console.error('Failed to upload document:', err);
       setUploadError(err.message || 'Failed to upload document');
@@ -132,26 +134,24 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
 
   return (
     <div className="space-y-3 font-sans">
-      <div>
-        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 font-sans">Policy Documents</h4>
-        <p className="text-[11px] text-slate-400 font-normal">
-          Upload and manage documents specific to this Life Policy
-        </p>
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div>
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 font-sans">Policy Documents</h4>
+          <p className="text-[11px] text-slate-400 font-normal">
+            Upload and manage documents specific to this Life Policy
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setUploadError(null);
+            setIsModalOpen(true);
+          }}
+          className="inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-xs font-sans"
+        >
+          Upload Document
+        </button>
       </div>
-
-      <FileDropzone onFilesSelected={handleFilesDropped} disabled={isUploading} />
-
-      {isUploading && (
-        <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold animate-pulse">
-          Uploading file(s)... Please wait.
-        </div>
-      )}
-
-      {uploadError && (
-        <div className="p-2.5 bg-rose-50 border border-rose-100 rounded-lg text-rose-600 text-xs font-semibold">
-          {uploadError}
-        </div>
-      )}
 
       {loading ? (
         <div className="py-6 text-center text-xs text-slate-400">Loading documents...</div>
@@ -195,6 +195,57 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Upload Modal Dialog */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-extrabold text-slate-900 font-sans">Upload Life Policy Document</h3>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                disabled={isUploading}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {uploadError && (
+              <div className="p-2.5 bg-rose-50 border border-rose-100 rounded-lg text-rose-600 text-xs font-semibold">
+                {uploadError}
+              </div>
+            )}
+
+            <FileDropzone
+              label="Drag files here or click to select"
+              maxSizeBytes={20 * 1024 * 1024}
+              disabled={isUploading}
+              onFilesSelected={handleFilesDropped}
+            />
+
+            {isUploading && (
+              <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold animate-pulse text-center">
+                Uploading file(s)... Please wait.
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 font-sans">
+              <button
+                type="button"
+                disabled={isUploading}
+                onClick={() => setIsModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
