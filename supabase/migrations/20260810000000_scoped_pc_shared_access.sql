@@ -46,6 +46,24 @@ BEGIN
 END;
 $$;
 
+-- 3b. Helper function to check P&C policy existence without RLS recursion
+CREATE OR REPLACE FUNCTION public.client_has_pc_policy(p_client_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.policies p
+        WHERE p.client_id = p_client_id
+    );
+$$;
+
+REVOKE ALL ON FUNCTION public.client_has_pc_policy(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.client_has_pc_policy(uuid) TO authenticated;
+
 -- 4. RLS FOR CLIENTS (P&C Scoped - requires policy record for non-owner shared access)
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 
@@ -58,10 +76,7 @@ CREATE POLICY "Agents view owned or shared PC clients"
         agent_id = auth.uid()
         OR (
             can_access_agent(agent_id, 'property_casualty')
-            AND EXISTS (
-                SELECT 1 FROM public.policies p
-                WHERE p.client_id = clients.id
-            )
+            AND public.client_has_pc_policy(id)
         )
     );
 
@@ -74,20 +89,14 @@ CREATE POLICY "Agents update owned or shared PC clients"
         agent_id = auth.uid()
         OR (
             can_access_agent(agent_id, 'property_casualty')
-            AND EXISTS (
-                SELECT 1 FROM public.policies p
-                WHERE p.client_id = clients.id
-            )
+            AND public.client_has_pc_policy(id)
         )
     )
     WITH CHECK (
         agent_id = auth.uid()
         OR (
             can_access_agent(agent_id, 'property_casualty')
-            AND EXISTS (
-                SELECT 1 FROM public.policies p
-                WHERE p.client_id = clients.id
-            )
+            AND public.client_has_pc_policy(id)
         )
     );
 
@@ -105,7 +114,7 @@ CREATE POLICY "Agents can manage personal info of their clients"
                 c.agent_id = auth.uid()
                 OR (
                     can_access_agent(c.agent_id, 'property_casualty')
-                    AND EXISTS (SELECT 1 FROM public.policies p WHERE p.client_id = c.id)
+                    AND public.client_has_pc_policy(c.id)
                 )
             )
         )
@@ -118,7 +127,7 @@ CREATE POLICY "Agents can manage personal info of their clients"
                 c.agent_id = auth.uid()
                 OR (
                     can_access_agent(c.agent_id, 'property_casualty')
-                    AND EXISTS (SELECT 1 FROM public.policies p WHERE p.client_id = c.id)
+                    AND public.client_has_pc_policy(c.id)
                 )
             )
         )
@@ -137,7 +146,7 @@ CREATE POLICY "Agents can manage residence info of their clients"
                 c.agent_id = auth.uid()
                 OR (
                     can_access_agent(c.agent_id, 'property_casualty')
-                    AND EXISTS (SELECT 1 FROM public.policies p WHERE p.client_id = c.id)
+                    AND public.client_has_pc_policy(c.id)
                 )
             )
         )
@@ -150,7 +159,7 @@ CREATE POLICY "Agents can manage residence info of their clients"
                 c.agent_id = auth.uid()
                 OR (
                     can_access_agent(c.agent_id, 'property_casualty')
-                    AND EXISTS (SELECT 1 FROM public.policies p WHERE p.client_id = c.id)
+                    AND public.client_has_pc_policy(c.id)
                 )
             )
         )
@@ -169,7 +178,7 @@ CREATE POLICY "Agents can manage income info of their clients"
                 c.agent_id = auth.uid()
                 OR (
                     can_access_agent(c.agent_id, 'property_casualty')
-                    AND EXISTS (SELECT 1 FROM public.policies p WHERE p.client_id = c.id)
+                    AND public.client_has_pc_policy(c.id)
                 )
             )
         )
@@ -182,7 +191,7 @@ CREATE POLICY "Agents can manage income info of their clients"
                 c.agent_id = auth.uid()
                 OR (
                     can_access_agent(c.agent_id, 'property_casualty')
-                    AND EXISTS (SELECT 1 FROM public.policies p WHERE p.client_id = c.id)
+                    AND public.client_has_pc_policy(c.id)
                 )
             )
         )
