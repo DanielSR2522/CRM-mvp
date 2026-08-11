@@ -36,6 +36,45 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
   const [totalPremium, setTotalPremium] = useState<number | ''>('');
   const [annualPremium, setAnnualPremium] = useState<number | ''>('');
   const [policyStatus, setPolicyStatus] = useState<'Active' | 'Cancelled' | 'Expired' | 'Pending'>('Active');
+  const [policyOwnershipType, setPolicyOwnershipType] = useState<'personal' | 'company'>('personal');
+
+  // Selected Linked Companies State
+  const [selectedCompanies, setSelectedCompanies] = useState<Array<{ id: string; agency_name: string | null; full_name: string | null }>>([]);
+  const [companySearchQuery, setCompanySearchQuery] = useState('');
+  const [companySearchResults, setCompanySearchResults] = useState<any[]>([]);
+  const [companySearchLoading, setCompanySearchLoading] = useState(false);
+
+  const handleSearchCompanies = async (query: string) => {
+    setCompanySearchQuery(query);
+    if (!query.trim()) {
+      setCompanySearchResults([]);
+      return;
+    }
+
+    try {
+      setCompanySearchLoading(true);
+      const trimmed = query.trim();
+
+      const { data: matchedCompanies, error: clientsErr } = await supabase
+        .from('clients')
+        .select('id, agency_name, full_name, email, phone, client_type')
+        .eq('client_type', 'company')
+        .or(`full_name.ilike.%${trimmed}%,email.ilike.%${trimmed}%,phone.ilike.%${trimmed}%`)
+        .limit(20);
+
+      if (clientsErr || !matchedCompanies) {
+        setCompanySearchResults([]);
+        return;
+      }
+
+      setCompanySearchResults(matchedCompanies);
+    } catch (err) {
+      console.error('Error searching commercial companies:', err);
+      setCompanySearchResults([]);
+    } finally {
+      setCompanySearchLoading(false);
+    }
+  };
 
   useEffect(() => {
     const fetchClient = async () => {
@@ -154,10 +193,19 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
       if (error) throw error;
 
-      // Log activity event (non-blocking)
+      // Log activity event & save linked companies if personal policy
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user?.id) {
+          if (data?.id && selectedCompanies.length > 0 && policyOwnershipType === 'personal') {
+            const companyRows = selectedCompanies.map((c) => ({
+              policy_id: data.id,
+              company_client_id: c.id,
+              created_by: session.user.id,
+            }));
+            await supabase.from('personal_policy_companies').insert(companyRows);
+          }
+
           await supabase.from('activity_events').insert({
             client_id: id,
             policy_id: data.id,
@@ -183,7 +231,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
     }
   };
 
-  const availableLobs = isCompanyClient ? COMMERCIAL_LINES_OF_BUSINESS : PERSONAL_LINES_OF_BUSINESS;
+  const availableLobs = [...(isCompanyClient ? COMMERCIAL_LINES_OF_BUSINESS : PERSONAL_LINES_OF_BUSINESS)].sort((a, b) => a.localeCompare(b));
 
   return (
     <DashboardLayout>
@@ -400,6 +448,84 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                   </select>
                 </div>
               </div>
+
+              {/* LINKED COMPANIES (OPTIONAL FOR PERSONAL POLICY CREATION) */}
+              {!isCompanyClient && (
+                <div className="md:col-span-2 border-t border-slate-100 pt-6 space-y-4">
+                  <div>
+                    <h4 className="text-sm font-extrabold text-slate-900 font-sans">Linked Companies (Optional)</h4>
+                    <p className="text-xs text-slate-400 font-sans">
+                      Select commercial companies associated with this personal policy.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={companySearchQuery}
+                      onChange={(e) => handleSearchCompanies(e.target.value)}
+                      placeholder="Search company name, contact, email, or phone to link..."
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-4 py-2 text-xs text-slate-800 outline-none"
+                    />
+
+                    {companySearchQuery.trim() !== '' && (
+                      <div className="max-h-48 overflow-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-white">
+                        {companySearchLoading ? (
+                          <div className="p-3 text-center text-xs text-slate-400">Searching commercial companies...</div>
+                        ) : companySearchResults.length === 0 ? (
+                          <div className="p-3 text-center text-xs text-slate-400">No commercial company clients found.</div>
+                        ) : (
+                          companySearchResults.map((comp) => {
+                            const isSelected = selectedCompanies.some((sc) => sc.id === comp.id);
+                            return (
+                              <div key={comp.id} className="p-2.5 flex items-center justify-between hover:bg-slate-50">
+                                <div className="min-w-0 pr-2">
+                                  <h5 className="text-xs font-bold text-slate-900 truncate">
+                                    {comp.agency_name || comp.full_name || 'Commercial Company'}
+                                  </h5>
+                                  <p className="text-[10px] text-slate-400 truncate">{comp.email || comp.phone || 'Company Client'}</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={isSelected}
+                                  onClick={() => {
+                                    if (!isSelected) {
+                                      setSelectedCompanies((prev) => [...prev, comp]);
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 text-xs font-bold rounded-lg text-blue-600 bg-blue-50 hover:bg-blue-100 disabled:opacity-40"
+                                >
+                                  {isSelected ? 'Selected' : '+ Select'}
+                                </button>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+
+                    {selectedCompanies.length > 0 && (
+                      <div className="flex flex-wrap gap-2 pt-2">
+                        {selectedCompanies.map((comp) => (
+                          <span
+                            key={comp.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold rounded-xl"
+                          >
+                            <span>{comp.agency_name || comp.full_name}</span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCompanies((prev) => prev.filter((c) => c.id !== comp.id))}
+                              className="text-blue-500 hover:text-rose-600 font-bold ml-1"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </form>
           </div>
         )}

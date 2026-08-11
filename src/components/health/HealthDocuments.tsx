@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { HealthPolicyDocument, HealthPolicyDocumentSection } from '@/lib/health/types';
 import { fetchHealthSections, fetchHealthDocuments } from '@/lib/health/health-service';
+import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 
 interface HealthDocumentsProps {
   clientId: string;
@@ -218,6 +219,94 @@ export default function HealthDocuments({
     }
   };
 
+  // Document Preview State & Handler
+  const [healthPreviewState, setHealthPreviewState] = useState<{
+    isOpen: boolean;
+    fileName: string;
+    mimeType?: string | null;
+    signedUrl?: string | null;
+    officePreview?: any | null;
+    loading: boolean;
+    error?: string | null;
+    doc?: HealthPolicyDocument | null;
+  }>({
+    isOpen: false,
+    fileName: '',
+    mimeType: null,
+    signedUrl: null,
+    officePreview: null,
+    loading: false,
+    error: null,
+    doc: null,
+  });
+
+  const handlePreview = async (doc: HealthPolicyDocument) => {
+    const fileNameVal = doc.display_name || doc.original_filename;
+    const ext = (fileNameVal.split('.').pop() || '').toLowerCase();
+    const isOffice = ['docx', 'xlsx', 'xls', 'pptx'].includes(ext);
+
+    setHealthPreviewState({
+      isOpen: true,
+      fileName: fileNameVal,
+      mimeType: doc.mime_type || null,
+      signedUrl: null,
+      officePreview: null,
+      loading: true,
+      error: null,
+      doc,
+    });
+
+    if (isOffice) {
+      try {
+        const res = await fetch('/api/documents/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'health', docId: doc.id }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Failed to generate document preview.');
+        }
+
+        const officeData = await res.json();
+        setHealthPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          officePreview: officeData,
+        }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not retrieve preview URL.';
+        setHealthPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          error: message,
+        }));
+      }
+    } else {
+      try {
+        const { data, error } = await supabase.storage
+          .from('health-policy-documents')
+          .createSignedUrl(doc.storage_path, 3600);
+
+        if (error || !data?.signedUrl) throw error || new Error('Could not retrieve preview URL.');
+
+        setHealthPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          signedUrl: data.signedUrl,
+        }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not retrieve preview URL.';
+        setHealthPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          error: message,
+        }));
+      }
+    }
+  };
+
   const handleDeleteDocument = async (doc: HealthPolicyDocument) => {
     const confirm = window.confirm(`Are you sure you want to permanently delete "${doc.display_name}"?`);
     if (!confirm) return;
@@ -428,9 +517,20 @@ export default function HealthDocuments({
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
+                              onClick={() => handlePreview(doc)}
+                              className="p-1.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 hover:text-slate-900 transition-all"
+                              title="Preview File"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleDownload(doc)}
                               className="p-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 hover:text-blue-800 transition-all"
-                              title="Download/View File"
+                              title="Download File"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -457,6 +557,18 @@ export default function HealthDocuments({
           })}
         </div>
       )}
+
+      <DocumentPreviewModal
+        isOpen={healthPreviewState.isOpen}
+        onClose={() => setHealthPreviewState((prev) => ({ ...prev, isOpen: false, signedUrl: null, officePreview: null }))}
+        fileName={healthPreviewState.fileName}
+        mimeType={healthPreviewState.mimeType}
+        signedUrl={healthPreviewState.signedUrl}
+        officePreview={healthPreviewState.officePreview}
+        loading={healthPreviewState.loading}
+        error={healthPreviewState.error}
+        onDownload={healthPreviewState.doc ? () => handleDownload(healthPreviewState.doc!) : undefined}
+      />
     </div>
   );
 }

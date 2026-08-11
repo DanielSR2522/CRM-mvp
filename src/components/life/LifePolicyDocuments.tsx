@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { isoDateToMMDDYYYY } from '@/lib/formatters/date';
+import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 
 export interface LifePolicyDocument {
   id: string;
@@ -26,6 +27,27 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+
+  // Preview Document State
+  const [previewState, setPreviewState] = useState<{
+    isOpen: boolean;
+    fileName: string;
+    mimeType?: string | null;
+    signedUrl?: string | null;
+    officePreview?: any | null;
+    loading: boolean;
+    error?: string | null;
+    doc?: LifePolicyDocument | null;
+  }>({
+    isOpen: false,
+    fileName: '',
+    mimeType: null,
+    signedUrl: null,
+    officePreview: null,
+    loading: false,
+    error: null,
+    doc: null,
+  });
 
   const loadDocuments = useCallback(async () => {
     setLoading(true);
@@ -94,7 +116,7 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
     try {
       const { data, error } = await supabase.storage
         .from('life-documents')
-        .createSignedUrl(doc.storage_path, 60);
+        .createSignedUrl(doc.storage_path, 3600);
 
       if (error) throw error;
       if (data?.signedUrl) {
@@ -103,6 +125,72 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
     } catch (err: any) {
       console.error('Failed to download document:', err);
       alert('Failed to download document: ' + err.message);
+    }
+  };
+
+  const handlePreview = async (doc: LifePolicyDocument) => {
+    const ext = (doc.file_name.split('.').pop() || '').toLowerCase();
+    const isOffice = ['docx', 'xlsx', 'xls', 'pptx'].includes(ext);
+
+    setPreviewState({
+      isOpen: true,
+      fileName: doc.file_name,
+      mimeType: doc.file_type || null,
+      signedUrl: null,
+      officePreview: null,
+      loading: true,
+      error: null,
+      doc,
+    });
+
+    if (isOffice) {
+      try {
+        const res = await fetch('/api/documents/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'life', docId: doc.id }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Failed to generate document preview.');
+        }
+
+        const officeData = await res.json();
+        setPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          officePreview: officeData,
+        }));
+      } catch (err: any) {
+        console.error('Failed to preview document:', err);
+        setPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          error: err.message || 'Unable to preview this document.',
+        }));
+      }
+    } else {
+      try {
+        const { data, error } = await supabase.storage
+          .from('life-documents')
+          .createSignedUrl(doc.storage_path, 3600);
+
+        if (error || !data?.signedUrl) throw error || new Error('Failed to generate signed preview URL.');
+
+        setPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          signedUrl: data.signedUrl,
+        }));
+      } catch (err: any) {
+        console.error('Failed to preview document:', err);
+        setPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          error: err.message || 'Unable to preview this document.',
+        }));
+      }
     }
   };
 
@@ -180,6 +268,13 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={() => handlePreview(doc)}
+                  className="text-xs font-bold text-slate-700 hover:text-slate-900 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 transition-all"
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleDownload(doc)}
                   className="text-xs font-bold text-indigo-600 hover:text-indigo-800 px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-all"
                 >
@@ -208,39 +303,35 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
                 type="button"
                 onClick={() => setIsModalOpen(false)}
                 disabled={isUploading}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition-colors"
+                className="text-slate-400 hover:text-slate-600 font-bold"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                ✕
               </button>
             </div>
 
             {uploadError && (
-              <div className="p-2.5 bg-rose-50 border border-rose-100 rounded-lg text-rose-600 text-xs font-semibold">
+              <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-semibold font-sans">
                 {uploadError}
               </div>
             )}
 
-            <FileDropzone
-              label="Drag files here or click to select"
-              maxSizeBytes={20 * 1024 * 1024}
-              disabled={isUploading}
-              onFilesSelected={handleFilesDropped}
-            />
+            <div className="space-y-3">
+              <p className="text-xs text-slate-500 font-sans">
+                Drag and drop files here or click to browse. Max file size: 20 MB.
+              </p>
+              <FileDropzone
+                onFilesSelected={handleFilesDropped}
+                disabled={isUploading}
+                loading={isUploading}
+              />
+            </div>
 
-            {isUploading && (
-              <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold animate-pulse text-center">
-                Uploading file(s)... Please wait.
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 font-sans">
+            <div className="flex items-center justify-end border-t border-slate-100 pt-3">
               <button
                 type="button"
-                disabled={isUploading}
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all"
+                disabled={isUploading}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all font-sans"
               >
                 Cancel
               </button>
@@ -248,6 +339,18 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
           </div>
         </div>
       )}
+
+      <DocumentPreviewModal
+        isOpen={previewState.isOpen}
+        onClose={() => setPreviewState((prev) => ({ ...prev, isOpen: false, signedUrl: null, officePreview: null }))}
+        fileName={previewState.fileName}
+        mimeType={previewState.mimeType}
+        signedUrl={previewState.signedUrl}
+        officePreview={previewState.officePreview}
+        loading={previewState.loading}
+        error={previewState.error}
+        onDownload={previewState.doc ? () => handleDownload(previewState.doc!) : undefined}
+      />
     </div>
   );
 }

@@ -29,6 +29,7 @@ import { formatSSN } from '@/lib/formatters/ssn';
 import { formatUSPhone } from '@/lib/formatters/phone';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 import { deleteClientSecure, getClientDeletionSummaryAction, type ClientDeletionSummary } from '@/app/actions/deleteClientAction';
+import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 
 declare global {
   interface Window {
@@ -112,9 +113,11 @@ interface ClientPersonalInformation {
   secondary_email: string;
   has_co_applicant: boolean;
   gender: 'Female' | 'Male' | '';
-  marital_status: 'Single' | 'Married' | '';
+  marital_status: 'Single' | 'Married' | 'Divorced' | 'Widowed' | 'Separated' | '';
+  language_preference?: string;
+  occupation?: string;
   born_in_usa: boolean | null;
-  immigration_status: 'Resident' | 'Work Permit' | 'Citizen' | 'Other' | '';
+  immigration_status: 'Resident' | 'Permanent Resident' | 'Work Permit' | 'US Citizen' | 'Citizen' | 'Other' | '';
   alien_number: string;
   card_number: string;
   uscis_number: string;
@@ -132,8 +135,10 @@ interface CoApplicantInformation {
   primary_email: string;
   secondary_email: string;
   gender: 'Female' | 'Male' | '';
-  marital_status: 'Single' | 'Married' | '';
-  immigration_status: 'Resident' | 'Work Permit' | 'Citizen' | 'Other' | '';
+  marital_status: 'Single' | 'Married' | 'Divorced' | 'Widowed' | 'Separated' | '';
+  language_preference?: string;
+  occupation?: string;
+  immigration_status: 'Resident' | 'Permanent Resident' | 'Work Permit' | 'US Citizen' | 'Citizen' | 'Other' | '';
   alien_number: string;
   card_number: string;
   uscis_number: string;
@@ -457,6 +462,101 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
   }, [clientId]);
 
+  // Unified Document Preview State
+  const [unifiedPreviewState, setUnifiedPreviewState] = useState<{
+    isOpen: boolean;
+    fileName: string;
+    mimeType?: string | null;
+    signedUrl?: string | null;
+    officePreview?: any | null;
+    loading: boolean;
+    error?: string | null;
+    bucket?: string;
+    storagePath?: string;
+  }>({
+    isOpen: false,
+    fileName: '',
+    mimeType: null,
+    signedUrl: null,
+    officePreview: null,
+    loading: false,
+    error: null,
+  });
+
+  const handlePreviewUnifiedDoc = async (doc: UnifiedClientDocument) => {
+    const fileNameVal = doc.displayName || doc.originalFilename;
+    const ext = (fileNameVal.split('.').pop() || '').toLowerCase();
+    const isOffice = ['docx', 'xlsx', 'xls', 'pptx'].includes(ext);
+
+    setUnifiedPreviewState({
+      isOpen: true,
+      fileName: fileNameVal,
+      mimeType: doc.mimeType || null,
+      signedUrl: null,
+      officePreview: null,
+      loading: true,
+      error: null,
+      bucket: doc.bucket,
+      storagePath: doc.storagePath,
+    });
+
+    if (isOffice) {
+      try {
+        const res = await fetch('/api/documents/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: doc.source, docId: doc.id }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Failed to generate document preview.');
+        }
+
+        const officeData = await res.json();
+        setUnifiedPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          officePreview: officeData,
+        }));
+      } catch (err: any) {
+        setUnifiedPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          error: err.message || 'Unable to preview this document.',
+        }));
+      }
+    } else {
+      try {
+        const { data, error } = await supabase.storage.from(doc.bucket).createSignedUrl(doc.storagePath, 3600);
+        if (error || !data?.signedUrl) {
+          throw new Error(error?.message || 'Failed to generate preview URL.');
+        }
+        setUnifiedPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          signedUrl: data.signedUrl,
+        }));
+      } catch (err: any) {
+        setUnifiedPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          error: err.message || 'Unable to preview this document.',
+        }));
+      }
+    }
+  };
+
+  const handleDownloadFromPreview = async () => {
+    if (!unifiedPreviewState.bucket || !unifiedPreviewState.storagePath) return;
+    try {
+      const { data } = await supabase.storage.from(unifiedPreviewState.bucket).createSignedUrl(unifiedPreviewState.storagePath, 3600);
+      if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+    } catch (err: any) {
+      alert(`Failed to download document: ${err.message || err}`);
+    }
+  };
+
   const loadClientNotes = useCallback(async () => {
     try {
       setClientNotesLoading(true);
@@ -469,10 +569,156 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
   }, [clientId]);
 
+  // Payment Information States (PERSONAL CLIENTS ONLY)
+  const [paymentInfoLoading, setPaymentInfoLoading] = useState(false);
+  const [paymentInfoSaving, setPaymentInfoSaving] = useState(false);
+  const [paymentInfoError, setPaymentInfoError] = useState<string | null>(null);
+  const [paymentInfoSuccess, setPaymentInfoSuccess] = useState<string | null>(null);
+
+  const [paymentAutoPay, setPaymentAutoPay] = useState(false);
+  const [paymentDayVal, setPaymentDayVal] = useState<number | null>(null);
+  const [paymentAddress, setPaymentAddress] = useState('');
+  const [paymentHolderName, setPaymentHolderName] = useState('');
+
+  const [hasBankAccount, setHasBankAccount] = useState(false);
+  const [bankName, setBankName] = useState('');
+  const [bankRoutingNumber, setBankRoutingNumber] = useState('');
+  const [bankAccountNumber, setBankAccountNumber] = useState('');
+  const [bankLast4, setBankLast4] = useState('');
+  const [isReplacingBank, setIsReplacingBank] = useState(false);
+
+  const [hasCardMethod, setHasCardMethod] = useState(false);
+  const [cardTypeVal, setCardTypeVal] = useState<'Debit' | 'Credit'>('Debit');
+  const [cardNumberVal, setCardNumberVal] = useState('');
+  const [cardExpMonth, setCardExpMonth] = useState('');
+  const [cardExpYear, setCardExpYear] = useState('');
+  const [cardLast4Val, setCardLast4Val] = useState('');
+  const [cardCvvVal, setCardCvvVal] = useState(''); // TRANSIENT ONLY - NEVER PERSISTED
+  const [isReplacingCard, setIsReplacingCard] = useState(false);
+
+  const loadPaymentInfo = useCallback(async () => {
+    try {
+      setPaymentInfoLoading(true);
+      const res = await fetch(`/api/clients/${clientId}/payment-info`);
+      if (!res.ok) {
+        if (res.status === 404 || res.status === 403) return;
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to load payment info');
+      }
+      const data = await res.json();
+      setPaymentAutoPay(Boolean(data.auto_pay));
+      setPaymentDayVal(data.payment_day ? Number(data.payment_day) : null);
+      setPaymentAddress(data.associated_address || '');
+      setPaymentHolderName(data.account_holder_name || '');
+
+      setHasBankAccount(Boolean(data.has_bank_account));
+      setBankName(data.bank_name || '');
+      setBankLast4(data.bank_last4 || '');
+      setIsReplacingBank(false);
+
+      setHasCardMethod(Boolean(data.has_card));
+      setCardTypeVal(data.card_type === 'Credit' ? 'Credit' : 'Debit');
+      setCardLast4Val(data.card_last4 || '');
+      setCardExpMonth(data.expiration_month || '');
+      setCardExpYear(data.expiration_year || '');
+      setCardCvvVal(''); // Ensure CVV is cleared
+      setIsReplacingCard(false);
+    } catch (err: any) {
+      console.error('loadPaymentInfo error:', err);
+    } finally {
+      setPaymentInfoLoading(false);
+    }
+  }, [clientId]);
+
+  const handleSavePaymentInfo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setPaymentInfoSaving(true);
+      setPaymentInfoError(null);
+      setPaymentInfoSuccess(null);
+
+      if (hasBankAccount && !bankLast4 && (!bankName || !bankRoutingNumber || !bankAccountNumber)) {
+        throw new Error('Bank Name, Routing Number, and Account Number are required when enabling a new Bank Account');
+      }
+
+      if (hasCardMethod && !cardLast4Val && (!cardNumberVal || !cardExpMonth || !cardExpYear)) {
+        throw new Error('Card Type, Card Number, Expiration Month, and Expiration Year are required when enabling a new Card');
+      }
+
+      const payload: any = {
+        auto_pay: paymentAutoPay,
+        payment_day: paymentDayVal,
+        associated_address: paymentAddress,
+        account_holder_name: paymentHolderName,
+        has_bank_account: hasBankAccount,
+        bank_name: bankName,
+        has_card: hasCardMethod,
+        card_type: cardTypeVal,
+        expiration_month: cardExpMonth,
+        expiration_year: cardExpYear,
+      };
+
+      if (hasBankAccount && (isReplacingBank || !bankLast4)) {
+        payload.routing_number = bankRoutingNumber;
+        payload.account_number = bankAccountNumber;
+      }
+
+      if (hasCardMethod && (isReplacingCard || !cardLast4Val)) {
+        payload.card_number = cardNumberVal;
+      }
+
+      const res = await fetch(`/api/clients/${clientId}/payment-info`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to save payment information');
+      }
+
+      const saved = await res.json();
+      setPaymentAutoPay(Boolean(saved.auto_pay));
+      setPaymentDayVal(saved.payment_day ? Number(saved.payment_day) : null);
+      setPaymentAddress(saved.associated_address || '');
+      setPaymentHolderName(saved.account_holder_name || '');
+
+      setHasBankAccount(Boolean(saved.has_bank_account));
+      setBankName(saved.bank_name || '');
+      setBankLast4(saved.bank_last4 || '');
+      setBankRoutingNumber('');
+      setBankAccountNumber('');
+      setIsReplacingBank(false);
+
+      setHasCardMethod(Boolean(saved.has_card));
+      setCardTypeVal(saved.card_type === 'Credit' ? 'Credit' : 'Debit');
+      setCardLast4Val(saved.card_last4 || '');
+      setCardExpMonth(saved.expiration_month || '');
+      setCardExpYear(saved.expiration_year || '');
+      setCardNumberVal('');
+      setCardCvvVal(''); // STRICT CVV RULE: Immediately discard transient CVV
+      setIsReplacingCard(false);
+
+      setPaymentInfoSuccess('Payment information saved successfully');
+    } catch (err: any) {
+      setPaymentInfoError(err.message || 'Failed to save payment info');
+    } finally {
+      setPaymentInfoSaving(false);
+    }
+  };
+
+  // Accordion Section States (Zoho-style layout for Personal Info)
+  const [isPersonalInfoOpen, setIsPersonalInfoOpen] = useState(true);
+  const [isResidenceOpen, setIsResidenceOpen] = useState(false);
+  const [isIncomeOpen, setIsIncomeOpen] = useState(false);
+  const [isPaymentInfoOpen, setIsPaymentInfoOpen] = useState(false);
+
   useEffect(() => {
     if (activeTab === 'documents') loadClientDocuments();
     if (activeTab === 'notes') loadClientNotes();
-  }, [activeTab, loadClientDocuments, loadClientNotes]);
+    if (activeTab === 'personal-info') loadPaymentInfo();
+  }, [activeTab, loadClientDocuments, loadClientNotes, loadPaymentInfo]);
 
   // Personal Information States
   const [personalInfo, setPersonalInfo] = useState<ClientPersonalInformation | null>(null);
@@ -903,6 +1149,38 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               }
             });
           }
+        }
+      }
+
+      // Lookup linked company clients for personal policies
+      const personalPolicyIds = loadedPolicies
+        .filter((p: any) => p.policy_ownership_type === 'personal')
+        .map((p: any) => p.id);
+
+      if (personalPolicyIds.length > 0) {
+        const { data: compLinksData } = await supabase
+          .from('personal_policy_companies')
+          .select('policy_id, company_client_id, clients!inner(id, agency_name, full_name, email, phone)')
+          .in('policy_id', personalPolicyIds);
+
+        if (compLinksData && compLinksData.length > 0) {
+          const compMap: Record<string, any[]> = {};
+          compLinksData.forEach((item: any) => {
+            if (!compMap[item.policy_id]) compMap[item.policy_id] = [];
+            compMap[item.policy_id].push({
+              id: item.clients.id,
+              agency_name: item.clients.agency_name,
+              full_name: item.clients.full_name,
+              email: item.clients.email,
+              phone: item.clients.phone,
+            });
+          });
+
+          loadedPolicies.forEach((p: any) => {
+            if (compMap[p.id]) {
+              p.linkedCompanyClients = compMap[p.id];
+            }
+          });
         }
       }
 
@@ -3370,20 +3648,32 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 )
               )}
 
-              {/* PERSONAL INFO TAB CONTENT */}
+              {/* PERSONAL INFO TAB CONTENT (ZOHO-STYLE CASCADING ACCORDION) */}
               {activeTab === 'personal-info' && (
-                <div className="space-y-6 font-sans">
+                <div className="space-y-4 font-sans">
                   
                   {/* SECTION 1: Personal or Company Information Card */}
                   <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                      <div>
-                        <h3 className="text-lg font-extrabold text-slate-900">
-                          {isCompanyClient ? 'Company Information' : 'Personal Information'}
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          {isCompanyClient ? 'Commercial P&C Entity Profile. Click any field to edit directly.' : 'Click any field to edit directly.'}
-                        </p>
+                    <div
+                      onClick={() => setIsPersonalInfoOpen(!isPersonalInfoOpen)}
+                      className="flex items-center justify-between border-b border-slate-100 pb-4 cursor-pointer select-none group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
+                          {isPersonalInfoOpen ? (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
+                          ) : (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
+                          )}
+                        </span>
+                        <div>
+                          <h3 className="text-lg font-extrabold text-slate-900">
+                            {isCompanyClient ? 'Company Information' : 'Personal Information'}
+                          </h3>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {isCompanyClient ? 'Commercial P&C Entity Profile. Click any field to edit directly.' : 'Click any field to edit directly.'}
+                          </p>
+                        </div>
                       </div>
                       {isCompanyClient && (
                         <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-100">
@@ -3392,312 +3682,141 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       )}
                     </div>
 
-                    {personalError && (
-                      <div className="mb-4 p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm">
-                        {personalError}
-                      </div>
-                    )}
-
-                    {loadingPersonal ? (
-                      <div className="flex justify-center items-center py-10">
-                        <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                      </div>
-                    ) : isCompanyClient ? (
-                      <div className="space-y-6">
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-6">
-                          {/* Left Column */}
-                          <div className="space-y-4">
-                            <InlineEditableText
-                              label="Company Name"
-                              value={client?.full_name || ''}
-                              onSave={async (val) => {
-                                if (!val.trim()) return;
-                                const { error } = await supabase.from('clients').update({ full_name: val.trim() }).eq('id', clientId);
-                                if (!error) setClient((prev: any) => prev ? { ...prev, full_name: val.trim() } : prev);
-                              }}
-                            />
-
-                            <InlineEditableText
-                              label="Contact Person Name"
-                              value={personalForm.full_name || ''}
-                              onSave={val => savePersonalField('full_name', val)}
-                            />
-
-                            <InlineEditableText
-                              label="Primary Email"
-                              type="email"
-                              value={personalForm.email || client?.email || ''}
-                              onSave={async (val) => {
-                                await savePersonalField('email', val);
-                                await supabase.from('clients').update({ email: val || null }).eq('id', clientId);
-                              }}
-                            />
-
-                            <InlineEditablePhone
-                              label="Primary Phone"
-                              value={personalForm.phone || client?.phone || ''}
-                              onSave={async (val) => {
-                                await savePersonalField('phone', val);
-                                await supabase.from('clients').update({ phone: val || null }).eq('id', clientId);
-                              }}
-                            />
+                    {isPersonalInfoOpen && (
+                      <div className="pt-6">
+                        {personalError && (
+                          <div className="mb-4 p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm">
+                            {personalError}
                           </div>
+                        )}
 
-                          {/* Right Column */}
-                          <div className="space-y-4">
-                            <InlineEditableText
-                              label="Secondary Email"
-                              type="email"
-                              value={personalForm.secondary_email || ''}
-                              onSave={val => savePersonalField('secondary_email', val)}
-                            />
-
-                            <InlineEditablePhone
-                              label="Secondary Phone"
-                              value={personalForm.secondary_phone || ''}
-                              onSave={val => savePersonalField('secondary_phone', val)}
-                            />
-
-                            <div>
-                              <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Business Address</span>
-                              <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
-                                {[residenceInfo?.address, residenceInfo?.city, residenceInfo?.state, residenceInfo?.zip_code].filter(Boolean).join(', ') || client?.address || 'No business address registered'}
-                              </span>
-                            </div>
+                        {loadingPersonal ? (
+                          <div className="flex justify-center items-center py-10">
+                            <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
                           </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-8">
-                        {/* Main Applicant Grid */}
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
-                          {/* Left Column */}
-                          <div className="space-y-4">
-                            <InlineEditableText
-                              label="Applicant Name"
-                              value={personalForm.full_name}
-                              onSave={val => savePersonalField('full_name', val)}
-                            />
-
-                            <InlineEditableDate
-                              label="DOB"
-                              value={personalForm.date_of_birth}
-                              onSave={iso => savePersonalField('date_of_birth', iso || '')}
-                            />
-
-                            <div>
-                              <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</span>
-                              <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
-                                {calculateAge(personalForm.date_of_birth)}
-                              </span>
-                            </div>
-
-                            <InlineEditableSSN
-                              label="SSN"
-                              value={personalForm.ssn}
-                              onSave={val => savePersonalField('ssn', val)}
-                            />
-
-                            <InlineEditablePhone
-                              label="Primary Phone"
-                              value={personalForm.phone}
-                              onSave={val => savePersonalField('phone', val)}
-                            />
-
-                            <InlineEditablePhone
-                              label="Secondary Phone"
-                              value={personalForm.secondary_phone}
-                              onSave={val => savePersonalField('secondary_phone', val)}
-                            />
-
-                            <InlineEditableText
-                              label="Primary Email"
-                              type="email"
-                              value={personalForm.email}
-                              onSave={val => savePersonalField('email', val)}
-                            />
-
-                            <InlineEditableText
-                              label="Secondary Email"
-                              type="email"
-                              value={personalForm.secondary_email}
-                              onSave={val => savePersonalField('secondary_email', val)}
-                            />
-
-                            <div className="pt-2">
-                              <div className="flex items-center space-x-3 p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                                <input
-                                  type="checkbox"
-                                  id="has_co_applicant"
-                                  checked={personalForm.has_co_applicant}
-                                  onChange={async (e) => {
-                                    const checked = e.target.checked;
-                                    setPersonalForm(prev => ({ ...prev, has_co_applicant: checked }));
-                                    await savePersonalField('has_co_applicant', checked);
-                                  }}
-                                  className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
-                                />
-                                <label htmlFor="has_co_applicant" className="text-sm font-bold text-slate-700 select-none cursor-pointer">
-                                  Include Co-Applicant
-                                </label>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Right Column */}
-                          <div className="space-y-4">
-                            <InlineEditableSelect
-                              label="Gender"
-                              value={personalForm.gender}
-                              options={[
-                                { label: 'Select Gender', value: '' },
-                                { label: 'Female', value: 'Female' },
-                                { label: 'Male', value: 'Male' },
-                              ]}
-                              onSave={val => savePersonalField('gender', val)}
-                            />
-
-                            <InlineEditableSelect
-                              label="Marital Status"
-                              value={personalForm.marital_status}
-                              options={[
-                                { label: 'Select Status', value: '' },
-                                { label: 'Single', value: 'Single' },
-                                { label: 'Married', value: 'Married' },
-                              ]}
-                              onSave={val => savePersonalField('marital_status', val)}
-                            />
-
-                            <InlineEditableSelect
-                              label="Immigration Status"
-                              value={personalForm.immigration_status}
-                              options={[
-                                { label: 'Select Status', value: '' },
-                                { label: 'Resident', value: 'Resident' },
-                                { label: 'Work Permit', value: 'Work Permit' },
-                                { label: 'Citizen', value: 'Citizen' },
-                                { label: 'Other', value: 'Other' },
-                              ]}
-                              onSave={val => savePersonalField('immigration_status', val)}
-                            />
-
-                            {/* CONDITIONAL IMMIGRATION FIELDS */}
-                            {personalForm.immigration_status === 'Resident' && (
-                              <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                <InlineEditableText
-                                  label="Alien Number"
-                                  value={personalForm.alien_number}
-                                  onSave={val => savePersonalField('alien_number', val)}
-                                />
-                                <InlineEditableText
-                                  label="Card Number"
-                                  value={personalForm.card_number}
-                                  onSave={val => savePersonalField('card_number', val)}
-                                />
-                                <InlineEditableDate
-                                  label="Expiration Date"
-                                  value={personalForm.immigration_expiration_date}
-                                  onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
-                                />
-                              </div>
-                            )}
-
-                            {personalForm.immigration_status === 'Work Permit' && (
-                              <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                <InlineEditableText
-                                  label="Card Number"
-                                  value={personalForm.card_number}
-                                  onSave={val => savePersonalField('card_number', val)}
-                                />
-                                <InlineEditableText
-                                  label="USCIS Number"
-                                  value={personalForm.uscis_number}
-                                  onSave={val => savePersonalField('uscis_number', val)}
-                                />
-                                <InlineEditableText
-                                  label="Category"
-                                  value={personalForm.immigration_category}
-                                  onSave={val => savePersonalField('immigration_category', val)}
-                                />
-                                <InlineEditableDate
-                                  label="Expiration Date"
-                                  value={personalForm.immigration_expiration_date}
-                                  onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
-                                />
-                              </div>
-                            )}
-
-                            {personalForm.immigration_status === 'Other' && (
-                              <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
-                                <InlineEditableTextarea
-                                  label="Other Immigration Status Description"
-                                  value={personalForm.immigration_other_description}
-                                  onSave={val => savePersonalField('immigration_other_description', val)}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Co-Applicant Section - Rendered BELOW Main Applicant Grid */}
-                        {personalForm.has_co_applicant && (
-                          <div className="pt-8 mt-8 border-t border-slate-200">
-                            <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-widest mb-6">Co-Applicant Personal Information</h4>
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
+                        ) : isCompanyClient ? (
+                          <div className="space-y-6">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-6">
                               {/* Left Column */}
                               <div className="space-y-4">
                                 <InlineEditableText
-                                  label="Co-Applicant Name"
-                                  value={coApplicantForm.full_name}
-                                  onSave={val => saveCoApplicantField('full_name', val)}
+                                  label="Company Name"
+                                  value={client?.full_name || ''}
+                                  onSave={async (val) => {
+                                    if (!val.trim()) return;
+                                    const { error } = await supabase.from('clients').update({ full_name: val.trim() }).eq('id', clientId);
+                                    if (!error) setClient((prev: any) => prev ? { ...prev, full_name: val.trim() } : prev);
+                                  }}
                                 />
 
-                                <InlineEditableDate
-                                  label="DOB"
-                                  value={coApplicantForm.date_of_birth}
-                                  onSave={iso => saveCoApplicantField('date_of_birth', iso || '')}
-                                />
-
-                                <div>
-                                  <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</span>
-                                  <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
-                                    {calculateAge(coApplicantForm.date_of_birth)}
-                                  </span>
-                                </div>
-
-                                <InlineEditableSSN
-                                  label="SSN"
-                                  value={coApplicantForm.ssn}
-                                  onSave={val => saveCoApplicantField('ssn', val)}
-                                />
-
-                                <InlineEditablePhone
-                                  label="Primary Phone"
-                                  value={coApplicantForm.primary_phone}
-                                  onSave={val => saveCoApplicantField('primary_phone', val)}
-                                />
-
-                                <InlineEditablePhone
-                                  label="Secondary Phone"
-                                  value={coApplicantForm.secondary_phone}
-                                  onSave={val => saveCoApplicantField('secondary_phone', val)}
+                                <InlineEditableText
+                                  label="Contact Person Name"
+                                  value={personalForm.full_name || ''}
+                                  onSave={val => savePersonalField('full_name', val)}
                                 />
 
                                 <InlineEditableText
                                   label="Primary Email"
                                   type="email"
-                                  value={coApplicantForm.primary_email}
-                                  onSave={val => saveCoApplicantField('primary_email', val)}
+                                  value={personalForm.email || client?.email || ''}
+                                  onSave={async (val) => {
+                                    await savePersonalField('email', val);
+                                    await supabase.from('clients').update({ email: val || null }).eq('id', clientId);
+                                  }}
+                                />
+
+                                <InlineEditablePhone
+                                  label="Primary Phone"
+                                  value={personalForm.phone || client?.phone || ''}
+                                  onSave={async (val) => {
+                                    await savePersonalField('phone', val);
+                                    await supabase.from('clients').update({ phone: val || null }).eq('id', clientId);
+                                  }}
+                                />
+                              </div>
+
+                              {/* Right Column */}
+                              <div className="space-y-4">
+                                <InlineEditableText
+                                  label="Secondary Email"
+                                  type="email"
+                                  value={personalForm.secondary_email || ''}
+                                  onSave={val => savePersonalField('secondary_email', val)}
+                                />
+
+                                <InlineEditablePhone
+                                  label="Secondary Phone"
+                                  value={personalForm.secondary_phone || ''}
+                                  onSave={val => savePersonalField('secondary_phone', val)}
+                                />
+
+                                <div>
+                                  <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Business Address</span>
+                                  <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
+                                    {[residenceInfo?.address, residenceInfo?.city, residenceInfo?.state, residenceInfo?.zip_code].filter(Boolean).join(', ') || client?.address || 'No business address registered'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-8">
+                            {/* Main Applicant Grid */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
+                              {/* Left Column */}
+                              <div className="space-y-4">
+                                <InlineEditableText
+                                  label="Applicant Name"
+                                  value={personalForm.full_name}
+                                  onSave={val => savePersonalField('full_name', val)}
+                                />
+
+                                <InlineEditableDate
+                                  label="DOB"
+                                  value={personalForm.date_of_birth}
+                                  onSave={iso => savePersonalField('date_of_birth', iso || '')}
+                                />
+
+                                <div>
+                                  <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</span>
+                                  <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
+                                    {calculateAge(personalForm.date_of_birth)}
+                                  </span>
+                                </div>
+
+                                <InlineEditableSSN
+                                  label="SSN"
+                                  value={personalForm.ssn}
+                                  onSave={val => savePersonalField('ssn', val)}
+                                />
+
+                                <InlineEditablePhone
+                                  label="Primary Phone"
+                                  value={personalForm.phone}
+                                  onSave={val => savePersonalField('phone', val)}
+                                />
+
+                                <InlineEditablePhone
+                                  label="Secondary Phone"
+                                  value={personalForm.secondary_phone}
+                                  onSave={val => savePersonalField('secondary_phone', val)}
+                                />
+
+                                <InlineEditableText
+                                  label="Primary Email"
+                                  type="email"
+                                  value={personalForm.email}
+                                  onSave={val => savePersonalField('email', val)}
                                 />
 
                                 <InlineEditableText
                                   label="Secondary Email"
                                   type="email"
-                                  value={coApplicantForm.secondary_email}
-                                  onSave={val => saveCoApplicantField('secondary_email', val)}
+                                  value={personalForm.secondary_email}
+                                  onSave={val => savePersonalField('secondary_email', val)}
                                 />
                               </div>
 
@@ -3705,95 +3824,299 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                               <div className="space-y-4">
                                 <InlineEditableSelect
                                   label="Gender"
-                                  value={coApplicantForm.gender}
+                                  value={personalForm.gender}
                                   options={[
                                     { label: 'Select Gender', value: '' },
                                     { label: 'Female', value: 'Female' },
                                     { label: 'Male', value: 'Male' },
                                   ]}
-                                  onSave={val => saveCoApplicantField('gender', val)}
+                                  onSave={val => savePersonalField('gender', val)}
                                 />
 
                                 <InlineEditableSelect
                                   label="Marital Status"
-                                  value={coApplicantForm.marital_status}
+                                  value={personalForm.marital_status}
                                   options={[
-                                    { label: 'Select Status', value: '' },
+                                    { label: 'Select Marital Status', value: '' },
                                     { label: 'Single', value: 'Single' },
                                     { label: 'Married', value: 'Married' },
+                                    { label: 'Divorced', value: 'Divorced' },
+                                    { label: 'Widowed', value: 'Widowed' },
+                                    { label: 'Separated', value: 'Separated' },
                                   ]}
-                                  onSave={val => saveCoApplicantField('marital_status', val)}
+                                  onSave={val => savePersonalField('marital_status', val)}
+                                />
+
+                                <InlineEditableSelect
+                                  label="Preferred Language"
+                                  value={personalForm.language_preference}
+                                  options={[
+                                    { label: 'Spanish', value: 'Spanish' },
+                                    { label: 'English', value: 'English' },
+                                    { label: 'Other', value: 'Other' },
+                                  ]}
+                                  onSave={val => savePersonalField('language_preference', val)}
+                                />
+
+                                <InlineEditableText
+                                  label="Occupation"
+                                  value={personalForm.occupation}
+                                  onSave={val => savePersonalField('occupation', val)}
                                 />
 
                                 <InlineEditableSelect
                                   label="Immigration Status"
-                                  value={coApplicantForm.immigration_status}
+                                  value={personalForm.immigration_status}
                                   options={[
                                     { label: 'Select Status', value: '' },
-                                    { label: 'Resident', value: 'Resident' },
-                                    { label: 'Work Permit', value: 'Work Permit' },
-                                    { label: 'Citizen', value: 'Citizen' },
+                                    { label: 'US Citizen', value: 'US Citizen' },
+                                    { label: 'Permanent Resident (Green Card)', value: 'Permanent Resident' },
+                                    { label: 'Work Permit (EAD)', value: 'Work Permit' },
                                     { label: 'Other', value: 'Other' },
                                   ]}
-                                  onSave={val => saveCoApplicantField('immigration_status', val)}
+                                  onSave={val => savePersonalField('immigration_status', val)}
                                 />
 
-                                {coApplicantForm.immigration_status === 'Resident' && (
+                                {personalForm.immigration_status === 'Permanent Resident' && (
                                   <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
                                     <InlineEditableText
-                                      label="Alien Number"
-                                      value={coApplicantForm.alien_number}
-                                      onSave={val => saveCoApplicantField('alien_number', val)}
-                                    />
-                                    <InlineEditableText
                                       label="Card Number"
-                                      value={coApplicantForm.card_number}
-                                      onSave={val => saveCoApplicantField('card_number', val)}
+                                      value={personalForm.card_number}
+                                      onSave={val => savePersonalField('card_number', val)}
                                     />
                                     <InlineEditableDate
                                       label="Expiration Date"
-                                      value={coApplicantForm.immigration_expiration_date}
-                                      onSave={iso => saveCoApplicantField('immigration_expiration_date', iso || '')}
+                                      value={personalForm.immigration_expiration_date}
+                                      onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
                                     />
                                   </div>
                                 )}
 
-                                {coApplicantForm.immigration_status === 'Work Permit' && (
+                                {personalForm.immigration_status === 'Work Permit' && (
                                   <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
                                     <InlineEditableText
                                       label="Card Number"
-                                      value={coApplicantForm.card_number}
-                                      onSave={val => saveCoApplicantField('card_number', val)}
+                                      value={personalForm.card_number}
+                                      onSave={val => savePersonalField('card_number', val)}
                                     />
                                     <InlineEditableText
                                       label="USCIS Number"
-                                      value={coApplicantForm.uscis_number}
-                                      onSave={val => saveCoApplicantField('uscis_number', val)}
+                                      value={personalForm.uscis_number}
+                                      onSave={val => savePersonalField('uscis_number', val)}
                                     />
                                     <InlineEditableText
                                       label="Category"
-                                      value={coApplicantForm.immigration_category}
-                                      onSave={val => saveCoApplicantField('immigration_category', val)}
+                                      value={personalForm.immigration_category}
+                                      onSave={val => savePersonalField('immigration_category', val)}
                                     />
                                     <InlineEditableDate
                                       label="Expiration Date"
-                                      value={coApplicantForm.immigration_expiration_date}
-                                      onSave={iso => saveCoApplicantField('immigration_expiration_date', iso || '')}
+                                      value={personalForm.immigration_expiration_date}
+                                      onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
                                     />
                                   </div>
                                 )}
 
-                                {coApplicantForm.immigration_status === 'Other' && (
+                                {personalForm.immigration_status === 'Other' && (
                                   <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
                                     <InlineEditableTextarea
                                       label="Other Description"
-                                      value={coApplicantForm.immigration_other_description}
-                                      onSave={val => saveCoApplicantField('immigration_other_description', val)}
+                                      value={personalForm.immigration_other_description}
+                                      onSave={val => savePersonalField('immigration_other_description', val)}
                                     />
                                   </div>
                                 )}
                               </div>
                             </div>
+
+                            {/* Co-Applicant Section Toggle */}
+                            <div className="border-t border-slate-100 pt-6">
+                              <label className="flex items-center gap-3 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={personalForm.has_co_applicant}
+                                  onChange={async (e) => {
+                                    const checked = e.target.checked;
+                                    setPersonalForm(prev => ({ ...prev, has_co_applicant: checked }));
+                                    await savePersonalField('has_co_applicant', checked);
+                                  }}
+                                  className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
+                                />
+                                <span className="text-sm font-bold text-slate-800">Add Spouse / Co-Applicant</span>
+                              </label>
+                            </div>
+
+                            {personalForm.has_co_applicant && (
+                              <div className="border border-blue-100 rounded-2xl bg-blue-50/30 p-6 space-y-6 animate-fade-in">
+                                <h4 className="text-base font-extrabold text-slate-900 border-b border-blue-100 pb-3">
+                                  Spouse / Co-Applicant Information
+                                </h4>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
+                                  {/* Left Column */}
+                                  <div className="space-y-4">
+                                    <InlineEditableText
+                                      label="Co-Applicant Name"
+                                      value={coApplicantForm.full_name}
+                                      onSave={val => saveCoApplicantField('full_name', val)}
+                                    />
+
+                                    <InlineEditableDate
+                                      label="DOB"
+                                      value={coApplicantForm.date_of_birth}
+                                      onSave={iso => saveCoApplicantField('date_of_birth', iso || '')}
+                                    />
+
+                                    <div>
+                                      <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</span>
+                                      <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
+                                        {calculateAge(coApplicantForm.date_of_birth)}
+                                      </span>
+                                    </div>
+
+                                    <InlineEditableSSN
+                                      label="SSN"
+                                      value={coApplicantForm.ssn}
+                                      onSave={val => saveCoApplicantField('ssn', val)}
+                                    />
+
+                                    <InlineEditablePhone
+                                      label="Primary Phone"
+                                      value={coApplicantForm.primary_phone}
+                                      onSave={val => saveCoApplicantField('primary_phone', val)}
+                                    />
+
+                                    <InlineEditablePhone
+                                      label="Secondary Phone"
+                                      value={coApplicantForm.secondary_phone}
+                                      onSave={val => saveCoApplicantField('secondary_phone', val)}
+                                    />
+
+                                    <InlineEditableText
+                                      label="Primary Email"
+                                      type="email"
+                                      value={coApplicantForm.primary_email}
+                                      onSave={val => saveCoApplicantField('primary_email', val)}
+                                    />
+
+                                    <InlineEditableText
+                                      label="Secondary Email"
+                                      type="email"
+                                      value={coApplicantForm.secondary_email}
+                                      onSave={val => saveCoApplicantField('secondary_email', val)}
+                                    />
+                                  </div>
+
+                                  {/* Right Column */}
+                                  <div className="space-y-4">
+                                    <InlineEditableSelect
+                                      label="Gender"
+                                      value={coApplicantForm.gender}
+                                      options={[
+                                        { label: 'Select Gender', value: '' },
+                                        { label: 'Female', value: 'Female' },
+                                        { label: 'Male', value: 'Male' },
+                                      ]}
+                                      onSave={val => saveCoApplicantField('gender', val)}
+                                    />
+
+                                    <InlineEditableSelect
+                                      label="Marital Status"
+                                      value={coApplicantForm.marital_status}
+                                      options={[
+                                        { label: 'Select Marital Status', value: '' },
+                                        { label: 'Single', value: 'Single' },
+                                        { label: 'Married', value: 'Married' },
+                                        { label: 'Divorced', value: 'Divorced' },
+                                        { label: 'Widowed', value: 'Widowed' },
+                                        { label: 'Separated', value: 'Separated' },
+                                      ]}
+                                      onSave={val => saveCoApplicantField('marital_status', val)}
+                                    />
+
+                                    <InlineEditableSelect
+                                      label="Preferred Language"
+                                      value={coApplicantForm.language_preference}
+                                      options={[
+                                        { label: 'Spanish', value: 'Spanish' },
+                                        { label: 'English', value: 'English' },
+                                        { label: 'Other', value: 'Other' },
+                                      ]}
+                                      onSave={val => saveCoApplicantField('language_preference', val)}
+                                    />
+
+                                    <InlineEditableText
+                                      label="Occupation"
+                                      value={coApplicantForm.occupation}
+                                      onSave={val => saveCoApplicantField('occupation', val)}
+                                    />
+
+                                    <InlineEditableSelect
+                                      label="Immigration Status"
+                                      value={coApplicantForm.immigration_status}
+                                      options={[
+                                        { label: 'Select Status', value: '' },
+                                        { label: 'US Citizen', value: 'US Citizen' },
+                                        { label: 'Permanent Resident (Green Card)', value: 'Permanent Resident' },
+                                        { label: 'Work Permit (EAD)', value: 'Work Permit' },
+                                        { label: 'Other', value: 'Other' },
+                                      ]}
+                                      onSave={val => saveCoApplicantField('immigration_status', val)}
+                                    />
+
+                                    {coApplicantForm.immigration_status === 'Permanent Resident' && (
+                                      <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
+                                        <InlineEditableText
+                                          label="Card Number"
+                                          value={coApplicantForm.card_number}
+                                          onSave={val => saveCoApplicantField('card_number', val)}
+                                        />
+                                        <InlineEditableDate
+                                          label="Expiration Date"
+                                          value={coApplicantForm.immigration_expiration_date}
+                                          onSave={iso => saveCoApplicantField('immigration_expiration_date', iso || '')}
+                                        />
+                                      </div>
+                                    )}
+
+                                    {coApplicantForm.immigration_status === 'Work Permit' && (
+                                      <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
+                                        <InlineEditableText
+                                          label="Card Number"
+                                          value={coApplicantForm.card_number}
+                                          onSave={val => saveCoApplicantField('card_number', val)}
+                                        />
+                                        <InlineEditableText
+                                          label="USCIS Number"
+                                          value={coApplicantForm.uscis_number}
+                                          onSave={val => saveCoApplicantField('uscis_number', val)}
+                                        />
+                                        <InlineEditableText
+                                          label="Category"
+                                          value={coApplicantForm.immigration_category}
+                                          onSave={val => saveCoApplicantField('immigration_category', val)}
+                                        />
+                                        <InlineEditableDate
+                                          label="Expiration Date"
+                                          value={coApplicantForm.immigration_expiration_date}
+                                          onSave={iso => saveCoApplicantField('immigration_expiration_date', iso || '')}
+                                        />
+                                      </div>
+                                    )}
+
+                                    {coApplicantForm.immigration_status === 'Other' && (
+                                      <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
+                                        <InlineEditableTextarea
+                                          label="Other Description"
+                                          value={coApplicantForm.immigration_other_description}
+                                          onSave={val => saveCoApplicantField('immigration_other_description', val)}
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -3802,239 +4125,612 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
                   {/* SECTION 2: Residence Information Card */}
                   <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                      <div>
-                        <h3 className="text-lg font-extrabold text-slate-900">Residence Information</h3>
-                        <p className="text-xs text-slate-400 mt-0.5">Click any field to edit directly.</p>
+                    <div
+                      onClick={() => setIsResidenceOpen(!isResidenceOpen)}
+                      className="flex items-center justify-between border-b border-slate-100 pb-4 cursor-pointer select-none group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
+                          {isResidenceOpen ? (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
+                          ) : (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
+                          )}
+                        </span>
+                        <div>
+                          <h3 className="text-lg font-extrabold text-slate-900">Residence Information</h3>
+                          <p className="text-xs text-slate-400 mt-0.5">Click any field to edit directly.</p>
+                        </div>
                       </div>
                     </div>
 
-                    {loadingResidence ? (
-                      <div className="flex justify-center items-center py-10">
-                        <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
+                    {isResidenceOpen && (
+                      <div className="pt-6">
+                        {loadingResidence ? (
+                          <div className="flex justify-center items-center py-10">
+                            <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                          </div>
+                        ) : (
+                          <InlineEditableAddress
+                            label=""
+                            data={{
+                              address: residenceForm.address,
+                              city: residenceForm.city,
+                              state: residenceForm.state,
+                              zip_code: residenceForm.zip_code,
+                              county: residenceForm.county,
+                            }}
+                            onSave={async (newData) => {
+                              await saveResidenceField({
+                                address: newData.address,
+                                city: newData.city,
+                                state: newData.state,
+                                zip_code: newData.zip_code,
+                                county: newData.county || '',
+                              });
+                            }}
+                          />
+                        )}
                       </div>
-                    ) : (
-                      <InlineEditableAddress
-                        label=""
-                        data={{
-                          address: residenceForm.address,
-                          city: residenceForm.city,
-                          state: residenceForm.state,
-                          zip_code: residenceForm.zip_code,
-                          county: residenceForm.county,
-                        }}
-                        onSave={async (newData) => {
-                          await saveResidenceField({
-                            address: newData.address,
-                            city: newData.city,
-                            state: newData.state,
-                            zip_code: newData.zip_code,
-                            county: newData.county || '',
-                          });
-                        }}
-                      />
                     )}
                   </div>
 
                   {/* SECTION 3: Income Information Card */}
                   <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                      <div>
-                        <h3 className="text-lg font-extrabold text-slate-900">Income Information</h3>
-                        <p className="text-xs text-slate-400 mt-0.5">Manage income records for health eligibility and tax household.</p>
+                    <div
+                      onClick={() => setIsIncomeOpen(!isIncomeOpen)}
+                      className="flex items-center justify-between border-b border-slate-100 pb-4 cursor-pointer select-none group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
+                          {isIncomeOpen ? (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
+                          ) : (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
+                          )}
+                        </span>
+                        <div>
+                          <h3 className="text-lg font-extrabold text-slate-900">Income Information</h3>
+                          <p className="text-xs text-slate-400 mt-0.5">Manage income records for health eligibility and tax household.</p>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setIsAddIncomeOpen(true)}
-                        className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-2 rounded-xl transition-all shadow-md active:scale-95"
-                      >
-                        + Add Income
-                      </button>
+                      {isIncomeOpen && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsAddIncomeOpen(true);
+                          }}
+                          className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-2 rounded-xl transition-all shadow-md active:scale-95"
+                        >
+                          + Add Income
+                        </button>
+                      )}
                     </div>
 
-                    {loadingIncome ? (
-                      <div className="flex justify-center items-center py-10">
-                        <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                      </div>
-                    ) : incomeList.length === 0 ? (
-                      <div className="text-center py-10 border border-dashed border-slate-200 rounded-xl">
-                        <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <h4 className="text-xs font-bold text-slate-700">No income records registered</h4>
-                        <p className="text-[11px] text-slate-400 mt-0.5">Click "+ Add Income" above to add income details.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {incomeList.map((income) => (
-                          <div
-                            key={income.id}
-                            className="p-4 border border-slate-150 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                          >
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 flex-1">
-                              <InlineEditableSelect
-                                label="Relationship"
-                                value={income.relationship_to_applicant}
-                                options={[
-                                  { label: 'Applicant', value: 'Applicant' },
-                                  { label: 'Spouse', value: 'Spouse' },
-                                  { label: 'Son/Daughter', value: 'Son/Daughter' },
-                                  { label: 'Mother', value: 'Mother' },
-                                  { label: 'Father', value: 'Father' },
-                                  { label: 'Other', value: 'Other' },
-                                ]}
-                                onSave={val => saveIncomeField(income.id, 'relationship_to_applicant', val)}
-                              />
-
-                              <InlineEditableSelect
-                                label="Income Type"
-                                value={income.income_type}
-                                options={[
-                                  { label: 'W2', value: 'W2' },
-                                  { label: '1099', value: '1099' },
-                                ]}
-                                onSave={val => saveIncomeField(income.id, 'income_type', val)}
-                              />
-
-                              <InlineEditableText
-                                label="Employer / Source"
-                                value={income.employer_name}
-                                onSave={val => saveIncomeField(income.id, 'employer_name', val)}
-                              />
-
-                              <InlineEditablePhone
-                                label="Employer Phone"
-                                value={income.employer_phone}
-                                onSave={val => saveIncomeField(income.id, 'employer_phone', val)}
-                              />
-
-                              <InlineEditableText
-                                label="Amount ($)"
-                                type="number"
-                                value={String(income.income || '')}
-                                onSave={val => saveIncomeField(income.id, 'income', Number(val))}
-                              />
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteIncome(income.id)}
-                              className="text-xs font-bold text-rose-500 hover:text-rose-700 p-1 self-end sm:self-center"
-                              title="Delete income record"
-                            >
-                              Delete
-                            </button>
+                    {isIncomeOpen && (
+                      <div className="pt-6">
+                        {loadingIncome ? (
+                          <div className="flex justify-center items-center py-10">
+                            <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
                           </div>
-                        ))}
+                        ) : incomeList.length === 0 ? (
+                          <div className="text-center py-10 border border-dashed border-slate-200 rounded-xl">
+                            <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <h4 className="text-xs font-bold text-slate-700">No income records registered</h4>
+                            <p className="text-[11px] text-slate-400 mt-0.5">Click "+ Add Income" above to add income details.</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            {incomeList.map((income) => (
+                              <div
+                                key={income.id}
+                                className="p-4 border border-slate-150 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                              >
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 flex-1">
+                                  <InlineEditableSelect
+                                    label="Relationship"
+                                    value={income.relationship_to_applicant}
+                                    options={[
+                                      { label: 'Applicant', value: 'Applicant' },
+                                      { label: 'Spouse', value: 'Spouse' },
+                                      { label: 'Son/Daughter', value: 'Son/Daughter' },
+                                      { label: 'Mother', value: 'Mother' },
+                                      { label: 'Father', value: 'Father' },
+                                      { label: 'Other', value: 'Other' },
+                                    ]}
+                                    onSave={val => saveIncomeField(income.id, 'relationship_to_applicant', val)}
+                                  />
+
+                                  <InlineEditableSelect
+                                    label="Income Type"
+                                    value={income.income_type}
+                                    options={[
+                                      { label: 'W2', value: 'W2' },
+                                      { label: '1099', value: '1099' },
+                                    ]}
+                                    onSave={val => saveIncomeField(income.id, 'income_type', val)}
+                                  />
+
+                                  <InlineEditableText
+                                    label="Employer / Source"
+                                    value={income.employer_name}
+                                    onSave={val => saveIncomeField(income.id, 'employer_name', val)}
+                                  />
+
+                                  <InlineEditablePhone
+                                    label="Employer Phone"
+                                    value={income.employer_phone}
+                                    onSave={val => saveIncomeField(income.id, 'employer_phone', val)}
+                                  />
+
+                                  <InlineEditableText
+                                    label="Amount ($)"
+                                    type="number"
+                                    value={String(income.income || '')}
+                                    onSave={val => saveIncomeField(income.id, 'income', Number(val))}
+                                  />
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteIncome(income.id)}
+                                  className="text-xs font-bold text-rose-500 hover:text-rose-700 p-1 self-end sm:self-center"
+                                  title="Delete income record"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* ADD INCOME MODAL */}
+                        {isAddIncomeOpen && (
+                          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+                            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 border border-slate-100">
+                              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                                <h4 className="text-base font-extrabold text-slate-900">Add Income Record</h4>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsAddIncomeOpen(false)}
+                                  className="text-slate-400 hover:text-slate-600 font-bold"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+
+                              {incomeError && (
+                                <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs font-semibold">
+                                  {incomeError}
+                                </div>
+                              )}
+
+                              <div className="space-y-3 text-xs">
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Relationship</label>
+                                  <select
+                                    value={incomeRelationship}
+                                    onChange={e => setIncomeRelationship(e.target.value as any)}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                                  >
+                                    <option value="Applicant">Applicant</option>
+                                    <option value="Spouse">Spouse</option>
+                                    <option value="Son/Daughter">Son/Daughter</option>
+                                    <option value="Mother">Mother</option>
+                                    <option value="Father">Father</option>
+                                    <option value="Other">Other</option>
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Income Type</label>
+                                  <select
+                                    value={incomeType}
+                                    onChange={e => setIncomeType(e.target.value as any)}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                                  >
+                                    <option value="W2">W2</option>
+                                    <option value="1099">1099</option>
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer / Source</label>
+                                  <input
+                                    type="text"
+                                    value={incomeEmployerName}
+                                    onChange={e => setIncomeEmployerName(e.target.value)}
+                                    placeholder="e.g. Acme Corp"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer Phone</label>
+                                  <PhoneInput
+                                    value={incomeEmployerPhone}
+                                    onChange={val => setIncomeEmployerPhone(val)}
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Annual Amount ($)</label>
+                                  <input
+                                    type="number"
+                                    value={incomeAmount}
+                                    onChange={e => setIncomeAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                                    placeholder="e.g. 55000"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                                    required
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                                <button
+                                  type="button"
+                                  onClick={() => setIsAddIncomeOpen(false)}
+                                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 rounded-xl"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleAddIncomeSubmit}
+                                  disabled={incomeSaving}
+                                  className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs disabled:opacity-50"
+                                >
+                                  {incomeSaving ? 'Saving...' : 'Save Income'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
+                  </div>
 
-                    {/* ADD INCOME MODAL */}
-                    {isAddIncomeOpen && (
-                      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-                        <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 border border-slate-100">
-                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                            <h4 className="text-base font-extrabold text-slate-900">Add Income Record</h4>
-                            <button
-                              type="button"
-                              onClick={() => setIsAddIncomeOpen(false)}
-                              className="text-slate-400 hover:text-slate-600 font-bold"
-                            >
-                              ✕
-                            </button>
-                          </div>
-
-                          {incomeError && (
-                            <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs font-semibold">
-                              {incomeError}
-                            </div>
+                  {/* SECTION 4: Payment Information Card */}
+                  <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative font-sans">
+                    <div
+                      onClick={() => setIsPaymentInfoOpen(!isPaymentInfoOpen)}
+                      className="flex items-center justify-between border-b border-slate-100 pb-4 cursor-pointer select-none group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
+                          {isPaymentInfoOpen ? (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
+                          ) : (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
                           )}
-
-                          <div className="space-y-3 text-xs">
-                            <div>
-                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Relationship</label>
-                              <select
-                                value={incomeRelationship}
-                                onChange={e => setIncomeRelationship(e.target.value as any)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                              >
-                                <option value="Applicant">Applicant</option>
-                                <option value="Spouse">Spouse</option>
-                                <option value="Son/Daughter">Son/Daughter</option>
-                                <option value="Mother">Mother</option>
-                                <option value="Father">Father</option>
-                                <option value="Other">Other</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Income Type</label>
-                              <select
-                                value={incomeType}
-                                onChange={e => setIncomeType(e.target.value as any)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                              >
-                                <option value="W2">W2</option>
-                                <option value="1099">1099</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer / Source</label>
-                              <input
-                                type="text"
-                                value={incomeEmployerName}
-                                onChange={e => setIncomeEmployerName(e.target.value)}
-                                placeholder="e.g. Acme Corp"
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer Phone</label>
-                              <PhoneInput
-                                value={incomeEmployerPhone}
-                                onChange={val => setIncomeEmployerPhone(val)}
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Annual Amount ($)</label>
-                              <input
-                                type="number"
-                                value={incomeAmount}
-                                onChange={e => setIncomeAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                                placeholder="e.g. 55000"
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                                required
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                            <button
-                              type="button"
-                              onClick={() => setIsAddIncomeOpen(false)}
-                              className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 rounded-xl"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleAddIncomeSubmit}
-                              disabled={incomeSaving}
-                              className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs disabled:opacity-50"
-                            >
-                              {incomeSaving ? 'Saving...' : 'Save Income'}
-                            </button>
-                          </div>
+                        </span>
+                        <div>
+                          <h3 className="text-lg font-extrabold text-slate-900 font-sans">Payment Information</h3>
+                          <p className="text-xs text-slate-400 mt-0.5 font-sans">Manage auto pay, payment day, bank account, and card details.</p>
                         </div>
+                      </div>
+                    </div>
+
+                    {isPaymentInfoOpen && (
+                      <div className="pt-6">
+                        {paymentInfoLoading ? (
+                          <div className="flex justify-center items-center py-10">
+                            <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                          </div>
+                        ) : (
+                          <form onSubmit={handleSavePaymentInfo} className="space-y-6">
+                            {paymentInfoError && (
+                              <div className="p-3.5 bg-rose-50 border border-rose-100 rounded-xl text-xs font-semibold text-rose-600 font-sans">
+                                {paymentInfoError}
+                              </div>
+                            )}
+
+                            {paymentInfoSuccess && (
+                              <div className="p-3.5 bg-emerald-50 border border-emerald-100 rounded-xl text-xs font-semibold text-emerald-700 font-sans">
+                                {paymentInfoSuccess}
+                              </div>
+                            )}
+
+                            {/* STATIC / COMMON FIELDS */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                              <div>
+                                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Auto Pay</label>
+                                <div className="flex items-center gap-3 pt-1">
+                                  <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={paymentAutoPay}
+                                      onChange={(e) => setPaymentAutoPay(e.target.checked)}
+                                      className="sr-only peer"
+                                    />
+                                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                    <span className="ml-2 text-xs font-bold text-slate-700">
+                                      {paymentAutoPay ? 'Enabled' : 'Disabled'}
+                                    </span>
+                                  </label>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Payment Day</label>
+                                <select
+                                  value={paymentDayVal || ''}
+                                  onChange={(e) => setPaymentDayVal(e.target.value === '' ? null : Number(e.target.value))}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans"
+                                >
+                                  <option value="">Select Day (1–31)...</option>
+                                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                                    <option key={day} value={day}>
+                                      Day {day}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Associated Address</label>
+                                <input
+                                  type="text"
+                                  value={paymentAddress}
+                                  onChange={(e) => setPaymentAddress(e.target.value)}
+                                  placeholder="e.g. 123 Main St, Miami, FL"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">A Nombre De (Holder Name)</label>
+                                <input
+                                  type="text"
+                                  value={paymentHolderName}
+                                  onChange={(e) => setPaymentHolderName(e.target.value)}
+                                  placeholder="e.g. Account Holder Name"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="border-t border-slate-100 pt-5 space-y-4">
+                              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 font-sans">Payment Methods</h4>
+
+                              {/* BANK ACCOUNT SUBSECTION */}
+                              <div className="p-4 border border-slate-200 rounded-xl bg-slate-50/50 space-y-4">
+                                <div className="flex items-center justify-between">
+                                  <label className="flex items-center gap-2.5 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={hasBankAccount}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setHasBankAccount(checked);
+                                        if (!checked) {
+                                          setBankName('');
+                                          setBankRoutingNumber('');
+                                          setBankAccountNumber('');
+                                          setBankLast4('');
+                                          setIsReplacingBank(false);
+                                        }
+                                      }}
+                                      className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
+                                    />
+                                    <span className="text-sm font-bold text-slate-800 font-sans">Bank Account</span>
+                                  </label>
+
+                                  {hasBankAccount && bankLast4 && !isReplacingBank && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setIsReplacingBank(true)}
+                                      className="text-xs font-bold text-blue-600 hover:text-blue-800 font-sans"
+                                    >
+                                      Replace Bank Details
+                                    </button>
+                                  )}
+                                </div>
+
+                                {hasBankAccount && (
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-slate-200/60 animate-fade-in">
+                                    <div>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">Bank Name</label>
+                                      <input
+                                        type="text"
+                                        value={bankName}
+                                        onChange={(e) => setBankName(e.target.value)}
+                                        placeholder="e.g. Chase Bank"
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-sans"
+                                        required={hasBankAccount && !bankLast4}
+                                      />
+                                    </div>
+
+                                    {bankLast4 && !isReplacingBank ? (
+                                      <>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-500 mb-1">Routing Number</label>
+                                          <input
+                                            type="text"
+                                            value="•••••••••"
+                                            disabled
+                                            className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-500 font-mono"
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-500 mb-1">Account Number</label>
+                                          <input
+                                            type="text"
+                                            value={`••••${bankLast4}`}
+                                            disabled
+                                            className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold"
+                                          />
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-500 mb-1">Routing Number</label>
+                                          <input
+                                            type="text"
+                                            value={bankRoutingNumber}
+                                            onChange={(e) => setBankRoutingNumber(e.target.value)}
+                                            placeholder="9-digit Routing Number"
+                                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono"
+                                            required={hasBankAccount && (isReplacingBank || !bankLast4)}
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-500 mb-1">Account Number</label>
+                                          <input
+                                            type="text"
+                                            value={bankAccountNumber}
+                                            onChange={(e) => setBankAccountNumber(e.target.value)}
+                                            placeholder="Account Number"
+                                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono"
+                                            required={hasBankAccount && (isReplacingBank || !bankLast4)}
+                                          />
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* CARD SUBSECTION */}
+                              <div className="p-4 border border-slate-200 rounded-xl bg-slate-50/50 space-y-4">
+                                <div className="flex items-center justify-between">
+                                  <label className="flex items-center gap-2.5 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={hasCardMethod}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setHasCardMethod(checked);
+                                        if (!checked) {
+                                          setCardTypeVal('Debit');
+                                          setCardNumberVal('');
+                                          setCardLast4Val('');
+                                          setCardExpMonth('');
+                                          setCardExpYear('');
+                                          setCardCvvVal('');
+                                          setIsReplacingCard(false);
+                                        }
+                                      }}
+                                      className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
+                                    />
+                                    <span className="text-sm font-bold text-slate-800 font-sans">Card</span>
+                                  </label>
+
+                                  {hasCardMethod && cardLast4Val && !isReplacingCard && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setIsReplacingCard(true)}
+                                      className="text-xs font-bold text-blue-600 hover:text-blue-800 font-sans"
+                                    >
+                                      Replace Card
+                                    </button>
+                                  )}
+                                </div>
+
+                                {hasCardMethod && (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2 border-t border-slate-200/60 animate-fade-in">
+                                    <div>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">Card Type</label>
+                                      <select
+                                        value={cardTypeVal}
+                                        onChange={(e) => setCardTypeVal(e.target.value as 'Debit' | 'Credit')}
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-sans"
+                                      >
+                                        <option value="Debit">Debit</option>
+                                        <option value="Credit">Credit</option>
+                                      </select>
+                                    </div>
+
+                                    {cardLast4Val && !isReplacingCard ? (
+                                      <div>
+                                        <label className="block text-xs font-bold text-slate-500 mb-1">Card Number</label>
+                                        <input
+                                          type="text"
+                                          value={`•••• •••• •••• ${cardLast4Val}`}
+                                          disabled
+                                          className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold"
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div>
+                                        <label className="block text-xs font-bold text-slate-500 mb-1">Card Number</label>
+                                        <input
+                                          type="text"
+                                          value={cardNumberVal}
+                                          onChange={(e) => setCardNumberVal(e.target.value)}
+                                          placeholder="16-digit Card Number"
+                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono"
+                                          required={hasCardMethod && (isReplacingCard || !cardLast4Val)}
+                                        />
+                                      </div>
+                                    )}
+
+                                    <div>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">Expiration Date (MM/YYYY)</label>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <input
+                                          type="text"
+                                          value={cardExpMonth}
+                                          onChange={(e) => setCardExpMonth(e.target.value)}
+                                          placeholder="MM"
+                                          maxLength={2}
+                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-sans text-center"
+                                          required={hasCardMethod}
+                                        />
+                                        <input
+                                          type="text"
+                                          value={cardExpYear}
+                                          onChange={(e) => setCardExpYear(e.target.value)}
+                                          placeholder="YYYY"
+                                          maxLength={4}
+                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-sans text-center"
+                                          required={hasCardMethod}
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">
+                                        CVV <span className="text-[10px] text-slate-400 font-normal">(Transient entry - never saved)</span>
+                                      </label>
+                                      <input
+                                        type="password"
+                                        value={cardCvvVal}
+                                        onChange={(e) => setCardCvvVal(e.target.value)}
+                                        placeholder="CVV"
+                                        maxLength={4}
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono text-center"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-end pt-3 border-t border-slate-100">
+                              <button
+                                type="submit"
+                                disabled={paymentInfoSaving}
+                                className="px-5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-all shadow-md shadow-blue-500/10 font-sans"
+                              >
+                                {paymentInfoSaving ? 'Saving...' : 'Save Payment Information'}
+                              </button>
+                            </div>
+                          </form>
+                        )}
                       </div>
                     )}
                   </div>
@@ -4184,6 +4880,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handlePreviewUnifiedDoc(doc)}
+                                className="text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors font-sans"
+                              >
+                                Preview
+                              </button>
                               <button
                                 type="button"
                                 onClick={async () => {
@@ -5180,6 +5883,18 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           </div>
         </div>
       )}
+
+      <DocumentPreviewModal
+        isOpen={unifiedPreviewState.isOpen}
+        onClose={() => setUnifiedPreviewState((prev) => ({ ...prev, isOpen: false, signedUrl: null, officePreview: null }))}
+        fileName={unifiedPreviewState.fileName}
+        mimeType={unifiedPreviewState.mimeType}
+        signedUrl={unifiedPreviewState.signedUrl}
+        officePreview={unifiedPreviewState.officePreview}
+        loading={unifiedPreviewState.loading}
+        error={unifiedPreviewState.error}
+        onDownload={handleDownloadFromPreview}
+      />
     </DashboardLayout>
   );
 }

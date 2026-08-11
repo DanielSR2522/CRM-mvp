@@ -6,6 +6,7 @@ import { Lead, LeadDocument } from '@/lib/leads/types';
 import { validateLeadFile, formatBytes, getLeadFileSignedUrl, logTimelineEvent } from '@/lib/leads/fileUtils';
 import { formatIsoToUsDate } from '@/utils/dateUtils';
 import FileDropzone from '@/components/ui/FileDropzone';
+import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 
 interface LeadDocumentsTabProps {
   lead: Lead;
@@ -168,6 +169,89 @@ export default function LeadDocumentsTab({ lead, onActivityLogged }: LeadDocumen
       window.open(signedUrl, '_blank');
     } else {
       setError('Failed to generate download URL for document.');
+    }
+  };
+
+  // Document Preview State & Handler
+  const [leadPreviewState, setLeadPreviewState] = useState<{
+    isOpen: boolean;
+    fileName: string;
+    mimeType?: string | null;
+    signedUrl?: string | null;
+    officePreview?: any | null;
+    loading: boolean;
+    error?: string | null;
+    doc?: LeadDocument | null;
+  }>({
+    isOpen: false,
+    fileName: '',
+    mimeType: null,
+    signedUrl: null,
+    officePreview: null,
+    loading: false,
+    error: null,
+    doc: null,
+  });
+
+  const handlePreviewDocument = async (doc: LeadDocument) => {
+    const fileNameVal = doc.display_name || doc.original_filename;
+    const ext = (fileNameVal.split('.').pop() || '').toLowerCase();
+    const isOffice = ['docx', 'xlsx', 'xls', 'pptx'].includes(ext);
+
+    setLeadPreviewState({
+      isOpen: true,
+      fileName: fileNameVal,
+      mimeType: doc.mime_type || null,
+      signedUrl: null,
+      officePreview: null,
+      loading: true,
+      error: null,
+      doc,
+    });
+
+    if (isOffice) {
+      try {
+        const res = await fetch('/api/documents/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'lead', docId: doc.id }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Failed to generate document preview.');
+        }
+
+        const officeData = await res.json();
+        setLeadPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          officePreview: officeData,
+        }));
+      } catch (err: any) {
+        setLeadPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          error: err?.message || 'Unable to preview this document.',
+        }));
+      }
+    } else {
+      try {
+        const signedUrl = await getLeadFileSignedUrl(doc.storage_path);
+        if (!signedUrl) throw new Error('Failed to generate preview URL.');
+
+        setLeadPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          signedUrl,
+        }));
+      } catch (err: any) {
+        setLeadPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          error: err?.message || 'Unable to preview this document.',
+        }));
+      }
     }
   };
 
@@ -399,10 +483,16 @@ export default function LeadDocumentsTab({ lead, onActivityLogged }: LeadDocumen
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
+                          onClick={() => handlePreviewDocument(doc)}
+                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition-colors"
+                        >
+                          Preview
+                        </button>
+                        <button
                           onClick={() => handleOpenDocument(doc)}
                           className="px-2.5 py-1 rounded bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[11px] font-medium transition-colors border border-blue-500/30"
                         >
-                          Open / Download
+                          Download
                         </button>
                         <button
                           onClick={() => {
@@ -520,6 +610,18 @@ export default function LeadDocumentsTab({ lead, onActivityLogged }: LeadDocumen
           </div>
         </div>
       )}
+
+      <DocumentPreviewModal
+        isOpen={leadPreviewState.isOpen}
+        onClose={() => setLeadPreviewState((prev) => ({ ...prev, isOpen: false, signedUrl: null, officePreview: null }))}
+        fileName={leadPreviewState.fileName}
+        mimeType={leadPreviewState.mimeType}
+        signedUrl={leadPreviewState.signedUrl}
+        officePreview={leadPreviewState.officePreview}
+        loading={leadPreviewState.loading}
+        error={leadPreviewState.error}
+        onDownload={leadPreviewState.doc ? () => handleOpenDocument(leadPreviewState.doc!) : undefined}
+      />
     </div>
   );
 }

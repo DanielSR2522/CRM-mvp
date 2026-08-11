@@ -18,6 +18,7 @@ import { formatDateMMDDYYYY, formatDateTimeMMDDYYYY } from '@/lib/formatters/dat
 import FileDropzone from '@/components/ui/FileDropzone';
 import DatePicker from '@/components/ui/DatePicker';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
+import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 
 interface Policy {
   id: string;
@@ -252,6 +253,129 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
   const [isConfirmUnlinkOpen, setIsConfirmUnlinkOpen] = useState(false);
   const [unlinkingClient, setUnlinkingClient] = useState(false);
   const [unlinkError, setUnlinkError] = useState<string | null>(null);
+
+  // Linked Companies State (FOR PERSONAL POLICIES)
+  interface LinkedCompanyItem {
+    id: string;
+    linkId: string;
+    agency_name: string | null;
+    full_name: string | null;
+    email: string | null;
+    phone: string | null;
+  }
+
+  const [linkedCompanies, setLinkedCompanies] = useState<LinkedCompanyItem[]>([]);
+  const [linkedCompaniesLoading, setLinkedCompaniesLoading] = useState(false);
+  const [companySearchOpen, setCompanySearchOpen] = useState(false);
+  const [companySearchQuery, setCompanySearchQuery] = useState('');
+  const [companySearchResults, setCompanySearchResults] = useState<any[]>([]);
+  const [companySearchLoading, setCompanySearchLoading] = useState(false);
+
+  const loadLinkedCompanies = useCallback(async () => {
+    if (!policyId) return;
+    try {
+      setLinkedCompaniesLoading(true);
+      const { data, error } = await supabase
+        .from('personal_policy_companies')
+        .select('id, company_client_id, clients!inner(id, agency_name, full_name, email, phone)')
+        .eq('policy_id', policyId);
+
+      if (error) {
+        console.warn('Error loading linked companies:', error);
+        setLinkedCompanies([]);
+        return;
+      }
+
+      const mapped = (data || []).map((item: any) => ({
+        linkId: item.id,
+        id: item.clients.id,
+        agency_name: item.clients.agency_name,
+        full_name: item.clients.full_name,
+        email: item.clients.email,
+        phone: item.clients.phone,
+      }));
+
+      setLinkedCompanies(mapped);
+    } catch (err) {
+      console.error('Failed to load linked companies:', err);
+    } finally {
+      setLinkedCompaniesLoading(false);
+    }
+  }, [policyId]);
+
+  useEffect(() => {
+    loadLinkedCompanies();
+  }, [loadLinkedCompanies]);
+
+  const handleSearchCompanies = async (query: string) => {
+    setCompanySearchQuery(query);
+    if (!query.trim()) {
+      setCompanySearchResults([]);
+      return;
+    }
+
+    try {
+      setCompanySearchLoading(true);
+      const trimmed = query.trim();
+
+      // Query clients where client_type = 'company' AND matching full_name, email, or phone
+      const { data: matchedCompanies, error: clientsErr } = await supabase
+        .from('clients')
+        .select('id, agency_name, full_name, email, phone, client_type')
+        .eq('client_type', 'company')
+        .or(`full_name.ilike.%${trimmed}%,email.ilike.%${trimmed}%,phone.ilike.%${trimmed}%`)
+        .limit(20);
+
+      if (clientsErr || !matchedCompanies) {
+        setCompanySearchResults([]);
+        return;
+      }
+
+      setCompanySearchResults(matchedCompanies);
+    } catch (err) {
+      console.error('Error searching commercial companies:', err);
+      setCompanySearchResults([]);
+    } finally {
+      setCompanySearchLoading(false);
+    }
+  };
+
+  const handleAddLinkedCompany = async (companyId: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated.');
+
+      const { error } = await supabase
+        .from('personal_policy_companies')
+        .insert({
+          policy_id: policyId,
+          company_client_id: companyId,
+          created_by: user.id,
+        });
+
+      if (error) throw error;
+
+      await loadLinkedCompanies();
+      setCompanySearchOpen(false);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to link company.');
+    }
+  };
+
+  const handleRemoveLinkedCompany = async (linkId: string) => {
+    try {
+      const { error } = await supabase
+        .from('personal_policy_companies')
+        .delete()
+        .eq('id', linkId);
+
+      if (error) throw error;
+
+      await loadLinkedCompanies();
+    } catch (err: any) {
+      alert(err?.message || 'Failed to remove company link.');
+    }
+  };
 
   // Client Personal and Residence States
   const [personalInfo, setPersonalInfo] = useState<any>(null);
@@ -1217,7 +1341,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
       const { data, error } = await supabase
         .storage
         .from('policy-documents')
-        .createSignedUrl(doc.storage_path, 60);
+        .createSignedUrl(doc.storage_path, 3600);
 
       if (error) throw error;
       if (!data?.signedUrl) throw new Error('Failed to generate signed download link.');
@@ -1226,6 +1350,95 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
     } catch (err: any) {
       console.error('Error downloading document:', err);
       setNoteActionError(err?.message || 'Failed to download document.');
+    }
+  };
+
+  // Preview Document State & Handler
+  const [pcPreviewState, setPcPreviewState] = useState<{
+    isOpen: boolean;
+    fileName: string;
+    mimeType?: string | null;
+    signedUrl?: string | null;
+    officePreview?: any | null;
+    loading: boolean;
+    error?: string | null;
+    doc?: PolicyDocument | null;
+  }>({
+    isOpen: false,
+    fileName: '',
+    mimeType: null,
+    signedUrl: null,
+    officePreview: null,
+    loading: false,
+    error: null,
+    doc: null,
+  });
+
+  const handlePreviewDoc = async (doc: PolicyDocument) => {
+    const fileNameVal = doc.display_name || doc.original_filename;
+    const ext = (fileNameVal.split('.').pop() || '').toLowerCase();
+    const isOffice = ['docx', 'xlsx', 'xls', 'pptx'].includes(ext);
+
+    setPcPreviewState({
+      isOpen: true,
+      fileName: fileNameVal,
+      mimeType: doc.mime_type || null,
+      signedUrl: null,
+      officePreview: null,
+      loading: true,
+      error: null,
+      doc,
+    });
+
+    if (isOffice) {
+      try {
+        const res = await fetch('/api/documents/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'property_casualty', docId: doc.id }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Failed to generate document preview.');
+        }
+
+        const officeData = await res.json();
+        setPcPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          officePreview: officeData,
+        }));
+      } catch (err: any) {
+        console.error('Error previewing document:', err);
+        setPcPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          error: err?.message || 'Unable to preview this document.',
+        }));
+      }
+    } else {
+      try {
+        const { data, error } = await supabase
+          .storage
+          .from('policy-documents')
+          .createSignedUrl(doc.storage_path, 3600);
+
+        if (error || !data?.signedUrl) throw error || new Error('Failed to generate signed preview URL.');
+
+        setPcPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          signedUrl: data.signedUrl,
+        }));
+      } catch (err: any) {
+        console.error('Error previewing document:', err);
+        setPcPreviewState((prev) => ({
+          ...prev,
+          loading: false,
+          error: err?.message || 'Unable to preview this document.',
+        }));
+      }
     }
   };
 
@@ -2286,6 +2499,12 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                                       {!isRenamingDoc && (
                                         <div className="flex items-center gap-3.5 self-end sm:self-center">
                                           <button
+                                            onClick={() => handlePreviewDoc(doc)}
+                                            className="text-xs text-slate-700 hover:text-slate-900 font-bold font-sans"
+                                          >
+                                            Preview
+                                          </button>
+                                          <button
                                             onClick={() => handleDownloadDoc(doc)}
                                             className="text-xs text-blue-600 hover:text-blue-800 font-bold font-sans"
                                           >
@@ -2546,7 +2765,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                         required
                       >
                         <option value="">Select Option</option>
-                        {LINES_OF_BUSINESS.map(opt => (
+                        {[...LINES_OF_BUSINESS].sort((a, b) => a.localeCompare(b)).map(opt => (
                           <option key={opt} value={opt}>{opt}</option>
                         ))}
                       </select>
@@ -2772,6 +2991,61 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                       </select>
                     </div>
                   </div>
+
+                  {/* LINKED COMPANIES (PERSONAL POLICIES ONLY) */}
+                  {policyOwnershipType === 'personal' && (
+                    <div className="md:col-span-2 border-t border-slate-100 pt-6 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-sm font-extrabold text-slate-900 font-sans">Linked Companies</h4>
+                          <p className="text-xs text-slate-400 font-sans">
+                            Link commercial companies associated with this personal policy.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCompanySearchQuery('');
+                            setCompanySearchResults([]);
+                            setCompanySearchOpen(true);
+                          }}
+                          className="px-3 py-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-xl transition-all font-sans"
+                        >
+                          + Add Company
+                        </button>
+                      </div>
+
+                      {linkedCompaniesLoading ? (
+                        <div className="py-4 text-center text-xs text-slate-400 font-sans">Loading linked companies...</div>
+                      ) : linkedCompanies.length === 0 ? (
+                        <div className="p-4 rounded-xl bg-slate-50/50 border border-dashed border-slate-200 text-xs text-slate-400 font-sans text-center">
+                          No companies linked to this personal policy yet.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {linkedCompanies.map((comp) => (
+                            <div key={comp.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200/80 rounded-xl shadow-xs">
+                              <div className="min-w-0 pr-2">
+                                <h5 className="text-xs font-bold text-slate-900 font-sans truncate">
+                                  {comp.agency_name || comp.full_name || 'Commercial Company'}
+                                </h5>
+                                <p className="text-[10px] text-slate-400 font-sans truncate">
+                                  {comp.email || comp.phone || 'Company Client'}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveLinkedCompany(comp.linkId)}
+                                className="text-xs font-bold text-rose-500 hover:text-rose-700 px-2 py-1 bg-rose-50 hover:bg-rose-100 rounded-lg transition-all font-sans flex-shrink-0"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </form>
               </div>
             )}
@@ -2841,6 +3115,94 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
           </div>
         </div>
       )}
+
+      {/* SEARCH & ADD COMPANY MODAL */}
+      {companySearchOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs font-sans animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">Link Commercial Company</h3>
+                <p className="text-xs text-slate-400">Search existing commercial company clients to link to this policy.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCompanySearchOpen(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <input
+                type="text"
+                value={companySearchQuery}
+                onChange={(e) => handleSearchCompanies(e.target.value)}
+                placeholder="Search company name, contact, email, or phone..."
+                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-4 py-2.5 text-xs text-slate-800 outline-none"
+                autoFocus
+              />
+
+              <div className="max-h-60 overflow-auto divide-y divide-slate-100 border border-slate-100 rounded-xl">
+                {companySearchLoading ? (
+                  <div className="p-4 text-center text-xs text-slate-400">Searching commercial companies...</div>
+                ) : companySearchResults.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    {companySearchQuery.trim() ? 'No commercial company clients found.' : 'Type to search commercial companies.'}
+                  </div>
+                ) : (
+                  companySearchResults.map((comp) => {
+                    const isAlreadyLinked = linkedCompanies.some((lc) => lc.id === comp.id);
+                    return (
+                      <div key={comp.id} className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                        <div className="min-w-0 pr-3">
+                          <h5 className="text-xs font-bold text-slate-900 truncate">
+                            {comp.agency_name || comp.full_name || 'Commercial Company'}
+                          </h5>
+                          <p className="text-[10px] text-slate-400 truncate">
+                            {comp.email || comp.phone || 'Company Client'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isAlreadyLinked}
+                          onClick={() => handleAddLinkedCompany(comp.id)}
+                          className="px-3 py-1.5 text-xs font-bold rounded-lg transition-all text-blue-600 bg-blue-50 hover:bg-blue-100 disabled:opacity-40 font-sans"
+                        >
+                          {isAlreadyLinked ? 'Linked' : '+ Select'}
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setCompanySearchOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <DocumentPreviewModal
+        isOpen={pcPreviewState.isOpen}
+        onClose={() => setPcPreviewState((prev) => ({ ...prev, isOpen: false, signedUrl: null, officePreview: null }))}
+        fileName={pcPreviewState.fileName}
+        mimeType={pcPreviewState.mimeType}
+        signedUrl={pcPreviewState.signedUrl}
+        officePreview={pcPreviewState.officePreview}
+        loading={pcPreviewState.loading}
+        error={pcPreviewState.error}
+        onDownload={pcPreviewState.doc ? () => handleDownloadDoc(pcPreviewState.doc!) : undefined}
+      />
     </DashboardLayout>
   );
 }

@@ -180,6 +180,7 @@ export default function NewClientWizardModal({
       // For Personal clients: full_name stores Personal Name.
       const clientPayload: any = {
         agent_id: activeAgentId,
+        client_type: isCompany ? 'company' : 'personal',
         full_name: isCompany ? companyName.trim() : fullName.trim(),
         agency_name: null,
         address: formattedAddress,
