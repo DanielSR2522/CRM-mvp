@@ -1,4 +1,4 @@
-export type NoteCategory = 'health' | 'life' | 'property_casualty';
+export type NoteCategory = 'health' | 'life' | 'property_casualty' | 'medicare' | 'supplemental';
 
 export interface NoteAttachment {
   id: string;

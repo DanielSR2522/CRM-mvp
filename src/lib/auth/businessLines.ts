@@ -1,9 +1,10 @@
 import { supabase } from '@/lib/supabaseClient';
 
-export type BusinessLine = 'health' | 'life' | 'property_casualty' | 'supplemental';
+export type BusinessLine = 'health' | 'medicare' | 'life' | 'property_casualty' | 'supplemental';
 
 export const ALL_BUSINESS_LINES: { id: BusinessLine; label: string }[] = [
   { id: 'health', label: 'Health' },
+  { id: 'medicare', label: 'Medicare' },
   { id: 'life', label: 'Life' },
   { id: 'property_casualty', label: 'Property & Casualty' },
   { id: 'supplemental', label: 'Supplemental' },
@@ -11,6 +12,7 @@ export const ALL_BUSINESS_LINES: { id: BusinessLine; label: string }[] = [
 
 export const DEFAULT_BUSINESS_LINES: BusinessLine[] = [
   'health',
+  'medicare',
   'life',
   'property_casualty',
   'supplemental'

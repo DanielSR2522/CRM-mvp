@@ -7,6 +7,8 @@ import DashboardLayout from '@/components/DashboardLayout';
 import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
+import MedicareTab from '@/components/medicare/MedicareTab';
+import SupplementalTab from '@/components/supplemental/SupplementalTab';
 import LifePolicyTab from '@/components/life/LifePolicyTab';
 import UnifiedNotesManager from '@/components/notes/UnifiedNotesManager';
 import { getAssignedAgentDisplay } from '@/lib/auth/agentDisplay';
@@ -192,7 +194,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { id: clientId } = use(params);
-  const { isLineEnabled } = useBusinessLines();
+  const { isLineEnabled, loading: businessLinesLoading } = useBusinessLines();
 
   const isValidUuid = (uuid: string) => {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid);
@@ -200,23 +202,14 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   // Section mapping & URL-driven tab state
   const rawSection = searchParams.get('section') || searchParams.get('tab');
-  const validSections = ['overview', 'personal-information', 'personal-info', 'policies', 'documents', 'notes', 'consents', 'timeline', 'health', 'life'];
+  const validSections = ['overview', 'personal-information', 'personal-info', 'policies', 'documents', 'notes', 'consents', 'timeline', 'health', 'life', 'medicare', 'supplemental'];
   const normalizedSection = validSections.includes(rawSection || '')
     ? (rawSection === 'personal-info' ? 'personal-information' : rawSection!)
     : 'overview';
 
-  const activeTab = (normalizedSection === 'personal-information' ? 'personal-info' : normalizedSection) as 'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health' | 'life';
+  const activeTab = (normalizedSection === 'personal-information' ? 'personal-info' : normalizedSection) as 'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health' | 'life' | 'medicare' | 'supplemental';
 
-  // Temporary diagnostic log as requested
-  if (typeof window !== 'undefined') {
-    console.log('[ClientTabNav Diagnostic]', {
-      rawSection,
-      normalizedSection,
-      activeTab,
-      isLifeRendered: activeTab === 'life',
-      isLifeEnabled: isLineEnabled('life')
-    });
-  }
+
 
   const handleTabChange = useCallback((tab: string) => {
     console.log('[ClientTabNav] Clicked tab key:', tab);
@@ -229,6 +222,17 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       router.push(`/clients/${clientId}?${paramsObj.toString()}`);
     }
   }, [clientId, router, searchParams]);
+
+  // Fallback to Overview if current activeTab is disabled by agent's Business Lines configuration
+  useEffect(() => {
+    if (!businessLinesLoading) {
+      if (activeTab === 'health' && !isLineEnabled('health')) handleTabChange('overview');
+      else if (activeTab === 'medicare' && !isLineEnabled('medicare')) handleTabChange('overview');
+      else if (activeTab === 'life' && !isLineEnabled('life')) handleTabChange('overview');
+      else if (activeTab === 'policies' && !isLineEnabled('property_casualty')) handleTabChange('overview');
+      else if (activeTab === 'supplemental' && !isLineEnabled('supplemental')) handleTabChange('overview');
+    }
+  }, [activeTab, businessLinesLoading, isLineEnabled, handleTabChange]);
 
   // Client Sidebar Collapse Preference
   const [isClientSidebarCollapsed, setIsClientSidebarCollapsed] = useState<boolean>(() => {
@@ -263,6 +267,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [lifePolicies, setLifePolicies] = useState<any[]>([]);
   const [healthPoliciesOverview, setHealthPoliciesOverview] = useState<any[]>([]);
+  const [supplementalPolicies, setSupplementalPolicies] = useState<any[]>([]);
   const [loadingClient, setLoadingClient] = useState(true);
   const [loadingPolicies, setLoadingPolicies] = useState(true);
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('Agent');
@@ -948,7 +953,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       expiration_date: string | null;
       premium: number;
       effectiveAddress: string;
-      targetTab: 'policies' | 'health' | 'life';
+      targetTab: 'policies' | 'health' | 'life' | 'supplemental';
       updated_at: string;
       isLinkedCommercial?: boolean;
       companyName?: string;
@@ -1068,6 +1073,33 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           isLinkedCommercial: true,
           companyName: resolvedCompanyName
         });
+      });
+    }
+    // 4. Supplemental policies (only if direct client owner)
+    if (!client || client.agent_id === currentUserId) {
+      (supplementalPolicies || []).forEach((supp: any) => {
+        if (supp.status === 'Active') {
+          const effectiveAddress = resolvePolicyAddress(
+            null,
+            residenceInfo,
+            client
+          );
+          cards.push({
+            id: supp.id,
+            businessLine: 'health', // compatible tag for policy badge styling
+            businessLineLabel: `Supplemental (${supp.product_type || 'Policy'})`,
+            policy_type: supp.product_type || 'Supplemental Policy',
+            company_name: supp.company || 'Carrier Unspecified',
+            policy_number: supp.member_id || 'N/A',
+            status: 'Active',
+            effective_date: supp.effective_date || null,
+            expiration_date: null,
+            premium: Number(supp.monthly_premium || 0),
+            effectiveAddress,
+            targetTab: 'supplemental' as any,
+            updated_at: supp.updated_at || supp.created_at || new Date().toISOString(),
+          });
+        }
       });
     }
 
@@ -1380,7 +1412,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const fetchOverviewPolicies = useCallback(async () => {
     if (!isValidUuid(clientId)) return;
     try {
-      const [healthRes, lifeRes] = await Promise.all([
+      const [healthRes, lifeRes, suppRes] = await Promise.all([
         supabase
           .from('health_policies')
           .select('*')
@@ -1392,6 +1424,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           .select('*, life_policy_products(*)')
           .eq('client_id', clientId)
           .order('created_at', { ascending: false }),
+        supabase
+          .from('client_supplemental_policies')
+          .select('*')
+          .eq('client_id', clientId)
+          .order('created_at', { ascending: false }),
       ]);
 
       if (healthRes.data) {
@@ -1399,6 +1436,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       }
       if (lifeRes.data) {
         setLifePolicies(lifeRes.data);
+      }
+      if (suppRes.data) {
+        setSupplementalPolicies(suppRes.data);
       }
     } catch (err) {
       console.error('Error fetching overview policies:', err);
@@ -3136,6 +3176,30 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       Health
                     </button>
                   )}
+                  {!isCompanyClient && isLineEnabled('medicare') && (
+                    <button
+                      onClick={() => handleTabChange('medicare')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        activeTab === 'medicare'
+                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                      }`}
+                    >
+                      Medicare
+                    </button>
+                  )}
+                  {!isCompanyClient && isLineEnabled('supplemental') && (
+                    <button
+                      onClick={() => handleTabChange('supplemental')}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        activeTab === 'supplemental'
+                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                      }`}
+                    >
+                      Supplemental
+                    </button>
+                  )}
                   <button
                     onClick={() => handleTabChange('documents')}
                     className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
@@ -3306,7 +3370,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                       <div>
                                         Premium: <strong className="text-emerald-600 font-semibold">{formatCurrency(card.premium)}</strong>
                                       </div>
-                                    )}
+)}
                                     <div>
                                       Policy Address: <strong className="text-slate-800 font-semibold">{card.effectiveAddress}</strong>
                                     </div>
@@ -3318,13 +3382,17 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      handleTabChange(card.targetTab);
-                                      setTimeout(() => {
-                                        const targetEl = document.getElementById('life-policy-' + card.id) || document.getElementById('policy-' + card.id);
-                                        if (targetEl) {
-                                          targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                        }
-                                      }, 150);
+                                      if (card.targetTab === 'supplemental') {
+                                        router.push(`/clients/${clientId}?section=supplemental&policy=${card.id}`);
+                                      } else {
+                                        handleTabChange(card.targetTab);
+                                        setTimeout(() => {
+                                          const targetEl = document.getElementById('life-policy-' + card.id) || document.getElementById('policy-' + card.id);
+                                          if (targetEl) {
+                                            targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                          }
+                                        }, 150);
+                                      }
                                     }}
                                     className="text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-white border border-slate-200 hover:border-indigo-200 px-4 py-2 rounded-xl shadow-xs transition-all flex items-center gap-1"
                                   >
@@ -3340,7 +3408,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         )}
                       </div>
 
-                      {/* Linked Company Policies Section in Overview */}
                       {linkedCompanyPolicies.length > 0 && (
                         <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
                           <div className="flex items-center justify-between border-b border-slate-50 pb-4">
@@ -5353,6 +5420,27 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             formatIsoToUsDate={formatIsoToUsDate}
           />
         )
+      )}
+
+      {activeTab === 'medicare' && client && (
+        <MedicareTab
+          clientId={clientId}
+          isCompanyClient={isCompanyClient}
+          initialSubtab={(searchParams.get('subtab') as any) || 'summary'}
+          currentUserId={currentUserId}
+          onPolicyDeleted={() => fetchOverviewPolicies()}
+        />
+      )}
+
+      {activeTab === 'supplemental' && client && (
+        <SupplementalTab
+          clientId={clientId}
+          isCompanyClient={isCompanyClient}
+          initialPolicyId={searchParams.get('policy')}
+          initialSubtab={(searchParams.get('subtab') as any) || 'summary'}
+          currentUserId={currentUserId}
+          onPolicyDeleted={() => fetchOverviewPolicies()}
+        />
       )}
             </div>
           </div>

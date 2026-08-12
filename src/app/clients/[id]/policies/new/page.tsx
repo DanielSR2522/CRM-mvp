@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import { supabase } from '@/lib/supabaseClient';
-import { LINES_OF_BUSINESS, COMMERCIAL_LINES_OF_BUSINESS, PERSONAL_LINES_OF_BUSINESS } from '@/constants/linesOfBusiness';
+import { LINES_OF_BUSINESS } from '@/constants/linesOfBusiness';
 import { usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
 import DatePicker from '@/components/ui/DatePicker';
 
@@ -15,7 +15,14 @@ import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 export default function NewPolicyPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { id } = use(params);
-  const { isLineEnabled } = useBusinessLines();
+  const { isLineEnabled, loading: businessLinesLoading } = useBusinessLines();
+
+  // Safety fallback if Property & Casualty is disabled for agent
+  useEffect(() => {
+    if (!businessLinesLoading && !isLineEnabled('property_casualty') && id) {
+      router.push(`/clients/${id}`);
+    }
+  }, [businessLinesLoading, isLineEnabled, id, router]);
 
   // States
   const [clientName, setClientName] = useState('');
@@ -230,7 +237,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
     }
   };
 
-  const availableLobs = [...(isCompanyClient ? COMMERCIAL_LINES_OF_BUSINESS : PERSONAL_LINES_OF_BUSINESS)].sort((a, b) => a.localeCompare(b));
+  const availableLobs = [...LINES_OF_BUSINESS].sort((a, b) => a.localeCompare(b));
 
   return (
     <DashboardLayout>
