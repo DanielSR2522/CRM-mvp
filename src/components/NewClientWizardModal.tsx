@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import PhoneInput from '@/components/common/PhoneInput';
 import GoogleAddressAutocomplete, { NormalizedAddress } from '@/components/address/GoogleAddressAutocomplete';
 import { parseDisplayDate } from '@/utils/dateUtils';
+import { formatEIN } from '@/lib/formatters/ein';
 
 interface NewClientWizardModalProps {
   isOpen: boolean;
@@ -37,6 +38,7 @@ export default function NewClientWizardModal({
   // Form Fields
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
+  const [ein, setEin] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
@@ -62,7 +64,7 @@ export default function NewClientWizardModal({
       try {
         const [agentsRes, clientsRes] = await Promise.all([
           supabase.from('profiles').select('id, name, first_name, last_name, email'),
-          supabase.from('clients').select('id, full_name, email, phone, address, agency_name').order('full_name', { ascending: true })
+          supabase.from('clients').select('id, full_name, email, phone, address, client_type').order('full_name', { ascending: true })
         ]);
         
         if (agentsRes.data && agentsRes.data.length > 0) {
@@ -74,7 +76,7 @@ export default function NewClientWizardModal({
         }
 
         if (clientsRes.data) {
-          const personalOnly = clientsRes.data.filter((c: any) => !c.agency_name || c.agency_name.trim() === '');
+          const personalOnly = clientsRes.data.filter((c: any) => c.client_type === 'personal' || (!c.client_type && !c.agency_name));
           setPersonalClientsList(personalOnly.map((c: any) => ({
             id: c.id,
             full_name: c.full_name,
@@ -106,6 +108,7 @@ export default function NewClientWizardModal({
     setLifeProductType('');
     setFullName('');
     setCompanyName('');
+    setEin('');
     setSelectedContactClientId('');
     setEmail('');
     setPhone('');
@@ -176,12 +179,11 @@ export default function NewClientWizardModal({
       const formattedAddress = addrParts.length > 0 ? addrParts.join(', ') : null;
 
       // 1. Create Client Row in `clients`
-      // For Company clients: full_name stores Company Name (e.g. ABC Roofing LLC). agency_name remains null unless applicable.
-      // For Personal clients: full_name stores Personal Name.
       const clientPayload: any = {
         agent_id: activeAgentId,
         client_type: isCompany ? 'company' : 'personal',
         full_name: isCompany ? companyName.trim() : fullName.trim(),
+        ein: isCompany ? (formatEIN(ein).trim() || null) : null,
         agency_name: null,
         address: formattedAddress,
         email: email.trim() || null,
@@ -199,6 +201,17 @@ export default function NewClientWizardModal({
 
       const clientId = newClient.id;
 
+      // Persist relationship if an existing Personal client was selected
+      if (isCompany && selectedContactClientId) {
+        await supabase
+          .from('client_company_relationships')
+          .insert({
+            company_client_id: clientId,
+            personal_client_id: selectedContactClientId,
+            relationship_type: 'contact_person'
+          });
+      }
+
       // 2. Save Residence Information
       if (streetAddress || city || state || zipCode) {
         await supabase
@@ -213,8 +226,6 @@ export default function NewClientWizardModal({
       }
 
       // 3. Save Personal Information / Contact Person
-      // For Company clients: full_name stores Contact Person name (e.g. Daniel Rodriguez).
-      // Person-only fields (DOB, SSN, Gender, Marital Status, Co-Applicant) are explicitly null/false.
       const parsedDob = isCompany ? null : parseDisplayDate(dateOfBirth);
       await supabase
         .from('client_personal_information')
@@ -281,12 +292,12 @@ export default function NewClientWizardModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in font-sans overflow-y-auto">
-      <div className="w-full max-w-2xl bg-white border border-slate-100 rounded-2xl shadow-2xl p-6 md:p-8 animate-scale-up my-8 max-h-[90vh] flex flex-col justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in font-sans overflow-hidden">
+      <div className="w-full max-w-2xl bg-white border border-slate-100 rounded-2xl shadow-2xl animate-scale-up max-h-[90vh] flex flex-col overflow-hidden">
         
-        {/* Header */}
-        <div>
-          <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+        {/* Header (flex-shrink-0) */}
+        <div className="p-6 md:p-8 pb-4 flex-shrink-0 border-b border-slate-100">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-xl font-extrabold text-slate-900">New Client Creation</h3>
               <p className="text-xs text-slate-400 mt-0.5">Policy-first guided workflow</p>
@@ -302,7 +313,7 @@ export default function NewClientWizardModal({
           </div>
 
           {/* Wizard Progress Bar */}
-          <div className="mb-8">
+          <div>
             <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider mb-2">
               <span className={step >= 1 ? 'text-blue-600' : 'text-slate-300'}>1. Policy Type</span>
               <span className={step >= 2 ? 'text-blue-600' : 'text-slate-300'}>2. Policy Details</span>
@@ -315,9 +326,12 @@ export default function NewClientWizardModal({
               />
             </div>
           </div>
+        </div>
 
+        {/* Scrollable Body (flex-1 min-h-0 overflow-y-auto) */}
+        <div className="p-6 md:p-8 flex-1 min-h-0 overflow-y-auto space-y-6">
           {formError && (
-            <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm font-medium">
+            <div className="p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm font-medium">
               {formError}
             </div>
           )}
@@ -512,7 +526,19 @@ export default function NewClientWizardModal({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Select Existing Personal Contact (Optional)</label>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">EIN (XX-XXXXXXX)</label>
+                      <input
+                        type="text"
+                        value={ein}
+                        onChange={e => setEin(formatEIN(e.target.value))}
+                        placeholder="e.g. 12-3456789"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Select Existing Personal Contact (Optional)</label>
                       <select
                         value={selectedContactClientId}
                         onChange={(e) => {
@@ -544,7 +570,6 @@ export default function NewClientWizardModal({
                         ))}
                       </select>
                     </div>
-                  </div>
 
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Contact Person Name *</label>
@@ -667,8 +692,8 @@ export default function NewClientWizardModal({
           )}
         </div>
 
-        {/* Footer Navigation Buttons */}
-        <div className="flex items-center justify-between pt-6 border-t border-slate-100 mt-6">
+        {/* Footer Navigation Buttons (flex-shrink-0) */}
+        <div className="px-6 py-4 md:px-8 bg-slate-50/50 border-t border-slate-100 flex-shrink-0 flex items-center justify-between">
           {step === 1 ? (
             <button
               type="button"

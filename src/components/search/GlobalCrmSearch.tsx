@@ -189,7 +189,7 @@ export default function GlobalCrmSearch() {
           category: 'clients',
           title: c.full_name || 'Unnamed Client',
           subtitle: [c.email, c.phone, c.address].filter(Boolean).join(' • '),
-          badge: c.agency_name ? 'Company Client' : 'Individual Client',
+          badge: c.client_type === 'company' ? 'Company Client' : 'Individual Client',
           targetUrl: `/clients/${c.id}`
         }));
 
@@ -215,7 +215,7 @@ export default function GlobalCrmSearch() {
         const companyItems: SearchResultItem[] = companiesResData.map((c: any) => ({
           id: c.id,
           category: 'companies',
-          title: c.agency_name || c.full_name || 'Company',
+          title: c.full_name || 'Company Profile',
           subtitle: `Contact: ${c.full_name} ${c.email ? '• ' + c.email : ''}`,
           badge: 'Commercial Profile',
           targetUrl: `/clients/${c.id}`

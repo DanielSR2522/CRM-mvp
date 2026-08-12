@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
+import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import { supabase } from '@/lib/supabaseClient';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -441,7 +442,7 @@ export default function CalendarPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+      <CrmPageContainer>
         {/* Flash Notification Banner */}
         {notice && (
           <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 font-medium text-sm flex items-center justify-between shadow-sm animate-fadeIn">
@@ -607,7 +608,7 @@ export default function CalendarPage() {
             </div>
           )}
         </div>
-      </div>
+      </CrmPageContainer>
 
       {/* ========================================================================= */}
       {/* 1. NEW / EDIT APPOINTMENT MODAL                                           */}

@@ -85,6 +85,8 @@ Deno.serve(async (req: Request) => {
     const fromEmail = Deno.env.get('POLICY_REMINDER_FROM_EMAIL') || 'reminders@updates.smartrackcrm.com';
     const fromName = Deno.env.get('POLICY_REMINDER_FROM_NAME') || 'SmarTrack CRM Reminders';
     const appBaseUrl = Deno.env.get('APP_BASE_URL') || 'http://localhost:3000';
+    const testEmailEnv = Deno.env.get('POLICY_REMINDER_TEST_EMAIL');
+    const isTestMode = Boolean(testEmailEnv && testEmailEnv.trim().length > 0);
 
     if (!supabaseUrl || !supabaseServiceKey) {
       return new Response(JSON.stringify({ error: 'Missing Supabase server configuration.' }), {
@@ -95,9 +97,10 @@ Deno.serve(async (req: Request) => {
 
     const adminSupabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // 4. DATE CALCULATIONS (America/New_York Business Timezone)
+    // 4. DATE CALCULATIONS (America/New_York Business Timezone for 60, 45, and 15 days)
     const nyTodayStr = getNewYorkDateString();
-    const target30Str = addDaysToIsoDate(nyTodayStr, 30);
+    const target60Str = addDaysToIsoDate(nyTodayStr, 60);
+    const target45Str = addDaysToIsoDate(nyTodayStr, 45);
     const target15Str = addDaysToIsoDate(nyTodayStr, 15);
 
     // 5. QUERY ELIGIBLE POLICIES (status = 'Active')
@@ -109,6 +112,8 @@ Deno.serve(async (req: Request) => {
         policy_type,
         policy_number,
         company_name,
+        writing_company,
+        effective_date,
         expiration_date,
         status,
         clients!inner (
@@ -118,7 +123,7 @@ Deno.serve(async (req: Request) => {
         )
       `)
       .eq('status', 'Active')
-      .in('expiration_date', [target30Str, target15Str]);
+      .in('expiration_date', [target60Str, target45Str, target15Str]);
 
     if (polErr) {
       throw new Error(`Failed to query eligible policies: ${polErr.message}`);
@@ -134,10 +139,13 @@ Deno.serve(async (req: Request) => {
       const expirationDateStr = pol.expiration_date;
       if (!expirationDateStr) continue;
 
-      const reminderDays = expirationDateStr === target30Str ? 30 : 15;
+      const reminderDays = expirationDateStr === target60Str
+        ? 60
+        : (expirationDateStr === target45Str ? 45 : 15);
+
       const client = pol.clients as any;
       const agentId = client?.agent_id;
-      const clientName = client?.full_name || 'Cliente';
+      const clientName = client?.full_name || 'Client';
 
       if (!agentId) {
         skippedCount++;
@@ -147,7 +155,7 @@ Deno.serve(async (req: Request) => {
 
       // Resolve Agent Email & Name from public.profiles table first
       let agentEmail: string | null = null;
-      let agentName: string = 'Agente';
+      let agentName: string = 'Agent';
 
       const { data: profile } = await adminSupabase
         .from('profiles')
@@ -157,7 +165,7 @@ Deno.serve(async (req: Request) => {
 
       if (profile?.email) {
         agentEmail = profile.email;
-        agentName = profile.name || 'Agente';
+        agentName = profile.name || 'Agent';
       } else {
         // Fallback using service role access to auth.users if profiles table email is null
         const { data: authUserData } = await adminSupabase.auth.admin.getUserById(agentId);
@@ -183,13 +191,18 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
+      // Resolve final target email address (Redirect in TEST MODE if POLICY_REMINDER_TEST_EMAIL is set)
+      const targetRecipientEmail = isTestMode ? testEmailEnv!.trim() : agentEmail;
+
       // DRY RUN CHECK: ZERO DB SIDE EFFECTS
       if (isDryRun) {
         skippedCount++;
         processedList.push({
           policy_id: pol.id,
           reminder_days: reminderDays,
-          recipient: maskEmail(agentEmail),
+          recipient: maskEmail(targetRecipientEmail),
+          original_agent_email: maskEmail(agentEmail),
+          test_mode: isTestMode,
           status: 'dry_run_would_send',
           client_name: clientName,
           policy_type: pol.policy_type,
@@ -261,7 +274,7 @@ Deno.serve(async (req: Request) => {
             agent_id: agentId,
             reminder_days: reminderDays,
             policy_expiration_date: expirationDateStr,
-            recipient_email: agentEmail,
+            recipient_email: targetRecipientEmail,
             delivery_status: 'pending',
             attempted_at: new Date().toISOString(),
           })
@@ -289,27 +302,36 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      // 9. CONSTRUCT EMAIL TEMPLATE & PAYLOAD (SPANISH)
+      // 9. CONSTRUCT EMAIL TEMPLATE & PAYLOAD
+      const formattedEffectiveDate = formatIsoToUsDate(pol.effective_date);
       const formattedExpDate = formatIsoToUsDate(expirationDateStr);
-      // Verified real policy route in CRM
       const policyUrl = `${appBaseUrl}/clients/${pol.client_id}/policies/${pol.id}`;
+      const carrierName = pol.writing_company || pol.company_name || 'N/A';
 
-      const subject = reminderDays === 30
-        ? `Póliza próxima a vencer en 30 días — ${clientName}`
-        : `Recordatorio urgente: póliza vence en 15 días — ${clientName}`;
+      let baseSubject = '';
+      if (reminderDays === 60) {
+        baseSubject = `Policy Expiration Reminder — 60 Days — ${clientName}`;
+      } else if (reminderDays === 45) {
+        baseSubject = `Policy Expiration Reminder — 45 Days — ${clientName}`;
+      } else {
+        baseSubject = `URGENT: Policy Expiration Reminder — 15 Days — ${clientName}`;
+      }
+
+      const subject = isTestMode ? `[TEST MODE] ${baseSubject}` : baseSubject;
 
       const htmlBody = `
         <!DOCTYPE html>
-        <html lang="es">
+        <html lang="en">
         <head>
           <meta charset="UTF-8">
           <style>
             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #0f172a; margin: 0; padding: 20px; }
             .container { max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+            .test-banner { background-color: #fef3c7; border: 1px solid #f59e0b; color: #92400e; font-size: 12px; font-weight: 700; padding: 10px 16px; border-radius: 8px; margin-bottom: 20px; text-align: center; }
             .header { border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px; }
             .title { font-size: 20px; font-weight: 800; color: #0f172a; margin: 0; }
             .subtitle { font-size: 14px; color: #64748b; margin-top: 4px; }
-            .badge { display: inline-block; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; ${reminderDays === 30 ? 'background-color: #dbeafe; color: #1e40af;' : 'background-color: #fee2e2; color: #991b1b;'} }
+            .badge { display: inline-block; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; ${reminderDays === 60 ? 'background-color: #dbeafe; color: #1e40af;' : (reminderDays === 45 ? 'background-color: #fef3c7; color: #92400e;' : 'background-color: #fee2e2; color: #991b1b;')} }
             .details { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0; }
             .row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
             .row:last-child { border-bottom: none; }
@@ -321,39 +343,42 @@ Deno.serve(async (req: Request) => {
         </head>
         <body>
           <div class="container">
+            ${isTestMode ? `<div class="test-banner">⚠️ TEST MODE ACTIVE — Original Intended Recipient: ${maskEmail(agentEmail)}</div>` : ''}
             <div class="header">
-              <span class="badge">Aviso de Expiración (${reminderDays} días)</span>
-              <h1 class="title" style="margin-top:12px;">Recordatorio de Vencimiento de Póliza</h1>
-              <p class="subtitle">Estimado/a ${agentName}, la póliza de uno de sus clientes vencerá próximamente.</p>
+              <span class="badge">Expiration Notice (${reminderDays} Days Remaining)</span>
+              <h1 class="title" style="margin-top:12px;">P&C Policy Expiration Reminder</h1>
+              <p class="subtitle">Dear ${agentName}, a policy assigned to your account is nearing expiration.</p>
             </div>
 
             <p style="font-size:14px; line-height:1.6;">
-              Se requiere su revisión para gestionar oportunamente la renovación antes de la fecha límite.
+              Please review this policy in SmarTrack CRM and initiate the renewal workflow with the client prior to the expiration date.
             </p>
 
             <div class="details">
-              <div class="row"><span class="label">Cliente:</span><span class="value">${clientName}</span></div>
-              <div class="row"><span class="label">Tipo de Póliza:</span><span class="value">${pol.policy_type}</span></div>
-              <div class="row"><span class="label">Número de Póliza:</span><span class="value">${pol.policy_number || 'N/A'}</span></div>
-              <div class="row"><span class="label">Aseguradora:</span><span class="value">${pol.company_name || 'N/A'}</span></div>
-              <div class="row"><span class="label">Fecha de Expiración:</span><span class="value" style="color:#dc2626;">${formattedExpDate}</span></div>
-              <div class="row"><span class="label">Días Restantes:</span><span class="value">${reminderDays} días</span></div>
+              <div class="row"><span class="label">Client Name:</span><span class="value">${clientName}</span></div>
+              <div class="row"><span class="label">Policy Line / Type:</span><span class="value">${pol.policy_type}</span></div>
+              <div class="row"><span class="label">Policy Number:</span><span class="value">${pol.policy_number || 'N/A'}</span></div>
+              <div class="row"><span class="label">Writing Company / Carrier:</span><span class="value">${carrierName}</span></div>
+              <div class="row"><span class="label">Effective Date:</span><span class="value">${formattedEffectiveDate}</span></div>
+              <div class="row"><span class="label">Expiration Date:</span><span class="value" style="color:#dc2626;">${formattedExpDate}</span></div>
+              <div class="row"><span class="label">Days Remaining:</span><span class="value">${reminderDays} days</span></div>
+              <div class="row"><span class="label">Status:</span><span class="value">${pol.status}</span></div>
             </div>
 
             <div style="text-align: center;">
-              <a href="${policyUrl}" class="btn">Abrir Póliza en SmarTrack</a>
+              <a href="${policyUrl}" class="btn">View Policy in SmarTrack CRM</a>
             </div>
 
             <div class="footer">
-              Este es un aviso automático generado por SmarTrack CRM.<br>
-              © ${new Date().getFullYear()} SmarTrack CRM. Todos los derechos reservados.
+              Automated notification generated by SmarTrack CRM.<br>
+              © ${new Date().getFullYear()} SmarTrack CRM. All rights reserved.
             </div>
           </div>
         </body>
         </html>
       `;
 
-      const textBody = `Recordatorio de Vencimiento de Póliza (${reminderDays} días)\n\nEstimado/a ${agentName},\nLa póliza de ${clientName} (${pol.policy_type} #${pol.policy_number || 'N/A'}) vence el ${formattedExpDate}.\n\nAbrir en SmarTrack: ${policyUrl}`;
+      const textBody = `${isTestMode ? '[TEST MODE] Original Recipient: ' + agentEmail + '\n\n' : ''}P&C Policy Expiration Reminder (${reminderDays} Days Remaining)\n\nDear ${agentName},\nThe policy for ${clientName} (${pol.policy_type} #${pol.policy_number || 'N/A'}) with ${carrierName} expires on ${formattedExpDate}.\n\nView Policy in SmarTrack CRM: ${policyUrl}`;
 
       // 10. INVOKE RESEND REST API
       const resendRes = await fetch('https://api.resend.com/emails', {
@@ -364,7 +389,7 @@ Deno.serve(async (req: Request) => {
         },
         body: JSON.stringify({
           from: `${fromName} <${fromEmail}>`,
-          to: [agentEmail],
+          to: [targetRecipientEmail],
           subject,
           html: htmlBody,
           text: textBody,
@@ -388,7 +413,8 @@ Deno.serve(async (req: Request) => {
         processedList.push({
           policy_id: pol.id,
           reminder_days: reminderDays,
-          recipient: maskEmail(agentEmail),
+          recipient: maskEmail(targetRecipientEmail),
+          original_agent_email: isTestMode ? maskEmail(agentEmail) : undefined,
           status: 'sent',
           message_id: resendJson.id,
         });
@@ -419,6 +445,8 @@ Deno.serve(async (req: Request) => {
         success: true,
         execution_date_ny: nyTodayStr,
         dry_run: isDryRun,
+        test_mode: isTestMode,
+        test_email: isTestMode ? testEmailEnv : null,
         summary: {
           total_eligible: (eligiblePolicies || []).length,
           sent: sentCount,

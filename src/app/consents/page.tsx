@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
+import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import ConsentFilters, { EMPTY_FILTERS, hasActiveFilters, type FilterState } from '@/components/consents/ConsentFilters';
 import ConsentStats from '@/components/consents/ConsentStats';
 import ConsentTable from '@/components/consents/ConsentTable';
@@ -234,7 +235,7 @@ export default function ConsentsDashboardPage() {
     const { row, tab } = detail;
     return (
       <DashboardLayout>
-        <div className="space-y-4 max-w-4xl">
+        <CrmPageContainer>
           <button
             type="button"
             onClick={() => setDetail(null)}
@@ -300,7 +301,7 @@ export default function ConsentsDashboardPage() {
               <ConsentAuditTrail requestId={row.id} />
             </div>
           )}
-        </div>
+        </CrmPageContainer>
       </DashboardLayout>
     );
   }
@@ -308,7 +309,7 @@ export default function ConsentsDashboardPage() {
   // ---- Dashboard --------------------------------------------------------
   return (
     <DashboardLayout>
-      <div className="space-y-5 max-w-[1600px]">
+      <CrmPageContainer>
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
           <div>
@@ -400,7 +401,7 @@ export default function ConsentsDashboardPage() {
           total={total}
           onPageChange={setPage}
         />
-      </div>
+      </CrmPageContainer>
 
       {delivery && (
         <DeliveryDialog

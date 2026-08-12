@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
+import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import { supabase } from '@/lib/supabaseClient';
 import { formatDateTimeMMDDYYYY } from '@/lib/formatters/date';
 import { formatUSPhone } from '@/lib/formatters/phone';
@@ -13,12 +14,12 @@ import { getAssignedAgentDisplay } from '@/lib/auth/agentDisplay';
 
 interface Client {
   id: string;
-  agent_id: string;
+  agent_id?: string;
   full_name: string;
-  agency_name: string;
-  address: string;
-  email: string;
-  phone: string;
+  agency_name?: string | null;
+  address?: string;
+  email?: string;
+  phone?: string;
   created_at: string;
   updated_at: string;
   policies?: { id: string }[];
@@ -37,7 +38,6 @@ export default function ClientsPage() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
   const [formName, setFormName] = useState('');
-  const [formAgency, setFormAgency] = useState('');
   const [formAddress, setFormAddress] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
@@ -48,39 +48,36 @@ export default function ClientsPage() {
   // Load clients and current user
   const loadClients = async () => {
     try {
-      setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        console.log('[NavTrace]', {
-          source: 'ClientsPage loadClients',
-          event: 'USER_NULL',
-          currentPath: typeof window !== 'undefined' ? window.location.pathname : '/clients',
-          target: 'none',
-          reason: 'User null during client data load; skipping router.push to prevent tab-switch redirect',
-        });
-        setLoading(false);
+        router.push('/login');
         return;
       }
       setCurrentUser(user);
 
-      // Fetch clients with their policies (to calculate policy count)
+      // Simple RLS query: active clients created by or accessible to current user
       const { data, error } = await supabase
         .from('clients')
-        .select('*, policies(id)')
-        .order('full_name', { ascending: true });
+        .select(`
+          id,
+          agent_id,
+          full_name,
+          address,
+          email,
+          phone,
+          created_at,
+          updated_at,
+          policies (
+            id,
+            status
+          )
+        `)
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      // Scoped P&C filter: Amanda/Laura only see non-owned shared clients if they have at least 1 P&C policy
-      const pcFilteredData = (data || []).filter((client: any) => {
-        if (client.agent_id === user.id) return true;
-        const hasPcPolicy = Array.isArray(client.policies) && client.policies.length > 0;
-        return hasPcPolicy;
-      });
-
-      setClients(pcFilteredData);
+      setClients(data || []);
     } catch (err: any) {
-      console.error('Error fetching clients:', err);
+      console.error('Error loading clients:', err);
     } finally {
       setLoading(false);
     }
@@ -90,21 +87,22 @@ export default function ClientsPage() {
     loadClients();
   }, []);
 
-  // Filter clients by search query
-  const filteredClients = clients.filter((client) => {
-    const query = searchQuery.toLowerCase();
-    return (
-      client.full_name?.toLowerCase().includes(query) ||
-      client.email?.toLowerCase().includes(query) ||
-      client.phone?.toLowerCase().includes(query)
+  // Filter clients client-side by searchQuery
+  const filteredClients = useMemo(() => {
+    if (!searchQuery.trim()) return clients;
+    const q = searchQuery.toLowerCase().trim();
+    return clients.filter(c =>
+      (c.full_name && c.full_name.toLowerCase().includes(q)) ||
+      (c.email && c.email.toLowerCase().includes(q)) ||
+      (c.phone && c.phone.toLowerCase().includes(q)) ||
+      (c.address && c.address.toLowerCase().includes(q))
     );
-  });
+  }, [clients, searchQuery]);
 
-  // Open modals
+  // Open Add modal
   const handleOpenAddModal = () => {
     setFormError(null);
     setFormName('');
-    setFormAgency('');
     setFormAddress('');
     setFormEmail('');
     setFormPhone('');
@@ -116,7 +114,6 @@ export default function ClientsPage() {
     setFormError(null);
     setSelectedClient(client);
     setFormName(client.full_name || '');
-    setFormAgency(client.agency_name || '');
     setFormAddress(client.address || '');
     setFormEmail(client.email || '');
     setFormPhone(client.phone || '');
@@ -141,7 +138,6 @@ export default function ClientsPage() {
         .insert({
           agent_id: currentUser.id,
           full_name: formName.trim(),
-          agency_name: formAgency.trim() || null,
           address: formAddress.trim() || null,
           email: formEmail.trim() || null,
           phone: formPhone.trim() || null,
@@ -178,7 +174,6 @@ export default function ClientsPage() {
         .from('clients')
         .update({
           full_name: formName.trim(),
-          agency_name: formAgency.trim() || null,
           address: formAddress.trim() || null,
           email: formEmail.trim() || null,
           phone: formPhone.trim() || null,
@@ -199,7 +194,7 @@ export default function ClientsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 max-w-7xl mx-auto">
+      <CrmPageContainer>
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -336,7 +331,7 @@ export default function ClientsPage() {
             </div>
           </div>
         )}
-      </div>
+      </CrmPageContainer>
 
       {/* Policy-First New Client Creation Wizard Modal */}
       <NewClientWizardModal
@@ -383,16 +378,7 @@ export default function ClientsPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Agency Name</label>
-                <input
-                  type="text"
-                  value={formAgency}
-                  onChange={(e) => setFormAgency(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                  placeholder="e.g. Summit Insurance"
-                />
-              </div>
+
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Email Address</label>

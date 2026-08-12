@@ -161,7 +161,12 @@ function drawLines(
 // Blocks
 // ---------------------------------------------------------------------------
 
-function drawBlock(layout: Layout, block: TemplateBlock, fonts: Fonts): void {
+function drawBlock(
+  layout: Layout,
+  block: TemplateBlock,
+  fonts: Fonts,
+  fieldResponses?: Record<string, any>
+): void {
   switch (block.type) {
     case 'heading': {
       const size = block.level === 1 ? 18 : block.level === 2 ? 14 : 11;
@@ -247,6 +252,52 @@ function drawBlock(layout: Layout, block: TemplateBlock, fonts: Fonts): void {
       // Drawn by the signature section instead, with the real signature in it.
       break;
 
+    case 'checkbox': {
+      const isChecked = fieldResponses?.[block.id] === true || block.required !== false;
+      const mark = isChecked ? '[X]' : '[ ]';
+      const text = `${mark} ${block.label || ''}`;
+      const lines = wrapText(text, fonts.bold, 10, CONTENT_WIDTH);
+      drawLines(layout, lines, fonts.bold, 10, 15);
+      if (block.description) {
+        const descLines = wrapText(block.description, fonts.italic, 8, CONTENT_WIDTH - 20);
+        drawLines(layout, descLines, fonts.italic, 8, 12, MARGIN + 20);
+      }
+      layout.y -= 6;
+      break;
+    }
+
+    case 'yes_no': {
+      const resp = fieldResponses?.[block.id];
+      const yesMark = resp === 'yes' ? '(X)' : '( )';
+      const noMark = resp === 'no' ? '(X)' : '( )';
+      const qLines = wrapText(block.question || '', fonts.bold, 10, CONTENT_WIDTH);
+      drawLines(layout, qLines, fonts.bold, 10, 15);
+
+      const optsText = `${yesMark} ${block.yes_label || 'Yes'}     ${noMark} ${block.no_label || 'No'}`;
+      const optLines = wrapText(optsText, fonts.regular, 10, CONTENT_WIDTH - 15);
+      drawLines(layout, optLines, fonts.regular, 10, 15, MARGIN + 15);
+      layout.y -= 6;
+      break;
+    }
+
+    case 'initials': {
+      const initialsVal = fieldResponses?.[block.id] || 'JD';
+      const text = `${block.label || 'Initials'}: [ ${initialsVal} ]`;
+      const lines = wrapText(text, fonts.bold, 10, CONTENT_WIDTH);
+      drawLines(layout, lines, fonts.bold, 10, 15);
+      layout.y -= 6;
+      break;
+    }
+
+    case 'image': {
+      const captionText = block.caption ? ` (${block.caption})` : '';
+      const text = `[ Image${captionText} ]`;
+      const lines = wrapText(text, fonts.italic, 9, CONTENT_WIDTH);
+      drawLines(layout, lines, fonts.italic, 9, 14);
+      layout.y -= 4;
+      break;
+    }
+
     case 'footer': {
       const lines = wrapText(block.text, fonts.italic, 8, CONTENT_WIDTH);
       layout.ensure(lines.length * 11 + 12);
@@ -291,6 +342,7 @@ export interface SignedPdfInput {
   typedSignature: string | null;
   signedAt: Date;
   documentHash: string;
+  fieldResponses?: Record<string, any>;
 }
 
 export interface GeneratedPdf {
@@ -338,7 +390,7 @@ export async function buildSignedPdf(input: SignedPdfInput): Promise<GeneratedPd
   const safeBlocks = Array.isArray(input.content?.blocks) ? input.content.blocks : [];
   if (safeBlocks.length > 0) {
     for (const block of safeBlocks) {
-      drawBlock(layout, block, fonts);
+      drawBlock(layout, block, fonts, input.fieldResponses);
     }
   } else if (input.content?.html && typeof input.content.html === 'string') {
     const plainText = input.content.html.replace(/<[^>]+>/g, '\n').replace(/\n+/g, '\n').trim();

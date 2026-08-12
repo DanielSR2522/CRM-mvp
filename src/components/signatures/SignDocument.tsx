@@ -45,6 +45,7 @@ export default function SignDocument({
   const [drawnSignature, setDrawnSignature] = useState<string | null>(null);
   const [typedSignature, setTypedSignature] = useState('');
   const [consentAccepted, setConsentAccepted] = useState(false);
+  const [fieldResponses, setFieldResponses] = useState<Record<string, any>>({});
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,13 +53,44 @@ export default function SignDocument({
   const [confirmDecline, setConfirmDecline] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
 
+  const handleFieldResponseChange = (elementId: string, value: any) => {
+    setFieldResponses((prev) => ({
+      ...prev,
+      [elementId]: value,
+    }));
+  };
+
   const hasSignature = method === 'draw' ? Boolean(drawnSignature) : typedSignature.trim().length > 0;
   const canSign = consentAccepted && hasSignature && !submitting;
 
   const submit = async () => {
     if (!canSign) return;
-    setSubmitting(true);
     setError(null);
+
+    // Validate interactive document fields
+    const blocks = content?.blocks || [];
+    for (const b of blocks) {
+      if (b.type === 'checkbox' && b.required !== false) {
+        if (fieldResponses[b.id] !== true) {
+          setError(`Please confirm required check: "${b.label}"`);
+          return;
+        }
+      } else if (b.type === 'yes_no' && b.required !== false) {
+        const val = fieldResponses[b.id];
+        if (val !== 'yes' && val !== 'no') {
+          setError(`Please answer required question: "${b.question}"`);
+          return;
+        }
+      } else if (b.type === 'initials' && b.required !== false) {
+        const val = (fieldResponses[b.id] || '').trim();
+        if (!val) {
+          setError(`Please provide your initials for: "${b.label}"`);
+          return;
+        }
+      }
+    }
+
+    setSubmitting(true);
 
     try {
       const response = await fetch(`/api/public-signatures/${token}/sign`, {
@@ -70,6 +102,7 @@ export default function SignDocument({
           typedSignature: method === 'typed' ? typedSignature.trim() : undefined,
           consentAccepted,
           consentText,
+          fieldResponses,
         }),
       });
 
@@ -151,7 +184,12 @@ export default function SignDocument({
     <div className="space-y-5">
       {/* Document */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-8 shadow-sm">
-        <PublicDocumentViewer content={content} title={title} />
+        <PublicDocumentViewer
+          content={content}
+          title={title}
+          fieldResponses={fieldResponses}
+          onFieldResponseChange={handleFieldResponseChange}
+        />
       </div>
 
       {/* Signing panel */}

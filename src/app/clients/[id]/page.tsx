@@ -4,6 +4,7 @@ import React, { useState, useEffect, use, useRef, useCallback, Suspense } from '
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
+import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
 import LifePolicyTab from '@/components/life/LifePolicyTab';
@@ -11,6 +12,7 @@ import UnifiedNotesManager from '@/components/notes/UnifiedNotesManager';
 import { getAssignedAgentDisplay } from '@/lib/auth/agentDisplay';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
+import { resolvePolicyAddress } from '@/utils/addressUtils';
 import { formatDateMMDDYYYY, formatDateTimeMMDDYYYY, isoDateToMMDDYYYY } from '@/lib/formatters/date';
 import FileDropzone from '@/components/ui/FileDropzone';
 import DatePicker from '@/components/ui/DatePicker';
@@ -27,6 +29,7 @@ import SSNInput from '@/components/common/SSNInput';
 import PhoneInput from '@/components/common/PhoneInput';
 import { formatSSN } from '@/lib/formatters/ssn';
 import { formatUSPhone } from '@/lib/formatters/phone';
+import { formatEIN } from '@/lib/formatters/ein';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 import { deleteClientSecure, getClientDeletionSummaryAction, type ClientDeletionSummary } from '@/app/actions/deleteClientAction';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
@@ -46,6 +49,8 @@ interface Client {
   id: string;
   agent_id: string;
   full_name: string;
+  client_type?: string | null;
+  ein?: string | null;
   agency_name: string | null;
   address: string | null;
   email: string | null;
@@ -94,6 +99,10 @@ interface Policy {
   policy_payment_frequency?: string | null;
   billing_type?: string | null;
   policy_ownership_type?: 'personal' | 'company' | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
   linkedPersonalClient?: {
     id: string;
     full_name: string;
@@ -259,6 +268,137 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('Agent');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [agentProfile, setAgentProfile] = useState<AgentProfile | null>(null);
+
+  // Linked Company Policies & Relationship state
+  const [linkedCompanyPolicies, setLinkedCompanyPolicies] = useState<any[]>([]);
+  const [linkedCompanyProfiles, setLinkedCompanyProfiles] = useState<any[]>([]);
+  const [linkedPersonalContact, setLinkedPersonalContact] = useState<any | null>(null);
+
+  // Company Search & Link States (Personal Profile Left Sidebar)
+  const [companySearchQuery, setCompanySearchQuery] = useState('');
+  const [companySearchResults, setCompanySearchResults] = useState<any[]>([]);
+  const [searchingCompanies, setSearchingCompanies] = useState(false);
+  const [companySearchError, setCompanySearchError] = useState<string | null>(null);
+  const [linkingCompanyId, setLinkingCompanyId] = useState<string | null>(null);
+  const [linkSuccessMsg, setLinkSuccessMsg] = useState<string | null>(null);
+
+  // Company Search Handler for Left Sidebar
+  const handleCompanySearchChange = useCallback(async (query: string) => {
+    setCompanySearchQuery(query);
+    setCompanySearchError(null);
+    setLinkSuccessMsg(null);
+
+    const q = query.trim();
+    if (!q) {
+      setCompanySearchResults([]);
+      setSearchingCompanies(false);
+      return;
+    }
+
+    try {
+      setSearchingCompanies(true);
+
+      // Query Company Clients
+      const { data: compClients, error: compErr } = await supabase
+        .from('clients')
+        .select('id, full_name, agency_name, email, phone, ein, client_type')
+        .eq('client_type', 'company')
+        .or(`full_name.ilike.%${q}%,agency_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,ein.ilike.%${q}%`)
+        .limit(10);
+
+      if (compErr) throw compErr;
+
+      const foundCompanies = compClients || [];
+      if (foundCompanies.length === 0) {
+        setCompanySearchResults([]);
+        return;
+      }
+
+      const compIds = foundCompanies.map(c => c.id);
+
+      // Fetch existing relationships for these companies
+      const { data: relsData } = await supabase
+        .from('client_company_relationships')
+        .select('id, company_client_id, personal_client_id')
+        .in('company_client_id', compIds);
+
+      const relsMap: { [companyId: string]: string } = {};
+      (relsData || []).forEach((r: any) => {
+        relsMap[r.company_client_id] = r.personal_client_id;
+      });
+
+      const formattedResults = foundCompanies.map(comp => {
+        const linkedPersonalId = relsMap[comp.id];
+        let linkStatus: 'current' | 'other' | 'available' = 'available';
+        if (linkedPersonalId) {
+          linkStatus = linkedPersonalId === clientId ? 'current' : 'other';
+        }
+        return {
+          ...comp,
+          linkStatus
+        };
+      });
+
+      setCompanySearchResults(formattedResults);
+    } catch (err: any) {
+      console.error('Error searching company clients:', err);
+      setCompanySearchError(err?.message || 'Failed to search companies.');
+      setCompanySearchResults([]);
+    } finally {
+      setSearchingCompanies(false);
+    }
+  }, [clientId]);
+
+  // Link Company Handler
+  const handleLinkCompany = async (company: any) => {
+    if (!isValidUuid(clientId) || !company?.id) return;
+    try {
+      setLinkingCompanyId(company.id);
+      setCompanySearchError(null);
+      setLinkSuccessMsg(null);
+
+      // 1. Double check existing link to prevent duplicates or race condition
+      const { data: existingRel } = await supabase
+        .from('client_company_relationships')
+        .select('id, personal_client_id')
+        .eq('company_client_id', company.id)
+        .maybeSingle();
+
+      if (existingRel) {
+        if (existingRel.personal_client_id === clientId) {
+          setCompanySearchError('This company is already linked to this profile.');
+        } else {
+          setCompanySearchError('This company is already linked to another personal client.');
+        }
+        return;
+      }
+
+      // 2. Insert relationship
+      const { error: insertErr } = await supabase
+        .from('client_company_relationships')
+        .insert({
+          company_client_id: company.id,
+          personal_client_id: clientId,
+          created_at: new Date().toISOString(),
+        });
+
+      if (insertErr) throw insertErr;
+
+      // 3. Clear search and refresh sidebar & overview
+      setCompanySearchQuery('');
+      setCompanySearchResults([]);
+      setLinkSuccessMsg(`Linked ${company.agency_name || company.full_name} successfully!`);
+      setTimeout(() => setLinkSuccessMsg(null), 3000);
+
+      await fetchLinkedCompanyPolicies();
+    } catch (err: any) {
+      console.error('Error linking company:', err);
+      setCompanySearchError(err?.message || 'Failed to link company.');
+    } finally {
+      setLinkingCompanyId(null);
+    }
+  };
+  const [loadingLinkedPolicies, setLoadingLinkedPolicies] = useState(false);
 
   // Sub-modules Loading states
   const [loadingPersonal, setLoadingPersonal] = useState(true);
@@ -729,94 +869,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [loadingDeletionSummary, setLoadingDeletionSummary] = useState<boolean>(false);
   const [isDeleteClientModalOpen, setIsDeleteClientModalOpen] = useState(false);
   const [deleteClientError, setDeleteClientError] = useState<string | null>(null);
-  // Build unified consolidated policy summary cards for Overview tab
-  const consolidatedOverviewCards = (() => {
-    const cards: Array<{
-      id: string;
-      businessLine: 'property_casualty' | 'health' | 'life';
-      businessLineLabel: string;
-      policy_type: string;
-      company_name: string;
-      policy_number: string;
-      status: string;
-      effective_date: string | null;
-      expiration_date: string | null;
-      premium: number;
-      targetTab: 'policies' | 'health' | 'life';
-      updated_at: string;
-    }> = [];
 
-    // 1. P&C policies (only active status)
-    (policies || []).forEach((p: any) => {
-      if (p.status === 'Active') {
-        cards.push({
-          id: p.id,
-          businessLine: 'property_casualty',
-          businessLineLabel: 'Property & Casualty',
-          policy_type: p.policy_type || 'P&C Policy',
-          company_name: p.writing_company || p.company_name || 'Carrier Unspecified',
-          policy_number: p.policy_number || 'N/A',
-          status: 'Active',
-          effective_date: p.effective_date || null,
-          expiration_date: p.expiration_date || null,
-          premium: Number(p.total_premium || p.premium || 0),
-          targetTab: 'policies',
-          updated_at: p.updated_at || p.created_at || new Date().toISOString(),
-        });
-      }
-    });
-
-    // 2. Health policies (only if direct client owner)
-    if (!client || client.agent_id === currentUserId) {
-      (healthPoliciesOverview || []).forEach((h: any) => {
-        if (h.active === true) {
-          cards.push({
-            id: h.id,
-            businessLine: 'health',
-            businessLineLabel: 'Health',
-            policy_type: h.plan_name || 'Health Plan',
-            company_name: h.company_2026 || 'Marketplace Carrier',
-            policy_number: h.plan_id || h.application_number || 'N/A',
-            status: 'Active',
-            effective_date: h.effective_date || null,
-            expiration_date: null,
-            premium: Number(h.plan_cost || 0),
-            targetTab: 'health',
-            updated_at: h.updated_at || h.created_at || new Date().toISOString(),
-          });
-        }
-      });
-    }
-
-    // 3. Life policies (only if direct client owner)
-    if (!client || client.agent_id === currentUserId) {
-      (lifePolicies || []).forEach((l: any) => {
-        const prods = l.life_policy_products || [];
-        const qualifyingProd = prods.find(
-          (prod: any) => prod.company && typeof prod.company === 'string' && prod.company.trim().length > 0
-        );
-
-        if (qualifyingProd) {
-          cards.push({
-            id: l.id,
-            businessLine: 'life',
-            businessLineLabel: 'Life Insurance',
-            policy_type: qualifyingProd.product_type || 'Life Policy',
-            company_name: qualifyingProd.company.trim(),
-            policy_number: qualifyingProd.policy_number || 'N/A',
-            status: 'Active',
-            effective_date: qualifyingProd.policy_date || null,
-            expiration_date: null,
-            premium: Number(qualifyingProd.monthly_premium || 0),
-            targetTab: 'life',
-            updated_at: l.updated_at || l.created_at || new Date().toISOString(),
-          });
-        }
-      });
-    }
-
-    return cards.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-  })();
   const [personalForm, setPersonalForm] = useState<ClientPersonalInformation>({
     full_name: '',
     date_of_birth: '',
@@ -875,6 +928,152 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [savingResidence, setSavingResidence] = useState(false);
   const [residenceError, setResidenceError] = useState<string | null>(null);
 
+  const isCompanyClient = Boolean(
+    (client?.client_type === 'company') ||
+    (policies && policies.some((p: any) => p.policy_ownership_type === 'company')) ||
+    (!personalInfo?.date_of_birth && !personalInfo?.ssn && !personalInfo?.gender && !personalInfo?.marital_status && personalInfo?.full_name && personalInfo?.full_name !== client?.full_name)
+  );
+
+  // Build unified consolidated policy summary cards for Overview tab
+  const consolidatedOverviewCards = (() => {
+    const cards: Array<{
+      id: string;
+      businessLine: 'property_casualty' | 'health' | 'life';
+      businessLineLabel: string;
+      policy_type: string;
+      company_name: string;
+      policy_number: string;
+      status: string;
+      effective_date: string | null;
+      expiration_date: string | null;
+      premium: number;
+      effectiveAddress: string;
+      targetTab: 'policies' | 'health' | 'life';
+      updated_at: string;
+      isLinkedCommercial?: boolean;
+      companyName?: string;
+    }> = [];
+
+    // 1. P&C policies (only active status)
+    (policies || []).forEach((p: any) => {
+      if (p.status === 'Active') {
+        const effectiveAddress = resolvePolicyAddress(
+          { address: p.address, city: p.city, state: p.state, zip_code: p.zip_code },
+          residenceInfo,
+          client
+        );
+        cards.push({
+          id: p.id,
+          businessLine: 'property_casualty',
+          businessLineLabel: 'Property & Casualty',
+          policy_type: p.policy_type || 'P&C Policy',
+          company_name: p.writing_company || p.company_name || 'Carrier Unspecified',
+          policy_number: p.policy_number || 'N/A',
+          status: 'Active',
+          effective_date: p.effective_date || null,
+          expiration_date: p.expiration_date || null,
+          premium: Number(p.total_premium || p.premium || 0),
+          effectiveAddress,
+          targetTab: 'policies',
+          updated_at: p.updated_at || p.created_at || new Date().toISOString(),
+        });
+      }
+    });
+
+    // 2. Health policies (only if direct client owner)
+    if (!client || client.agent_id === currentUserId) {
+      (healthPoliciesOverview || []).forEach((h: any) => {
+        if (h.active === true) {
+          const effectiveAddress = resolvePolicyAddress(
+            null,
+            residenceInfo,
+            client
+          );
+          cards.push({
+            id: h.id,
+            businessLine: 'health',
+            businessLineLabel: 'Health',
+            policy_type: h.plan_name || 'Health Plan',
+            company_name: h.company_2026 || 'Marketplace Carrier',
+            policy_number: h.plan_id || h.application_number || 'N/A',
+            status: 'Active',
+            effective_date: h.effective_date || null,
+            expiration_date: null,
+            premium: Number(h.plan_cost || 0),
+            effectiveAddress,
+            targetTab: 'health',
+            updated_at: h.updated_at || h.created_at || new Date().toISOString(),
+          });
+        }
+      });
+    }
+
+    // 3. Life policies (only if direct client owner)
+    if (!client || client.agent_id === currentUserId) {
+      (lifePolicies || []).forEach((l: any) => {
+        const prods = l.life_policy_products || [];
+        const qualifyingProd = prods.find(
+          (prod: any) => prod.company && typeof prod.company === 'string' && prod.company.trim().length > 0
+        );
+
+        if (qualifyingProd) {
+          const effectiveAddress = resolvePolicyAddress(
+            null,
+            residenceInfo,
+            client
+          );
+          cards.push({
+            id: l.id,
+            businessLine: 'life',
+            businessLineLabel: 'Life Insurance',
+            policy_type: qualifyingProd.product_type || 'Life Policy',
+            company_name: qualifyingProd.company.trim(),
+            policy_number: qualifyingProd.policy_number || 'N/A',
+            status: 'Active',
+            effective_date: qualifyingProd.policy_date || null,
+            expiration_date: null,
+            premium: Number(qualifyingProd.monthly_premium || 0),
+            effectiveAddress,
+            targetTab: 'life',
+            updated_at: l.updated_at || l.created_at || new Date().toISOString(),
+          });
+        }
+      });
+    }
+
+    // 4. Linked Company Commercial P&C policies (surfaced automatically on Personal Client Overview)
+    if (!isCompanyClient && linkedCompanyPolicies && linkedCompanyPolicies.length > 0) {
+      linkedCompanyPolicies.forEach((p: any) => {
+        const effectiveAddress = resolvePolicyAddress(
+          { address: p.address, city: p.city, state: p.state, zip_code: p.zip_code },
+          residenceInfo,
+          client
+        );
+        const compProfile = (linkedCompanyProfiles || []).find((c: any) => c.id === p.client_id);
+        const resolvedCompanyName = compProfile?.agency_name || compProfile?.full_name || p.client?.agency_name || p.client?.full_name || 'Linked Company';
+        cards.push({
+          id: p.id,
+          businessLine: 'property_casualty',
+          businessLineLabel: 'Commercial P&C (Linked)',
+          policy_type: p.policy_type || 'Commercial P&C',
+          company_name: p.writing_company || p.company_name || 'Carrier Unspecified',
+          policy_number: p.policy_number || 'N/A',
+          status: p.status || 'Active',
+          effective_date: p.effective_date || null,
+          expiration_date: p.expiration_date || null,
+          premium: Number(p.total_premium || p.premium || 0),
+          effectiveAddress,
+          targetTab: 'policies',
+          updated_at: p.updated_at || p.created_at || new Date().toISOString(),
+          isLinkedCommercial: true,
+          companyName: resolvedCompanyName
+        });
+      });
+    }
+
+    return cards.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  })();
+
   // Google Autocomplete States
   const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false);
   const [googleMapsWarning, setGoogleMapsWarning] = useState<string | null>(null);
@@ -912,27 +1111,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [formStatus, setFormStatus] = useState<'Active' | 'Cancelled' | 'Expired' | 'Pending' | ''>('Active');
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-
-  // Company Policy Search & Linking state
-  const [companySearchQuery, setCompanySearchQuery] = useState('');
-  const [companySearchResults, setCompanySearchResults] = useState<any[]>([]);
-  const [companyLinksMap, setCompanyLinksMap] = useState<Record<string, string>>({});
-  const [companySearchLoading, setCompanySearchLoading] = useState(false);
-  const [companySearchError, setCompanySearchError] = useState<string | null>(null);
-  const [hasSearchedCompany, setHasSearchedCompany] = useState(false);
-  const [companySearchSuccess, setCompanySearchSuccess] = useState<string | null>(null);
-
-  // Linking state
-  const [selectedCompanyPolicy, setSelectedCompanyPolicy] = useState<any | null>(null);
-  const [selectedCompanyProfile, setSelectedCompanyProfile] = useState<any | null>(null);
-  const [isConfirmLinkOpen, setIsConfirmLinkOpen] = useState(false);
-  const [linkedPersonRole, setLinkedPersonRole] = useState<'main_applicant' | 'co_applicant'>('main_applicant');
-  const [linkingPolicy, setLinkingPolicy] = useState(false);
-  const [linkError, setLinkError] = useState<string | null>(null);
-
-  // Linked Company Policies state
-  const [linkedCompanyPolicies, setLinkedCompanyPolicies] = useState<any[]>([]);
-  const [loadingLinkedPolicies, setLoadingLinkedPolicies] = useState(false);
 
   // Unlinking state
   const [selectedUnlinkPolicy, setSelectedUnlinkPolicy] = useState<any | null>(null);
@@ -1044,7 +1222,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   }, [googleMapsLoaded, isEditingResidence]);
 
   // Fetch client details
-  const fetchClientDetails = async () => {
+  const fetchClientDetails = useCallback(async () => {
     try {
       setLoadingClient(true);
       const { data: { session } } = await supabase.auth.getSession();
@@ -1083,10 +1261,10 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     } finally {
       setLoadingClient(false);
     }
-  };
+  }, [clientId, router]);
 
   // Fetch policies
-  const fetchPolicies = async () => {
+  const fetchPolicies = useCallback(async () => {
     try {
       setLoadingPolicies(true);
       if (!isValidUuid(clientId)) {
@@ -1196,7 +1374,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     } finally {
       setLoadingPolicies(false);
     }
-  };
+  }, [clientId]);
 
   // Fetch Health and Life policies for Overview tab
   const fetchOverviewPolicies = useCallback(async () => {
@@ -1424,8 +1602,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
   }, [clientId]);
 
-  // Fetch Residence Information
-  const fetchCoApplicantInformation = async () => {
+  // Fetch Co-Applicant Information
+  const fetchCoApplicantInformation = useCallback(async () => {
     try {
       setLoadingCoApplicant(true);
       if (!isValidUuid(clientId)) {
@@ -1488,7 +1666,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     } finally {
       setLoadingCoApplicant(false);
     }
-  };
+  }, [clientId]);
 
   const fetchResidenceInformation = useCallback(async () => {
     try {
@@ -1540,90 +1718,117 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
   }, [clientId]);
 
-  // Fetch Linked Company Policies
-  const fetchLinkedCompanyPolicies = async () => {
+  // Fetch Linked Company Profiles and their Commercial Policies
+  const fetchLinkedCompanyPolicies = useCallback(async () => {
     try {
       setLoadingLinkedPolicies(true);
       if (!isValidUuid(clientId)) {
         setLinkedCompanyPolicies([]);
+        setLinkedCompanyProfiles([]);
+        setLinkedPersonalContact(null);
         setLoadingLinkedPolicies(false);
         return;
       }
 
-      // 1. Fetch links for this personal client
-      const { data: linksData, error: linksErr } = await supabase
+      // 1. Fetch relationships from client_company_relationships
+      const { data: relData } = await supabase
+        .from('client_company_relationships')
+        .select('id, company_client_id, personal_client_id, relationship_type');
+
+      const companyRels = (relData || []).filter((r: any) => r.personal_client_id === clientId || r.company_client_id === clientId);
+
+      let targetCompanyIds: string[] = [];
+      let targetPersonalClientId: string | null = null;
+
+      companyRels.forEach((r: any) => {
+        if (r.personal_client_id === clientId) {
+          targetCompanyIds.push(r.company_client_id);
+        }
+        if (r.company_client_id === clientId) {
+          targetPersonalClientId = r.personal_client_id;
+        }
+      });
+
+      // Also check legacy personal_commercial_policy_links
+      const { data: legacyLinks } = await supabase
         .from('personal_commercial_policy_links')
-        .select('commercial_policy_id, linked_person_role, created_at')
+        .select('commercial_policy_id, personal_client_id')
         .eq('personal_client_id', clientId);
 
-      if (linksErr) throw linksErr;
-      if (!linksData || linksData.length === 0) {
+      let legacyPolicyIds: string[] = (legacyLinks || []).map((l: any) => l.commercial_policy_id).filter(Boolean);
+
+      // If Personal Client: load linked company profiles & commercial policies
+      if (targetCompanyIds.length > 0 || legacyPolicyIds.length > 0) {
+        let companyProfiles: any[] = [];
+        if (targetCompanyIds.length > 0) {
+          const { data: compsData } = await supabase
+            .from('clients')
+            .select('id, full_name, agency_name, email, phone')
+            .in('id', targetCompanyIds);
+
+          if (compsData) {
+            companyProfiles = compsData;
+          }
+        }
+
+        let loadedPolicies: any[] = [];
+        let orConditions: string[] = [];
+        if (targetCompanyIds.length > 0) {
+          orConditions.push(`client_id.in.(${targetCompanyIds.join(',')})`);
+        }
+        if (legacyPolicyIds.length > 0) {
+          orConditions.push(`id.in.(${legacyPolicyIds.join(',')})`);
+        }
+
+        if (orConditions.length > 0) {
+          const { data: companyPoliciesData } = await supabase
+            .from('policies')
+            .select('*')
+            .or(orConditions.join(','));
+
+          loadedPolicies = companyPoliciesData || [];
+        }
+
+        setLinkedCompanyPolicies(loadedPolicies);
+
+        const profileCards = companyProfiles.map(comp => {
+          const count = loadedPolicies.filter(p => p.client_id === comp.id).length;
+          return {
+            ...comp,
+            policyCount: count
+          };
+        });
+        setLinkedCompanyProfiles(profileCards);
+      } else {
         setLinkedCompanyPolicies([]);
-        return;
+        setLinkedCompanyProfiles([]);
       }
 
-      // 2. Fetch policies for commercial_policy_ids
-      const policyIds = Array.from(new Set(linksData.map((l: any) => l.commercial_policy_id).filter(Boolean)));
-      if (policyIds.length === 0) {
-        setLinkedCompanyPolicies([]);
-        return;
-      }
-
-      const { data: policiesData, error: policiesErr } = await supabase
-        .from('policies')
-        .select('id, client_id, policy_number, policy_type, policy_subtype, company_name, writing_company, effective_date, expiration_date, premium, total_premium, status, policy_ownership_type')
-        .in('id', policyIds);
-
-      if (policiesErr) throw policiesErr;
-
-      // 3. Fetch owning clients details for policy client_ids
-      const clientIds = Array.from(new Set((policiesData || []).map((p: any) => p.client_id).filter(Boolean)));
-      let clientMap: Record<string, any> = {};
-      if (clientIds.length > 0) {
-        const { data: clientsData } = await supabase
+      // If Company Client: load linked personal contact
+      if (targetPersonalClientId) {
+        const { data: persData } = await supabase
           .from('clients')
-          .select('id, full_name, agency_name, email, phone')
-          .in('id', clientIds);
-        if (clientsData) {
-          clientsData.forEach((c: any) => {
-            clientMap[c.id] = c;
-          });
-        }
+          .select('id, full_name, email, phone')
+          .eq('id', targetPersonalClientId)
+          .maybeSingle();
+
+        setLinkedPersonalContact(persData || null);
+      } else {
+        setLinkedPersonalContact(null);
       }
 
-      // 4. Merge links, policies, and client data
-      const linkMapByPolicyId: Record<string, any> = {};
-      linksData.forEach((l: any) => {
-        linkMapByPolicyId[l.commercial_policy_id] = l;
-      });
-
-      const merged: any[] = [];
-      const seenPolicyIds = new Set<string>();
-
-      (policiesData || []).forEach((pol: any) => {
-        if (!seenPolicyIds.has(pol.id)) {
-          seenPolicyIds.add(pol.id);
-          const link = linkMapByPolicyId[pol.id];
-          merged.push({
-            ...pol,
-            link_role: link?.linked_person_role || 'main_applicant',
-            link_created_at: link?.created_at,
-            client: clientMap[pol.client_id] || null,
-          });
-        }
-      });
-
-      setLinkedCompanyPolicies(merged);
     } catch (err: any) {
-      console.error('Error fetching linked company policies:', err);
+      console.error('Error fetching linked company/personal info:', err);
       setLinkedCompanyPolicies([]);
+      setLinkedCompanyProfiles([]);
+      setLinkedPersonalContact(null);
     } finally {
       setLoadingLinkedPolicies(false);
     }
-  };
+  }, [clientId]);
 
   // Fetch Income Information
-  const fetchIncomeInformation = async () => {
+  const fetchIncomeInformation = useCallback(async () => {
     try {
       setLoadingIncome(true);
       if (!isValidUuid(clientId)) {
@@ -1648,166 +1853,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     } finally {
       setLoadingIncome(false);
     }
-  };
-
-  // Search Company Policies (Grouped by Commercial Client Profile)
-  const handleSearchCompany = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setCompanySearchLoading(true);
-    setCompanySearchError(null);
-    setHasSearchedCompany(true);
-
-    try {
-      // 1. Query commercial policies using real table columns only
-      const { data: rawPolicies, error: policiesErr } = await supabase
-        .from('policies')
-        .select('id, client_id, policy_number, policy_type, policy_subtype, company_name, writing_company, status, effective_date, expiration_date, policy_ownership_type')
-        .eq('policy_ownership_type', 'company');
-
-      if (policiesErr) throw policiesErr;
-
-      const policiesList = rawPolicies || [];
-
-      // 2. Load related commercial client details
-      const clientIds = Array.from(new Set(policiesList.map((p: any) => p.client_id).filter(Boolean)));
-      let clientMap: Record<string, any> = {};
-      if (clientIds.length > 0) {
-        const { data: clientsData } = await supabase
-          .from('clients')
-          .select('id, full_name, agency_name, email, phone')
-          .in('id', clientIds);
-        if (clientsData) {
-          clientsData.forEach((c: any) => {
-            clientMap[c.id] = c;
-          });
-        }
-      }
-
-      // 3. Fetch link status from personal_commercial_policy_links for all commercial policies
-      const policyIds = policiesList.map((item: any) => item.id);
-      let linksMap: Record<string, string> = {};
-      if (policyIds.length > 0) {
-        const { data: linksData } = await supabase
-          .from('personal_commercial_policy_links')
-          .select('commercial_policy_id, personal_client_id')
-          .in('commercial_policy_id', policyIds);
-        
-        if (linksData) {
-          linksData.forEach((l: any) => {
-            linksMap[l.commercial_policy_id] = l.personal_client_id;
-          });
-        }
-      }
-
-      // 4. Attach client & link status to each policy, then group by client_id
-      const groupsMap: Record<string, { client: any; policies: any[] }> = {};
-
-      policiesList.forEach((p: any) => {
-        const cid = p.client_id;
-        if (!cid) return;
-        if (!groupsMap[cid]) {
-          groupsMap[cid] = {
-            client: clientMap[cid] || { id: cid, full_name: 'Commercial Client' },
-            policies: []
-          };
-        }
-        groupsMap[cid].policies.push({
-          ...p,
-          linkOwnerId: linksMap[p.id] || null
-        });
-      });
-
-      // 5. Filter matching search query case-insensitively across client & policy fields
-      const q = companySearchQuery.trim().toLowerCase();
-      const groupedResults = Object.values(groupsMap).filter((group: any) => {
-        if (!q) return true;
-        const cName = (group.client?.full_name || '').toLowerCase();
-        const cAgency = (group.client?.agency_name || '').toLowerCase();
-        const cEmail = (group.client?.email || '').toLowerCase();
-        const cPhone = (group.client?.phone || '').toLowerCase();
-        
-        const clientMatches = cName.includes(q) || cAgency.includes(q) || cEmail.includes(q) || cPhone.includes(q);
-        if (clientMatches) return true;
-
-        // Check if any policy in group matches
-        return group.policies.some((p: any) => {
-          const pNum = (p.policy_number || '').toLowerCase();
-          const pType = (p.policy_type || '').toLowerCase();
-          const pSubtype = (p.policy_subtype || '').toLowerCase();
-          const pCompany = (p.company_name || p.writing_company || '').toLowerCase();
-          return pNum.includes(q) || pType.includes(q) || pSubtype.includes(q) || pCompany.includes(q);
-        });
-      });
-
-      setCompanySearchResults(groupedResults);
-      setCompanyLinksMap(linksMap);
-    } catch (err: any) {
-      console.error('Error searching company policies:', err);
-      setCompanySearchError(err?.message || 'Error searching company policies');
-      setCompanySearchResults([]);
-    } finally {
-      setCompanySearchLoading(false);
-    }
-  };
-
-  // Confirm and Execute Link Commercial Client Profile & Eligible Policies
-  const handleConfirmLinkPolicy = async () => {
-    const profile = selectedCompanyProfile;
-    if (!profile || !profile.policies?.length) return;
-    setLinkingPolicy(true);
-    setLinkError(null);
-    setCompanySearchSuccess(null);
-
-    try {
-      const eligiblePolicies = profile.policies.filter((p: any) => !p.linkOwnerId);
-      if (eligiblePolicies.length === 0) {
-        setLinkError('No available policies to link in this profile.');
-        setLinkingPolicy(false);
-        return;
-      }
-
-      // Controlled execution tracking success/failure for each eligible policy
-      const results = await Promise.allSettled(
-        eligiblePolicies.map((p: any) =>
-          supabase.rpc('link_commercial_policy', {
-            p_personal_client_id: clientId,
-            p_commercial_policy_id: p.id,
-            p_linked_person_role: linkedPersonRole,
-          })
-        )
-      );
-
-      let succeededCount = 0;
-      let failedCount = 0;
-
-      results.forEach((res) => {
-        if (res.status === 'fulfilled' && !res.value.error && res.value.data?.success !== false) {
-          succeededCount++;
-        } else {
-          failedCount++;
-        }
-      });
-
-      setIsConfirmLinkOpen(false);
-      setSelectedCompanyProfile(null);
-
-      if (failedCount === 0) {
-        setCompanySearchSuccess(`Successfully linked ${succeededCount} commercial policy/policies!`);
-      } else if (succeededCount > 0) {
-        setCompanySearchSuccess(`Linked ${succeededCount} policy/policies. ${failedCount} failed.`);
-      } else {
-        setCompanySearchError(`Failed to link eligible policies.`);
-      }
-
-      await fetchLinkedCompanyPolicies();
-      await handleSearchCompany();
-    } catch (err: any) {
-      console.error('Error linking company profile:', err);
-      setLinkError(err?.message || 'Failed to link company profile.');
-    } finally {
-      setLinkingPolicy(false);
-    }
-  };
+  }, [clientId]);
 
   // Unlink Company Policy
   const handleConfirmUnlinkPolicy = async () => {
@@ -1828,9 +1874,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       setSelectedUnlinkPolicy(null);
       setCompanyUnlinkSuccess('Company policy unlinked successfully.');
       await fetchLinkedCompanyPolicies();
-      if (companySearchQuery.trim()) {
-        await handleSearchCompany();
-      }
     } catch (err: any) {
       console.error('Error unlinking company policy:', err);
       setUnlinkError(err?.message || 'Failed to unlink company policy.');
@@ -1890,7 +1933,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   }, [policies]);
 
   // Fetch timeline events across all implemented modules
-  const fetchTimelineEvents = async () => {
+  const fetchTimelineEvents = useCallback(async () => {
     try {
       setEventsLoading(true);
       setEventsError(null);
@@ -2156,7 +2199,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     } finally {
       setEventsLoading(false);
     }
-  };
+  }, [clientId]);
 
   useEffect(() => {
     if (!isValidUuid(clientId)) return;
@@ -2165,20 +2208,18 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     fetchLinkedCompanyPolicies();
     fetchOverviewPolicies();
     fetchPersonalInformation();
+    fetchCoApplicantInformation();
     fetchResidenceInformation();
-  }, [clientId]);
+  }, [clientId, fetchClientDetails, fetchPolicies, fetchLinkedCompanyPolicies, fetchOverviewPolicies, fetchPersonalInformation, fetchCoApplicantInformation, fetchResidenceInformation]);
 
   useEffect(() => {
     if (!isValidUuid(clientId)) return;
     if (activeTab === 'timeline') {
       fetchTimelineEvents();
-    } else if (activeTab === 'overview') {
-      fetchOverviewPolicies();
     } else if (activeTab === 'personal-info') {
       fetchIncomeInformation();
-      fetchCoApplicantInformation();
     }
-  }, [activeTab, clientId]);
+  }, [activeTab, clientId, fetchTimelineEvents, fetchIncomeInformation]);
 
   const cleanCoApplicantPayload = (form: CoApplicantInformation) => {
     const cleaned = { ...form } as any;
@@ -2717,14 +2758,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     return matchesSearch && matchesStatus && matchesLob && matchesCompany;
   });
 
-  const isCompanyClient = Boolean(
-    (policies && policies.some((p: any) => p.policy_ownership_type === 'company')) ||
-    (!personalInfo?.date_of_birth && !personalInfo?.ssn && !personalInfo?.gender && !personalInfo?.marital_status && personalInfo?.full_name && personalInfo?.full_name !== client?.full_name)
-  );
-
   return (
     <DashboardLayout>
-      <div className="w-full space-y-6">
+      <CrmPageContainer>
         {/* Navigation Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <Link href="/clients" className="hover:text-blue-600 transition-colors">Clients</Link>
@@ -2793,12 +2829,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Assigned Agent</span>
                   <span className="text-sm font-semibold text-slate-800 block mt-1">{getAgentDisplayName()}</span>
                 </div>
-                {client?.agency_name && (
-                  <div>
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Agency</span>
-                    <span className="text-sm font-semibold text-slate-800 block mt-1">{client.agency_name}</span>
-                  </div>
-                )}
+
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email Address</span>
                   {(() => {
@@ -2864,97 +2895,61 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 {personalInfo?.has_co_applicant === true && (
                   <div className="border-t border-slate-100 pt-4 space-y-3">
                     <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Co-Applicant</span>
-                    <div>
-                      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Name</span>
-                      <span className="text-sm font-semibold text-slate-800 block mt-0.5">{coApplicantInfo?.full_name || '-'}</span>
-                    </div>
-                    <div>
-                      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email</span>
-                      <a href={coApplicantInfo?.primary_email ? `mailto:${coApplicantInfo.primary_email}` : '#'} className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline block mt-0.5 truncate">
-                        {coApplicantInfo?.primary_email || '-'}
-                      </a>
-                    </div>
-                    <div>
-                      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Phone</span>
-                      <a href={coApplicantInfo?.primary_phone ? `tel:${coApplicantInfo.primary_phone}` : '#'} className="text-sm font-semibold text-slate-800 hover:text-blue-600 block mt-0.5">
-                        {coApplicantInfo?.primary_phone || '-'}
-                      </a>
-                    </div>
-                  </div>
-                )}
-
-                {/* Linked Company Policies Block in Sidebar */}
-                {linkedCompanyPolicies.length > 0 && (
-                  <div className="border-t border-slate-100 pt-4 space-y-3">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Linked Company Policies</span>
-                    <div className="space-y-2">
-                      {linkedCompanyPolicies.map((linkedPol) => (
-                        <div key={linkedPol.id} className="bg-rose-600 border border-rose-700 rounded-xl p-3 text-white space-y-1.5 shadow-sm">
-                          <div className="flex items-start justify-between gap-1">
-                            <h5 className="font-extrabold text-white text-xs truncate">{linkedPol.client?.full_name || '-'}</h5>
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-white/20 text-white flex-shrink-0">
-                              {linkedPol.link_role === 'co_applicant' ? 'Co-App' : 'Main App'}
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-rose-100 space-y-0.5">
-                            <div><span className="text-rose-200">Policy #:</span> {linkedPol.policy_number || '-'}</div>
-                            <div><span className="text-rose-200">LOB:</span> {linkedPol.policy_type || '-'}</div>
-                          </div>
-                          <div className="pt-1 flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedUnlinkPolicy(linkedPol);
-                                setUnlinkError(null);
-                                setIsConfirmUnlinkOpen(true);
-                              }}
-                              className="text-[10px] font-bold text-white bg-white/20 hover:bg-white/30 border border-white/30 px-2 py-1 rounded-md transition-all shadow-xs"
-                            >
-                              Unlink
-                            </button>
-                            <Link
-                              href={`/clients/${linkedPol.client_id}/policies/${linkedPol.id}`}
-                              className="text-[10px] font-bold text-rose-700 bg-white hover:bg-rose-50 px-2.5 py-1 rounded-md transition-all shadow-xs"
-                            >
-                              View Policy
-                            </Link>
-                          </div>
+                    {loadingCoApplicant && !coApplicantInfo ? (
+                      <div className="animate-pulse space-y-2">
+                        <div className="h-3 bg-slate-100 rounded w-24"></div>
+                        <div className="h-3 bg-slate-100 rounded w-32"></div>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Name</span>
+                          <span className="text-sm font-semibold text-slate-800 block mt-0.5">{coApplicantInfo?.full_name || '-'}</span>
                         </div>
-                      ))}
-                    </div>
+                        <div>
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email</span>
+                          <a href={coApplicantInfo?.primary_email ? `mailto:${coApplicantInfo.primary_email}` : '#'} className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline block mt-0.5 truncate">
+                            {coApplicantInfo?.primary_email || '-'}
+                          </a>
+                        </div>
+                        <div>
+                          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Phone</span>
+                          <a href={coApplicantInfo?.primary_phone ? `tel:${coApplicantInfo.primary_phone}` : '#'} className="text-sm font-semibold text-slate-800 hover:text-blue-600 block mt-0.5">
+                            {coApplicantInfo?.primary_phone || '-'}
+                          </a>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
-                {/* Company Policy Search Block in Sidebar */}
-                {activeTab === 'policies' && (
-                  <div className="border-t border-slate-100 pt-4 space-y-3">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Company Policy Search</span>
-                    <form onSubmit={handleSearchCompany} className="space-y-2">
+                {/* Company Search & Linking Block for Personal Profiles */}
+                {!isCompanyClient && (
+                  <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Link Company</span>
+                    <div className="relative">
                       <input
                         type="text"
                         value={companySearchQuery}
-                        onChange={e => setCompanySearchQuery(e.target.value)}
-                        placeholder="Search policy #, company, agency, email..."
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-800 placeholder-slate-400 text-xs outline-none transition-all"
+                        onChange={(e) => handleCompanySearchChange(e.target.value)}
+                        placeholder="Search companies..."
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none transition-all"
                       />
-                      <button
-                        type="submit"
-                        disabled={companySearchLoading}
-                        className="w-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold px-3 py-2 rounded-xl transition-all shadow-sm disabled:opacity-50 flex items-center justify-center gap-1.5"
-                      >
-                        {companySearchLoading ? (
-                          <>
-                            <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                            </svg>
-                            <span>Searching...</span>
-                          </>
-                        ) : (
-                          'Search'
-                        )}
-                      </button>
-                    </form>
+                      {searchingCompanies && (
+                        <div className="absolute right-2.5 top-2.5">
+                          <svg className="animate-spin h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+
+                    {linkSuccessMsg && (
+                      <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-semibold">
+                        {linkSuccessMsg}
+                      </div>
+                    )}
 
                     {companySearchError && (
                       <div className="p-2 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 text-[11px]">
@@ -2962,109 +2957,117 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       </div>
                     )}
 
-                    {companySearchSuccess && (
-                      <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-700 text-[11px] font-semibold">
-                        {companySearchSuccess}
-                      </div>
-                    )}
-
-                    {companySearchLoading ? (
-                      <div className="flex justify-center items-center py-4">
-                        <svg className="animate-spin h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                      </div>
-                    ) : hasSearchedCompany && companySearchResults.length === 0 ? (
-                      <div className="text-center py-4 bg-slate-50/50 border border-slate-100 rounded-lg">
-                        <p className="text-[11px] text-slate-400 font-medium">No company policies found.</p>
-                      </div>
-                    ) : companySearchResults.length > 0 ? (
-                      <div className="space-y-4 pt-1">
-                        {companySearchResults.map((group) => {
-                          const clientInfo = group.client || {};
-                          const clientNameDisplay = clientInfo.agency_name || clientInfo.full_name || 'Commercial Client';
-                          const contactDisplay = [clientInfo.email, clientInfo.phone].filter(Boolean).join(' • ');
-
-                          const eligibleCount = group.policies.filter((p: any) => !p.linkOwnerId).length;
-
-                          return (
-                            <div key={clientInfo.id} className="bg-slate-50/90 border border-slate-200/80 rounded-xl p-3 space-y-2.5 text-xs shadow-xs">
-                              {/* Group Client Header */}
-                              <div className="border-b border-slate-200/60 pb-2 space-y-0.5">
-                                <span className="text-[9px] font-extrabold text-blue-600 uppercase tracking-wider block">Company / Client</span>
-                                <h5 className="font-extrabold text-slate-900 text-xs">{clientNameDisplay}</h5>
-                                {clientInfo.agency_name && clientInfo.full_name && clientInfo.agency_name !== clientInfo.full_name && (
-                                  <p className="text-[10px] text-slate-500 font-medium">Contact: {clientInfo.full_name}</p>
-                                )}
-                                {contactDisplay && (
-                                  <p className="text-[10px] text-slate-400 font-mono">{contactDisplay}</p>
+                    {companySearchQuery.trim() !== '' && (
+                      <div className="bg-white border border-slate-200 rounded-xl shadow-md p-2 space-y-2 max-h-56 overflow-y-auto">
+                        {companySearchResults.length === 0 && !searchingCompanies ? (
+                          <div className="text-xs text-slate-400 py-2 text-center">No companies found</div>
+                        ) : (
+                          companySearchResults.map((comp) => (
+                            <div key={comp.id} className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors flex items-center justify-between gap-2 border border-slate-100">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold text-slate-800 truncate">{comp.agency_name || comp.full_name}</div>
+                                {(comp.email || comp.phone || comp.ein) && (
+                                  <div className="text-[10px] text-slate-500 truncate">
+                                    {comp.email || comp.phone || (comp.ein ? `EIN: ${comp.ein}` : '')}
+                                  </div>
                                 )}
                               </div>
 
-                              {/* Commercial P&C Policies Group List */}
-                              <div className="space-y-1.5">
-                                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
-                                  Commercial P&C Policies ({group.policies.length})
+                              {comp.linkStatus === 'current' ? (
+                                <span className="text-[10px] font-bold text-slate-400 bg-slate-200 px-2 py-0.5 rounded-md">
+                                  Linked
                                 </span>
-                                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                                  {group.policies.map((p: any) => {
-                                    const linkOwnerId = p.linkOwnerId;
-                                    let badgeLabel = 'Available';
-                                    let badgeStyle = 'bg-emerald-50 text-emerald-700 border-emerald-100';
-
-                                    if (linkOwnerId) {
-                                      if (linkOwnerId === clientId) {
-                                        badgeLabel = 'Linked';
-                                        badgeStyle = 'bg-blue-50 text-blue-700 border-blue-100';
-                                      } else {
-                                        badgeLabel = 'Unavailable';
-                                        badgeStyle = 'bg-rose-50 text-rose-700 border-rose-100 font-bold';
-                                      }
-                                    }
-
-                                    const lobDisplay = p.policy_type ? (p.policy_subtype ? `${p.policy_type} (${p.policy_subtype})` : p.policy_type) : 'Commercial P&C';
-                                    const companyDisplay = p.writing_company || p.company_name || 'Carrier Unspecified';
-
-                                    return (
-                                      <div key={p.id} className="bg-white border border-slate-100 rounded-lg p-2 text-[11px] space-y-1">
-                                        <div className="flex items-center justify-between gap-1">
-                                          <span className="font-extrabold text-slate-800 truncate">{lobDisplay}</span>
-                                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border flex-shrink-0 ${badgeStyle}`}>
-                                            {badgeLabel}
-                                          </span>
-                                        </div>
-                                        <div className="flex justify-between text-slate-500 text-[10px]">
-                                          <span>#{p.policy_number || 'N/A'}</span>
-                                          <span className="truncate max-w-[110px]">{companyDisplay}</span>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                              {/* Profile Action Button */}
-                              <div className="pt-2 border-t border-slate-200/60">
+                              ) : comp.linkStatus === 'other' ? (
+                                <span className="text-[10px] font-bold text-slate-400 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md" title="Linked to another client">
+                                  Unavailable
+                                </span>
+                              ) : (
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setSelectedCompanyProfile(group);
-                                    setLinkedPersonRole('main_applicant');
-                                    setLinkError(null);
-                                    setIsConfirmLinkOpen(true);
-                                  }}
-                                  className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-[11px] font-bold py-1.5 rounded-lg transition-all shadow-xs flex items-center justify-center gap-1"
+                                  disabled={linkingCompanyId === comp.id}
+                                  onClick={() => handleLinkCompany(comp)}
+                                  className="text-[10px] font-bold text-white bg-blue-600 hover:bg-blue-700 active:scale-[0.98] px-2 py-1 rounded-lg transition-all shadow-2xs disabled:opacity-50 flex-shrink-0"
                                 >
-                                  <span>Select Client Profile</span>
-                                  <span className="text-[10px] opacity-90">({eligibleCount} avail)</span>
+                                  {linkingCompanyId === comp.id ? 'Linking...' : 'Link Company'}
                                 </button>
-                              </div>
+                              )}
                             </div>
-                          );
-                        })}
+                          ))
+                        )}
                       </div>
-                    ) : null}
+                    )}
+                  </div>
+                )}
+
+                {/* Persistent LINKED COMPANY Cards in Sidebar */}
+                {!isCompanyClient && (
+                  <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      {linkedCompanyProfiles && linkedCompanyProfiles.length > 1 ? 'Linked Companies' : 'Linked Company'}
+                    </span>
+                    {linkedCompanyProfiles && linkedCompanyProfiles.length > 0 ? (
+                      linkedCompanyProfiles.map((comp) => (
+                        <div key={comp.id} className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 space-y-2">
+                          <div className="font-extrabold text-slate-900 text-sm truncate">{comp.agency_name || comp.full_name}</div>
+                          <div className="text-xs font-semibold text-slate-600">
+                            Commercial P&C Policies: <strong className="text-slate-900 font-extrabold">{comp.policyCount}</strong>
+                          </div>
+                          <Link
+                            href={`/clients/${comp.id}`}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline pt-0.5"
+                          >
+                            View Company Profile
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                            </svg>
+                          </Link>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-xs text-slate-400 italic">
+                        No companies linked.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Persistent LINKED PERSONAL CONTACT Card in Sidebar (for Company Profiles) */}
+                {isCompanyClient && (
+                  <div className="border-t border-slate-100 pt-4 space-y-3">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Linked Personal Contact</span>
+                    {linkedPersonalContact ? (
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 space-y-2">
+                        <div className="font-extrabold text-slate-900 text-sm truncate">{linkedPersonalContact.full_name}</div>
+                        <div className="text-xs text-slate-600 space-y-1">
+                          <div>
+                            <span className="text-slate-400">Email: </span>
+                            {linkedPersonalContact.email ? (
+                              <a href={`mailto:${linkedPersonalContact.email}`} className="text-blue-600 font-semibold hover:underline">
+                                {linkedPersonalContact.email}
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </div>
+                          <div>
+                            <span className="text-slate-400">Phone: </span>
+                            <span className="font-semibold text-slate-800">
+                              {linkedPersonalContact.phone || '—'}
+                            </span>
+                          </div>
+                        </div>
+                        <Link
+                          href={`/clients/${linkedPersonalContact.id}`}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline pt-1"
+                        >
+                          View Client Profile →
+                        </Link>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 font-medium bg-slate-50 border border-slate-150 rounded-xl p-3">
+                        No personal client linked.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -3095,7 +3098,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
                     }`}
                   >
-                    Personal Info
+                    {isCompanyClient ? 'Company Information' : 'Personal Info'}
                   </button>
                   {isLineEnabled('property_casualty') && (
                     <button
@@ -3109,7 +3112,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       Property & Casualty
                     </button>
                   )}
-                  {isLineEnabled('life') && (
+                  {!isCompanyClient && isLineEnabled('life') && (
                     <button
                       onClick={() => handleTabChange('life')}
                       className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
@@ -3121,7 +3124,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       Life
                     </button>
                   )}
-                  {isLineEnabled('health') && (
+                  {!isCompanyClient && isLineEnabled('health') && (
                     <button
                       onClick={() => handleTabChange('health')}
                       className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
@@ -3289,23 +3292,24 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                     </span>
                                   </div>
 
-                                  {/* Company */}
-                                  <div className="text-xs text-slate-500 font-medium">
-                                    Carrier/Company: <strong>{card.company_name}</strong>
-                                  </div>
-
-                                  {/* Dates & Premium */}
-                                  <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+                                  {/* Information Row: Company, Dates, Premium, Policy Address */}
+                                  <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs text-slate-500 font-medium">
+                                    <div>
+                                      Carrier/Company: <strong className="text-slate-800 font-semibold">{card.company_name}</strong>
+                                    </div>
                                     {card.effective_date && (
                                       <div>
-                                        Term: <strong className="text-slate-800">{formatIsoToUsDate(card.effective_date)} {card.expiration_date ? 'to ' + formatIsoToUsDate(card.expiration_date) : ''}</strong>
+                                        Term: <strong className="text-slate-800 font-semibold">{formatIsoToUsDate(card.effective_date)} {card.expiration_date ? 'to ' + formatIsoToUsDate(card.expiration_date) : ''}</strong>
                                       </div>
                                     )}
                                     {card.premium > 0 && (
                                       <div>
-                                        Premium: <strong className="text-emerald-600">{formatCurrency(card.premium)}</strong>
+                                        Premium: <strong className="text-emerald-600 font-semibold">{formatCurrency(card.premium)}</strong>
                                       </div>
                                     )}
+                                    <div>
+                                      Policy Address: <strong className="text-slate-800 font-semibold">{card.effectiveAddress}</strong>
+                                    </div>
                                   </div>
                                 </div>
 
@@ -3584,6 +3588,16 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 </td>
                                 <td className="p-4 font-bold text-slate-800 whitespace-nowrap">
                                   <div>{policy.policy_type}{policy.policy_subtype ? ` (${policy.policy_subtype})` : ''}</div>
+                                  <div className="mt-1 text-[11px] font-normal text-slate-500">
+                                    <span className="font-semibold text-slate-400">Policy Address:</span>{' '}
+                                    <span className="text-slate-700 font-medium">
+                                      {resolvePolicyAddress(
+                                        { address: policy.address, city: policy.city, state: policy.state, zip_code: policy.zip_code },
+                                        residenceInfo,
+                                        client
+                                      )}
+                                    </span>
+                                  </div>
                                   {policy.linkedPersonalClient && (
                                     <div className="mt-1 flex items-center gap-2 text-[10px] font-normal text-slate-600 bg-slate-100/90 border border-slate-200/80 px-2 py-1 rounded-md max-w-md" onClick={(e) => e.stopPropagation()}>
                                       <span className="font-bold text-slate-700 truncate">Linked: {policy.linkedPersonalClient.full_name}</span>
@@ -3709,6 +3723,16 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                     if (!val.trim()) return;
                                     const { error } = await supabase.from('clients').update({ full_name: val.trim() }).eq('id', clientId);
                                     if (!error) setClient((prev: any) => prev ? { ...prev, full_name: val.trim() } : prev);
+                                  }}
+                                />
+
+                                <InlineEditableText
+                                  label="EIN (XX-XXXXXXX)"
+                                  value={client?.ein ? formatEIN(client.ein) : ''}
+                                  onSave={async (val) => {
+                                    const formatted = formatEIN(val);
+                                    const { error } = await supabase.from('clients').update({ ein: formatted.trim() || null }).eq('id', clientId);
+                                    if (!error) setClient((prev: any) => prev ? { ...prev, ein: formatted.trim() || null } : prev);
                                   }}
                                 />
 
@@ -3938,7 +3962,14 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                   onChange={async (e) => {
                                     const checked = e.target.checked;
                                     setPersonalForm(prev => ({ ...prev, has_co_applicant: checked }));
+                                    setPersonalInfo(prev => prev ? { ...prev, has_co_applicant: checked } : prev);
                                     await savePersonalField('has_co_applicant', checked);
+                                    if (!checked) {
+                                      await supabase.from('client_co_applicant_information').delete().eq('client_id', clientId);
+                                      setCoApplicantInfo(null);
+                                    } else {
+                                      await fetchCoApplicantInformation();
+                                    }
                                   }}
                                   className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
                                 />
@@ -4178,226 +4209,228 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                     )}
                   </div>
 
-                  {/* SECTION 3: Income Information Card */}
-                  <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
-                    <div
-                      onClick={() => setIsIncomeOpen(!isIncomeOpen)}
-                      className="flex items-center justify-between border-b border-slate-100 pb-4 cursor-pointer select-none group"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
-                          {isIncomeOpen ? (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
-                          ) : (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
-                          )}
-                        </span>
-                        <div>
-                          <h3 className="text-lg font-extrabold text-slate-900">Income Information</h3>
-                          <p className="text-xs text-slate-400 mt-0.5">Manage income records for health eligibility and tax household.</p>
+                  {/* SECTION 3: Income Information Card (Personal Clients Only) */}
+                  {!isCompanyClient && (
+                    <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative font-sans">
+                      <div
+                        onClick={() => setIsIncomeOpen(!isIncomeOpen)}
+                        className="flex items-center justify-between border-b border-slate-100 pb-4 cursor-pointer select-none group"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
+                            {isIncomeOpen ? (
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
+                            ) : (
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
+                            )}
+                          </span>
+                          <div>
+                            <h3 className="text-lg font-extrabold text-slate-900">Income Information</h3>
+                            <p className="text-xs text-slate-400 mt-0.5">Manage income records for health eligibility and tax household.</p>
+                          </div>
                         </div>
-                      </div>
-                      {isIncomeOpen && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setIsAddIncomeOpen(true);
-                          }}
-                          className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-2 rounded-xl transition-all shadow-md active:scale-95"
-                        >
-                          + Add Income
-                        </button>
-                      )}
-                    </div>
-
-                    {isIncomeOpen && (
-                      <div className="pt-6">
-                        {loadingIncome ? (
-                          <div className="flex justify-center items-center py-10">
-                            <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                            </svg>
-                          </div>
-                        ) : incomeList.length === 0 ? (
-                          <div className="text-center py-10 border border-dashed border-slate-200 rounded-xl">
-                            <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <h4 className="text-xs font-bold text-slate-700">No income records registered</h4>
-                            <p className="text-[11px] text-slate-400 mt-0.5">Click "+ Add Income" above to add income details.</p>
-                          </div>
-                        ) : (
-                          <div className="space-y-4">
-                            {incomeList.map((income) => (
-                              <div
-                                key={income.id}
-                                className="p-4 border border-slate-150 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                              >
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 flex-1">
-                                  <InlineEditableSelect
-                                    label="Relationship"
-                                    value={income.relationship_to_applicant}
-                                    options={[
-                                      { label: 'Applicant', value: 'Applicant' },
-                                      { label: 'Spouse', value: 'Spouse' },
-                                      { label: 'Son/Daughter', value: 'Son/Daughter' },
-                                      { label: 'Mother', value: 'Mother' },
-                                      { label: 'Father', value: 'Father' },
-                                      { label: 'Other', value: 'Other' },
-                                    ]}
-                                    onSave={val => saveIncomeField(income.id, 'relationship_to_applicant', val)}
-                                  />
-
-                                  <InlineEditableSelect
-                                    label="Income Type"
-                                    value={income.income_type}
-                                    options={[
-                                      { label: 'W2', value: 'W2' },
-                                      { label: '1099', value: '1099' },
-                                    ]}
-                                    onSave={val => saveIncomeField(income.id, 'income_type', val)}
-                                  />
-
-                                  <InlineEditableText
-                                    label="Employer / Source"
-                                    value={income.employer_name}
-                                    onSave={val => saveIncomeField(income.id, 'employer_name', val)}
-                                  />
-
-                                  <InlineEditablePhone
-                                    label="Employer Phone"
-                                    value={income.employer_phone}
-                                    onSave={val => saveIncomeField(income.id, 'employer_phone', val)}
-                                  />
-
-                                  <InlineEditableText
-                                    label="Amount ($)"
-                                    type="number"
-                                    value={String(income.income || '')}
-                                    onSave={val => saveIncomeField(income.id, 'income', Number(val))}
-                                  />
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteIncome(income.id)}
-                                  className="text-xs font-bold text-rose-500 hover:text-rose-700 p-1 self-end sm:self-center"
-                                  title="Delete income record"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            ))}
-                          </div>
+                        {isIncomeOpen && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsAddIncomeOpen(true);
+                            }}
+                            className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-2 rounded-xl transition-all shadow-md active:scale-95"
+                          >
+                            + Add Income
+                          </button>
                         )}
+                      </div>
 
-                        {/* ADD INCOME MODAL */}
-                        {isAddIncomeOpen && (
-                          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-                            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 border border-slate-100">
-                              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                                <h4 className="text-base font-extrabold text-slate-900">Add Income Record</h4>
-                                <button
-                                  type="button"
-                                  onClick={() => setIsAddIncomeOpen(false)}
-                                  className="text-slate-400 hover:text-slate-600 font-bold"
+                      {isIncomeOpen && (
+                        <div className="pt-6">
+                          {loadingIncome ? (
+                            <div className="flex justify-center items-center py-10">
+                              <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                            </div>
+                          ) : incomeList.length === 0 ? (
+                            <div className="text-center py-10 border border-dashed border-slate-200 rounded-xl">
+                              <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              <h4 className="text-xs font-bold text-slate-700">No income records registered</h4>
+                              <p className="text-[11px] text-slate-400 mt-0.5">Click "+ Add Income" above to add income details.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-4">
+                              {incomeList.map((income) => (
+                                <div
+                                  key={income.id}
+                                  className="p-4 border border-slate-150 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                                 >
-                                  ✕
-                                </button>
-                              </div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 flex-1">
+                                    <InlineEditableSelect
+                                      label="Relationship"
+                                      value={income.relationship_to_applicant}
+                                      options={[
+                                        { label: 'Applicant', value: 'Applicant' },
+                                        { label: 'Spouse', value: 'Spouse' },
+                                        { label: 'Son/Daughter', value: 'Son/Daughter' },
+                                        { label: 'Mother', value: 'Mother' },
+                                        { label: 'Father', value: 'Father' },
+                                        { label: 'Other', value: 'Other' },
+                                      ]}
+                                      onSave={val => saveIncomeField(income.id, 'relationship_to_applicant', val)}
+                                    />
 
-                              {incomeError && (
-                                <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs font-semibold">
-                                  {incomeError}
-                                </div>
-                              )}
+                                    <InlineEditableSelect
+                                      label="Income Type"
+                                      value={income.income_type}
+                                      options={[
+                                        { label: 'W2', value: 'W2' },
+                                        { label: '1099', value: '1099' },
+                                      ]}
+                                      onSave={val => saveIncomeField(income.id, 'income_type', val)}
+                                    />
 
-                              <div className="space-y-3 text-xs">
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Relationship</label>
-                                  <select
-                                    value={incomeRelationship}
-                                    onChange={e => setIncomeRelationship(e.target.value as any)}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                                    <InlineEditableText
+                                      label="Employer / Source"
+                                      value={income.employer_name}
+                                      onSave={val => saveIncomeField(income.id, 'employer_name', val)}
+                                    />
+
+                                    <InlineEditablePhone
+                                      label="Employer Phone"
+                                      value={income.employer_phone}
+                                      onSave={val => saveIncomeField(income.id, 'employer_phone', val)}
+                                    />
+
+                                    <InlineEditableText
+                                      label="Amount ($)"
+                                      type="number"
+                                      value={String(income.income || '')}
+                                      onSave={val => saveIncomeField(income.id, 'income', Number(val))}
+                                    />
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteIncome(income.id)}
+                                    className="text-xs font-bold text-rose-500 hover:text-rose-700 p-1 self-end sm:self-center"
+                                    title="Delete income record"
                                   >
-                                    <option value="Applicant">Applicant</option>
-                                    <option value="Spouse">Spouse</option>
-                                    <option value="Son/Daughter">Son/Daughter</option>
-                                    <option value="Mother">Mother</option>
-                                    <option value="Father">Father</option>
-                                    <option value="Other">Other</option>
-                                  </select>
+                                    Delete
+                                  </button>
                                 </div>
+                              ))}
+                            </div>
+                          )}
 
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Income Type</label>
-                                  <select
-                                    value={incomeType}
-                                    onChange={e => setIncomeType(e.target.value as any)}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                          {/* ADD INCOME MODAL */}
+                          {isAddIncomeOpen && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+                              <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 border border-slate-100">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                                  <h4 className="text-base font-extrabold text-slate-900">Add Income Record</h4>
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsAddIncomeOpen(false)}
+                                    className="text-slate-400 hover:text-slate-600 font-bold"
                                   >
-                                    <option value="W2">W2</option>
-                                    <option value="1099">1099</option>
-                                  </select>
+                                    ✕
+                                  </button>
                                 </div>
 
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer / Source</label>
-                                  <input
-                                    type="text"
-                                    value={incomeEmployerName}
-                                    onChange={e => setIncomeEmployerName(e.target.value)}
-                                    placeholder="e.g. Acme Corp"
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                                  />
+                                {incomeError && (
+                                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs font-semibold">
+                                    {incomeError}
+                                  </div>
+                                )}
+
+                                <div className="space-y-3 text-xs">
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Relationship</label>
+                                    <select
+                                      value={incomeRelationship}
+                                      onChange={e => setIncomeRelationship(e.target.value as any)}
+                                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                                    >
+                                      <option value="Applicant">Applicant</option>
+                                      <option value="Spouse">Spouse</option>
+                                      <option value="Son/Daughter">Son/Daughter</option>
+                                      <option value="Mother">Mother</option>
+                                      <option value="Father">Father</option>
+                                      <option value="Other">Other</option>
+                                    </select>
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Income Type</label>
+                                    <select
+                                      value={incomeType}
+                                      onChange={e => setIncomeType(e.target.value as any)}
+                                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                                    >
+                                      <option value="W2">W2</option>
+                                      <option value="1099">1099</option>
+                                    </select>
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer / Source</label>
+                                    <input
+                                      type="text"
+                                      value={incomeEmployerName}
+                                      onChange={e => setIncomeEmployerName(e.target.value)}
+                                      placeholder="e.g. Acme Corp"
+                                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer Phone</label>
+                                    <PhoneInput
+                                      value={incomeEmployerPhone}
+                                      onChange={val => setIncomeEmployerPhone(val)}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Annual Amount ($)</label>
+                                    <input
+                                      type="number"
+                                      value={incomeAmount}
+                                      onChange={e => setIncomeAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                                      placeholder="e.g. 55000"
+                                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
+                                      required
+                                    />
+                                  </div>
                                 </div>
 
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer Phone</label>
-                                  <PhoneInput
-                                    value={incomeEmployerPhone}
-                                    onChange={val => setIncomeEmployerPhone(val)}
-                                  />
+                                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsAddIncomeOpen(false)}
+                                    className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 rounded-xl"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleAddIncomeSubmit}
+                                    disabled={incomeSaving}
+                                    className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs disabled:opacity-50"
+                                  >
+                                    {incomeSaving ? 'Saving...' : 'Save Income'}
+                                  </button>
                                 </div>
-
-                                <div>
-                                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Annual Amount ($)</label>
-                                  <input
-                                    type="number"
-                                    value={incomeAmount}
-                                    onChange={e => setIncomeAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                                    placeholder="e.g. 55000"
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                                    required
-                                  />
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                                <button
-                                  type="button"
-                                  onClick={() => setIsAddIncomeOpen(false)}
-                                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 rounded-xl"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={handleAddIncomeSubmit}
-                                  disabled={incomeSaving}
-                                  className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs disabled:opacity-50"
-                                >
-                                  {incomeSaving ? 'Saving...' : 'Save Income'}
-                                </button>
                               </div>
                             </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* SECTION 4: Payment Information Card */}
                   <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative font-sans">
@@ -5324,7 +5357,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             </div>
           </div>
         )}
-      </div>
+      </CrmPageContainer>
 
       {/* POLICY MODALS REMOVED */}
 
@@ -5643,178 +5676,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      
-      {/* Modal: Confirm Company Policy Link */}
-      {isConfirmLinkOpen && selectedCompanyProfile && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-xl max-w-md w-full p-6 space-y-4 animate-scaleUp max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-base font-extrabold text-slate-900">Confirm Commercial Profile Link</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsConfirmLinkOpen(false);
-                  setSelectedCompanyProfile(null);
-                  setLinkError(null);
-                }}
-                className="text-slate-400 hover:text-slate-600 transition-colors p-1"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Summary Header */}
-            <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5 space-y-2 text-xs">
-              <div className="flex justify-between gap-2">
-                <span className="text-slate-400 font-medium">Commercial Client:</span>
-                <span className="font-extrabold text-slate-900 truncate">
-                  {selectedCompanyProfile.client?.agency_name || selectedCompanyProfile.client?.full_name || 'Commercial Client'}
-                </span>
-              </div>
-              {selectedCompanyProfile.client?.email && (
-                <div className="flex justify-between gap-2">
-                  <span className="text-slate-400 font-medium">Email:</span>
-                  <span className="font-semibold text-slate-700 truncate">{selectedCompanyProfile.client.email}</span>
-                </div>
-              )}
-              {selectedCompanyProfile.client?.phone && (
-                <div className="flex justify-between gap-2">
-                  <span className="text-slate-400 font-medium">Phone:</span>
-                  <span className="font-semibold text-slate-700 truncate">{selectedCompanyProfile.client.phone}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Policy Breakdown Badges & List */}
-            {(() => {
-              const total = selectedCompanyProfile.policies.length;
-              const eligible = selectedCompanyProfile.policies.filter((p: any) => !p.linkOwnerId).length;
-              const linked = selectedCompanyProfile.policies.filter((p: any) => p.linkOwnerId === clientId).length;
-              const conflict = selectedCompanyProfile.policies.filter((p: any) => p.linkOwnerId && p.linkOwnerId !== clientId).length;
-
-              return (
-                <div className="space-y-3 text-xs">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                    <span>Commercial P&C Policies ({total})</span>
-                    <div className="flex items-center gap-1.5 text-[10px]">
-                      <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-100 font-extrabold">
-                        {eligible} avail
-                      </span>
-                      {linked > 0 && (
-                        <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100 font-extrabold">
-                          {linked} linked
-                        </span>
-                      )}
-                      {conflict > 0 && (
-                        <span className="bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full border border-rose-100 font-extrabold">
-                          {conflict} unavail
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Policy List */}
-                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1 border border-slate-100 rounded-xl p-2 bg-slate-50/50">
-                    {selectedCompanyProfile.policies.map((p: any) => {
-                      const linkOwnerId = p.linkOwnerId;
-                      let badgeLabel = 'Available';
-                      let badgeStyle = 'bg-emerald-50 text-emerald-700 border-emerald-100';
-
-                      if (linkOwnerId) {
-                        if (linkOwnerId === clientId) {
-                          badgeLabel = 'Already Linked';
-                          badgeStyle = 'bg-blue-50 text-blue-700 border-blue-100';
-                        } else {
-                          badgeLabel = 'Unavailable';
-                          badgeStyle = 'bg-rose-50 text-rose-700 border-rose-100 font-extrabold';
-                        }
-                      }
-
-                      const lobDisplay = p.policy_type ? (p.policy_subtype ? `${p.policy_type} (${p.policy_subtype})` : p.policy_type) : 'Commercial P&C';
-                      const companyDisplay = p.writing_company || p.company_name || 'Carrier Unspecified';
-
-                      return (
-                        <div key={p.id} className="bg-white border border-slate-200/80 rounded-lg p-2.5 space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-extrabold text-slate-900 text-xs">{lobDisplay}</span>
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold border ${badgeStyle}`}>
-                              {badgeLabel}
-                            </span>
-                          </div>
-                          <div className="flex justify-between text-slate-500 text-[11px]">
-                            <span>Policy #: <strong>{p.policy_number || 'N/A'}</strong></span>
-                            <span className="truncate max-w-[140px]">{companyDisplay}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Role Selection */}
-                  <div className="space-y-1.5 pt-1">
-                    <label className="block text-xs font-bold text-slate-700">Linked Person Role</label>
-                    <select
-                      value={linkedPersonRole}
-                      onChange={(e) => setLinkedPersonRole(e.target.value as 'main_applicant' | 'co_applicant')}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-800 text-xs outline-none transition-all"
-                    >
-                      <option value="main_applicant">Main Applicant</option>
-                      {personalInfo?.has_co_applicant === true && (
-                        <option value="co_applicant">Co-Applicant</option>
-                      )}
-                    </select>
-                  </div>
-
-                  {linkError && (
-                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs">
-                      {linkError}
-                    </div>
-                  )}
-
-                  {/* Modal Buttons */}
-                  <div className="flex justify-end gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsConfirmLinkOpen(false);
-                        setSelectedCompanyProfile(null);
-                        setLinkError(null);
-                      }}
-                      disabled={linkingPolicy}
-                      className="border border-slate-200 hover:bg-slate-50 text-slate-600 font-semibold rounded-xl px-4 py-2 text-xs transition-all disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleConfirmLinkPolicy}
-                      disabled={linkingPolicy || eligible === 0}
-                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl px-4 py-2 text-xs transition-all shadow-md shadow-blue-500/10 disabled:opacity-50 flex items-center gap-1.5"
-                    >
-                      {linkingPolicy ? (
-                        <>
-                          <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                          </svg>
-                          <span>Linking...</span>
-                        </>
-                      ) : eligible === 0 ? (
-                        <span>All Policies Linked</span>
-                      ) : (
-                        <span>Link {eligible} Available Policy/Policies</span>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
           </div>
         </div>
       )}

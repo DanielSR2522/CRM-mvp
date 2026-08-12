@@ -328,6 +328,8 @@ export interface SignInput {
   consentAccepted: boolean;
   /** The consent wording the signer actually saw, echoed back to be snapshotted. */
   consentText: string;
+  /** Field responses for interactive checkbox, yes_no, initials fields. */
+  fieldResponses?: Record<string, any>;
 }
 
 const MAX_SIGNATURE_BYTES = 1_500_000; // under the bucket's 2 MB ceiling
@@ -492,6 +494,7 @@ export async function signDocument(
   await recordEvent(request.id, signer.id, 'document_signed', meta, {
     method: input.method,
     has_image: Boolean(imagePath),
+    field_responses: input.fieldResponses || {},
   });
 
   await writeConsentChronology(request, 'consent_signed', `Consent signed: ${request.title}`, {

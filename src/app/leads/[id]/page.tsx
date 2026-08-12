@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
+import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import { supabase } from '@/lib/supabaseClient';
 import { Lead, LeadStatus, LeadPriority } from '@/lib/leads/types';
 import {
@@ -337,7 +338,7 @@ export default function LeadProfilePage({ params }: LeadProfilePageProps) {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 pb-12">
+      <CrmPageContainer className="pb-12">
         {/* Toast Notification */}
         {toast && (
           <div className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-xl shadow-2xl border text-sm font-medium transition-all duration-300 ${
@@ -564,7 +565,7 @@ export default function LeadProfilePage({ params }: LeadProfilePageProps) {
         {activeTab === 'timeline' && (
           <LeadTimelineTab lead={lead} />
         )}
-      </div>
+      </CrmPageContainer>
 
       {/* Edit Lead Modal */}
       {isEditModalOpen && (

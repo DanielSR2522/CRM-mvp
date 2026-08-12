@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
+import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import UnifiedNotesManager from '@/components/notes/UnifiedNotesManager';
 import { NoteCategory } from '@/lib/notes/types';
 import { supabase } from '@/lib/supabaseClient';
@@ -57,6 +58,7 @@ interface Client {
   id: string;
   agent_id: string;
   full_name: string;
+  client_type?: 'personal' | 'company' | null;
   agency_name: string | null;
   address: string | null;
   email: string | null;
@@ -254,128 +256,22 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
   const [unlinkingClient, setUnlinkingClient] = useState(false);
   const [unlinkError, setUnlinkError] = useState<string | null>(null);
 
-  // Linked Companies State (FOR PERSONAL POLICIES)
-  interface LinkedCompanyItem {
-    id: string;
-    linkId: string;
-    agency_name: string | null;
-    full_name: string | null;
-    email: string | null;
-    phone: string | null;
-  }
+  // Policy Lifecycle State (Renew & Cancel)
+  const [isRenewModalOpen, setIsRenewModalOpen] = useState(false);
+  const [renewEffectiveDate, setRenewEffectiveDate] = useState('');
+  const [renewExpirationDate, setRenewExpirationDate] = useState('');
+  const [renewPremium, setRenewPremium] = useState<number | ''>('');
+  const [renewError, setRenewError] = useState<string | null>(null);
+  const [renewing, setRenewing] = useState(false);
+  const [existingRenewalId, setExistingRenewalId] = useState<string | null>(null);
 
-  const [linkedCompanies, setLinkedCompanies] = useState<LinkedCompanyItem[]>([]);
-  const [linkedCompaniesLoading, setLinkedCompaniesLoading] = useState(false);
-  const [companySearchOpen, setCompanySearchOpen] = useState(false);
-  const [companySearchQuery, setCompanySearchQuery] = useState('');
-  const [companySearchResults, setCompanySearchResults] = useState<any[]>([]);
-  const [companySearchLoading, setCompanySearchLoading] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [cancellationReason, setCancellationReason] = useState('Client Requested');
+  const [cancellationNotes, setCancellationNotes] = useState('');
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
-  const loadLinkedCompanies = useCallback(async () => {
-    if (!policyId) return;
-    try {
-      setLinkedCompaniesLoading(true);
-      const { data, error } = await supabase
-        .from('personal_policy_companies')
-        .select('id, company_client_id, clients!inner(id, agency_name, full_name, email, phone)')
-        .eq('policy_id', policyId);
 
-      if (error) {
-        console.warn('Error loading linked companies:', error);
-        setLinkedCompanies([]);
-        return;
-      }
-
-      const mapped = (data || []).map((item: any) => ({
-        linkId: item.id,
-        id: item.clients.id,
-        agency_name: item.clients.agency_name,
-        full_name: item.clients.full_name,
-        email: item.clients.email,
-        phone: item.clients.phone,
-      }));
-
-      setLinkedCompanies(mapped);
-    } catch (err) {
-      console.error('Failed to load linked companies:', err);
-    } finally {
-      setLinkedCompaniesLoading(false);
-    }
-  }, [policyId]);
-
-  useEffect(() => {
-    loadLinkedCompanies();
-  }, [loadLinkedCompanies]);
-
-  const handleSearchCompanies = async (query: string) => {
-    setCompanySearchQuery(query);
-    if (!query.trim()) {
-      setCompanySearchResults([]);
-      return;
-    }
-
-    try {
-      setCompanySearchLoading(true);
-      const trimmed = query.trim();
-
-      // Query clients where client_type = 'company' AND matching full_name, email, or phone
-      const { data: matchedCompanies, error: clientsErr } = await supabase
-        .from('clients')
-        .select('id, agency_name, full_name, email, phone, client_type')
-        .eq('client_type', 'company')
-        .or(`full_name.ilike.%${trimmed}%,email.ilike.%${trimmed}%,phone.ilike.%${trimmed}%`)
-        .limit(20);
-
-      if (clientsErr || !matchedCompanies) {
-        setCompanySearchResults([]);
-        return;
-      }
-
-      setCompanySearchResults(matchedCompanies);
-    } catch (err) {
-      console.error('Error searching commercial companies:', err);
-      setCompanySearchResults([]);
-    } finally {
-      setCompanySearchLoading(false);
-    }
-  };
-
-  const handleAddLinkedCompany = async (companyId: string) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated.');
-
-      const { error } = await supabase
-        .from('personal_policy_companies')
-        .insert({
-          policy_id: policyId,
-          company_client_id: companyId,
-          created_by: user.id,
-        });
-
-      if (error) throw error;
-
-      await loadLinkedCompanies();
-      setCompanySearchOpen(false);
-    } catch (err: any) {
-      alert(err?.message || 'Failed to link company.');
-    }
-  };
-
-  const handleRemoveLinkedCompany = async (linkId: string) => {
-    try {
-      const { error } = await supabase
-        .from('personal_policy_companies')
-        .delete()
-        .eq('id', linkId);
-
-      if (error) throw error;
-
-      await loadLinkedCompanies();
-    } catch (err: any) {
-      alert(err?.message || 'Failed to remove company link.');
-    }
-  };
 
   // Client Personal and Residence States
   const [personalInfo, setPersonalInfo] = useState<any>(null);
@@ -473,6 +369,20 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
       setTotalPremium(policyData.total_premium ?? policyData.premium ?? '');
       setAnnualPremium(policyData.annual_premium ?? '');
       setPolicyStatus(policyData.status || 'Active');
+
+      // Check if a renewal policy already exists for this policy
+      const { data: existingRenewal } = await supabase
+        .from('policies')
+        .select('id')
+        .eq('renewed_from_policy_id', policyId)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingRenewal?.id) {
+        setExistingRenewalId(existingRenewal.id);
+      } else {
+        setExistingRenewalId(null);
+      }
     } catch (err: any) {
       console.error('Error fetching policy data:', err);
       setErrorMsg(err?.message || 'Failed to load policy details.');
@@ -1774,6 +1684,154 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
     setErrorMsg(null);
   };
 
+  // Renew Policy Submit
+  const handleRenewPolicySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRenewError(null);
+
+    if (!renewEffectiveDate || !renewExpirationDate || renewPremium === '') {
+      setRenewError('Effective Date, Expiration Date, and Total Premium are required.');
+      return;
+    }
+
+    const effIso = usDateToIso(renewEffectiveDate);
+    const expIso = usDateToIso(renewExpirationDate);
+
+    if (!effIso || !expIso) {
+      setRenewError('Please enter valid dates in MM/DD/YYYY format.');
+      return;
+    }
+
+    if (new Date(expIso) < new Date(effIso)) {
+      setRenewError('Expiration Date cannot be earlier than Effective Date.');
+      return;
+    }
+
+    setRenewing(true);
+    try {
+      const premiumNum = Number(renewPremium);
+
+      const { data: newPolicy, error: createError } = await supabase
+        .from('policies')
+        .insert({
+          client_id: id,
+          policy_type: lob,
+          policy_ownership_type: (client?.client_type === 'company' || policyOwnershipType === 'company') ? 'company' : 'personal',
+          writing_company: writingCompany.trim() || null,
+          company_name: writingCompany.trim() || null,
+          policy_number: policyNumber.trim() || null,
+          policy_payment_frequency: paymentFrequency,
+          billing_type: billingType,
+          broker_name: brokerName.trim() || null,
+          address: address.trim() || null,
+          city: city.trim() || null,
+          state: state.trim() || null,
+          zip_code: zipCode.trim() || null,
+          effective_date: effIso,
+          expiration_date: expIso,
+          total_premium: premiumNum,
+          premium: premiumNum,
+          annual_premium: premiumNum,
+          status: 'Pending',
+          renewed_from_policy_id: policyId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (createError) throw createError;
+
+      // Log activity event (non-blocking)
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id && newPolicy) {
+          await supabase.from('activity_events').insert([
+            {
+              client_id: id,
+              policy_id: policyId,
+              actor_id: session.user.id,
+              event_type: 'policy_renewed',
+              title: 'Policy renewed',
+              description: 'Renewal policy created.',
+              metadata: { renewal_policy_id: newPolicy.id }
+            },
+            {
+              client_id: id,
+              policy_id: newPolicy.id,
+              actor_id: session.user.id,
+              event_type: 'policy_created',
+              title: 'Policy created from renewal',
+              description: 'Created from previous policy renewal.',
+              metadata: { source_policy_id: policyId }
+            }
+          ]);
+        }
+      } catch (eventErr) {
+        console.error('Failed to log renewal activity event:', eventErr);
+      }
+
+      setIsRenewModalOpen(false);
+      router.push(`/clients/${id}/policies/${newPolicy.id}`);
+    } catch (err: any) {
+      console.error('Error renewing policy:', err);
+      setRenewError(err?.message || 'Failed to create renewal policy.');
+    } finally {
+      setRenewing(false);
+    }
+  };
+
+  // Cancel Policy Submit
+  const handleCancelPolicySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCancelError(null);
+    setCancelling(true);
+
+    try {
+      const nowIso = new Date().toISOString();
+      const reasonFull = cancellationReason + (cancellationNotes.trim() ? `: ${cancellationNotes.trim()}` : '');
+
+      const { error: updateError } = await supabase
+        .from('policies')
+        .update({
+          status: 'Cancelled',
+          cancelled_at: nowIso,
+          cancellation_reason: reasonFull,
+          updated_at: nowIso,
+        })
+        .eq('id', policyId);
+
+      if (updateError) throw updateError;
+
+      // Log activity event
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          await supabase.from('activity_events').insert({
+            client_id: id,
+            policy_id: policyId,
+            actor_id: session.user.id,
+            event_type: 'policy_cancelled',
+            title: 'Policy cancelled',
+            description: `Policy status changed to Cancelled (${cancellationReason}).`,
+            metadata: { reason: cancellationReason, notes: cancellationNotes }
+          });
+        }
+      } catch (eventErr) {
+        console.error('Failed to log cancellation activity event:', eventErr);
+      }
+
+      setPolicyStatus('Cancelled');
+      setIsCancelModalOpen(false);
+      setSuccessMsg('Policy status updated to Cancelled.');
+    } catch (err: any) {
+      console.error('Error cancelling policy:', err);
+      setCancelError(err?.message || 'Failed to cancel policy.');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   // Submit Form
   // Delete Policy
   const handleDeletePolicy = async () => {
@@ -1886,8 +1944,8 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
           billing_type: billingType,
           broker_name: brokerName.trim() || null,
           writing_company: writingCompany.trim() || null,
-      policy_ownership_type: policyOwnershipType,
-      address: address.trim() || null,
+          policy_ownership_type: (client?.client_type === 'company' || policyOwnershipType === 'company') ? 'company' : 'personal',
+          address: address.trim() || null,
       city: city.trim() || null,
       state: state.trim() || null,
       zip_code: zipCode.trim() || null,
@@ -2014,9 +2072,11 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
     }
   };
 
-  const resolvedSidebarName = (personalInfo?.full_name && personalInfo.full_name.trim().length > 0)
-    ? personalInfo.full_name.trim()
-    : (client?.full_name || clientName || '-');
+  const resolvedSidebarName = client?.client_type === 'company'
+    ? (client.full_name || clientName || '-')
+    : ((personalInfo?.full_name && personalInfo.full_name.trim().length > 0)
+        ? personalInfo.full_name.trim()
+        : (client?.full_name || clientName || '-'));
 
   const resolvedSidebarEmail = (personalInfo?.email && personalInfo.email.trim().length > 0)
     ? personalInfo.email.trim()
@@ -2052,7 +2112,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
 
   return (
     <DashboardLayout>
-      <div className="max-w-7xl mx-auto space-y-6">
+      <CrmPageContainer>
         
         {/* Navigation Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-slate-500">
@@ -2096,12 +2156,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                     {loadingClient ? 'Loading...' : getAgentDisplayName()}
                   </span>
                 </div>
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Agency</span>
-                  <span className="text-sm font-semibold text-slate-800 block mt-1">
-                    {loadingClient ? 'Loading...' : client?.agency_name || '-'}
-                  </span>
-                </div>
+
                 <div>
                   <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email Address</span>
                   {loadingClient ? (
@@ -2170,22 +2225,76 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
             {/* AREA 1: TOP POLICY SUMMARY (Non-sticky) */}
             <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
               {/* Row 1 */}
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-baseline gap-2">
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Policy Number</span>
-                  <h1 className="text-xl font-extrabold text-slate-900">{policyNumber || 'Not provided'}</h1>
+                  <h1 className="text-xl font-bold text-slate-900">{policyNumber || 'Not provided'}</h1>
                 </div>
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                  policyStatus === 'Active'
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                    : policyStatus === 'Pending'
-                    ? 'bg-amber-50 text-amber-700 border-amber-100'
-                    : policyStatus === 'Cancelled'
-                    ? 'bg-rose-50 text-rose-700 border-rose-100'
-                    : 'bg-slate-50 text-slate-650 border-slate-200'
-                }`}>
-                  {policyStatus}
-                </span>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {/* Renewal Warning / Link if renewal exists */}
+                  {existingRenewalId ? (
+                    <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-1 rounded-xl text-xs font-semibold text-amber-800">
+                      <span>A renewal has been created for this policy</span>
+                      <Link
+                        href={`/clients/${id}/policies/${existingRenewalId}`}
+                        className="bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1 rounded-lg text-xs font-bold transition-colors shadow-2xs"
+                      >
+                        View Renewal
+                      </Link>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Renew Policy Button (Active or Expired) */}
+                      {(policyStatus === 'Active' || policyStatus === 'Expired') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRenewEffectiveDate('');
+                            setRenewExpirationDate('');
+                            setRenewPremium('');
+                            setRenewError(null);
+                            setIsRenewModalOpen(true);
+                          }}
+                          className="px-3 py-1.5 rounded-xl text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all shadow-2xs flex items-center gap-1.5"
+                        >
+                          <span>↻</span>
+                          <span>Renew Policy</span>
+                        </button>
+                      )}
+                    </>
+                  )}
+
+                  {/* Cancel Policy Button (Active or Pending) */}
+                  {(policyStatus === 'Active' || policyStatus === 'Pending') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCancellationReason('Client Requested');
+                        setCancellationNotes('');
+                        setCancelError(null);
+                        setIsCancelModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-all shadow-2xs flex items-center gap-1.5"
+                    >
+                      <span>✕</span>
+                      <span>Cancel Policy</span>
+                    </button>
+                  )}
+
+                  {/* Policy Status Badge */}
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                    policyStatus === 'Active'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                      : policyStatus === 'Pending'
+                      ? 'bg-amber-50 text-amber-700 border-amber-100'
+                      : policyStatus === 'Cancelled'
+                      ? 'bg-rose-50 text-rose-700 border-rose-100'
+                      : 'bg-slate-50 text-slate-650 border-slate-200'
+                  }`}>
+                    {policyStatus}
+                  </span>
+                </div>
               </div>
 
               {/* Row 2 */}
@@ -2712,7 +2821,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
               /* AREA 3: SUMMARY FORM (2-column desktop layout) */
               <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
                 <div className="flex items-center justify-between border-b border-slate-50 pb-4">
-                  <h3 className="text-lg font-extrabold text-slate-900">Summary Details</h3>
+                  <h3 className="text-lg font-bold text-slate-900">Summary Details</h3>
                   <div className="flex items-center gap-2">
                     <button
                         type="button"
@@ -2752,12 +2861,13 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                   </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+                <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-sm">
                   
                   {/* LEFT COLUMN */}
                   <div className="space-y-4">
+                    {/* 1. Line of Business */}
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Line of Business</label>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Line of Business</label>
                       <select
                         value={lob}
                         onChange={e => setLob(e.target.value)}
@@ -2771,21 +2881,21 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                       </select>
                     </div>
 
+                    {/* 2. Company */}
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Transaction Type</label>
-                      <select
-                        value={transactionType}
-                        onChange={e => setTransactionType(e.target.value as any)}
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                        required
-                      >
-                        <option value="New Business">New Business</option>
-                        <option value="Renewal">Renewal</option>
-                      </select>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Company</label>
+                      <input
+                        type="text"
+                        value={writingCompany}
+                        onChange={e => setWritingCompany(e.target.value)}
+                        placeholder="e.g. Progressive"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                      />
                     </div>
 
+                    {/* 3. Policy Number */}
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Policy Number</label>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Number</label>
                       <input
                         type="text"
                         value={policyNumber}
@@ -2795,21 +2905,9 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                       />
                     </div>
 
+                    {/* 4. Effective Date */}
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Policy Payment Frequency</label>
-                      <select
-                        value={paymentFrequency}
-                        onChange={e => setPaymentFrequency(e.target.value as any)}
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                        required
-                      >
-                        <option value="Annual">Annual</option>
-                        <option value="Monthly">Monthly</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Effective Date</label>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Effective Date</label>
                       <input
                         type="text"
                         value={effectiveDate}
@@ -2820,8 +2918,9 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                       />
                     </div>
 
+                    {/* 5. Expiration Date */}
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Expiration Date</label>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Expiration Date</label>
                       <input
                         type="text"
                         value={expirationDate}
@@ -2832,37 +2931,10 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                       />
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Billing Type</label>
-                      <select
-                        value={billingType}
-                        onChange={e => setBillingType(e.target.value as any)}
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                        required
-                      >
-                        <option value="Direct Bill">Direct Bill</option>
-                        <option value="Agency Bill">Agency Bill</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* RIGHT COLUMN */}
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Policy Ownership Type</label>
-                      <select
-                        value={policyOwnershipType}
-                        onChange={e => setPolicyOwnershipType(e.target.value as any)}
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                      >
-                        <option value="personal">Personal</option>
-                        <option value="company">Company</option>
-                      </select>
-                    </div>
-
+                    {/* 6. Policy Address */}
                     <div className="border-t border-slate-100 pt-4">
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-sm font-extrabold text-slate-900">Policy Address</h4>
+                        <h4 className="text-sm font-semibold text-slate-900">Policy Address</h4>
                         <label className="flex items-center gap-2 cursor-pointer select-none">
                           <input
                             type="checkbox"
@@ -2888,7 +2960,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
 
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Street Address</label>
+                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Street Address</label>
                           <input
                             type="text"
                             value={address}
@@ -2898,7 +2970,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">City</label>
+                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">City</label>
                           <input
                             type="text"
                             value={city}
@@ -2909,7 +2981,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">State</label>
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">State</label>
                             <input
                               type="text"
                               value={state}
@@ -2919,7 +2991,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">ZIP Code</label>
+                            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ZIP Code</label>
                             <input
                               type="text"
                               value={zipCode}
@@ -2931,53 +3003,24 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                         </div>
                       </div>
                     </div>
+                  </div>
 
-<div>
-<label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Broker Name</label>
-                      <input
-                        type="text"
-                        value={brokerName}
-                        onChange={e => setBrokerName(e.target.value)}
-                        placeholder="e.g. John Agent"
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                      />
+                  {/* RIGHT COLUMN */}
+                  <div className="space-y-4">
+                    {/* 1. Policy Type (Read-Only) */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Type</label>
+                      <div className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-700 text-sm font-semibold flex items-center justify-between cursor-not-allowed select-none">
+                        <span>{(client?.client_type === 'company' || policyOwnershipType === 'company') ? 'Company' : 'Personal'}</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-200 text-slate-600">
+                          Derived from Client Profile
+                        </span>
+                      </div>
                     </div>
 
+                    {/* 2. Policy Status */}
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Writing Company</label>
-                      <input
-                        type="text"
-                        value={writingCompany}
-                        onChange={e => setWritingCompany(e.target.value)}
-                        placeholder="e.g. Progressive"
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Total Premium</label>
-                      <input
-                        type="number"
-                        value={totalPremium}
-                        onChange={e => setTotalPremium(e.target.value === '' ? '' : Number(e.target.value))}
-                        placeholder="e.g. 5000"
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Annual Premium</label>
-                      <input
-                        type="number"
-                        value={annualPremium}
-                        onChange={e => setAnnualPremium(e.target.value === '' ? '' : Number(e.target.value))}
-                        placeholder="e.g. 5000"
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Policy Status</label>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Status</label>
                       <select
                         value={policyStatus}
                         onChange={e => setPolicyStatus(e.target.value as any)}
@@ -2990,69 +3033,66 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                         <option value="Pending">Pending</option>
                       </select>
                     </div>
-                  </div>
 
-                  {/* LINKED COMPANIES (PERSONAL POLICIES ONLY) */}
-                  {policyOwnershipType === 'personal' && (
-                    <div className="md:col-span-2 border-t border-slate-100 pt-6 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className="text-sm font-extrabold text-slate-900 font-sans">Linked Companies</h4>
-                          <p className="text-xs text-slate-400 font-sans">
-                            Link commercial companies associated with this personal policy.
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCompanySearchQuery('');
-                            setCompanySearchResults([]);
-                            setCompanySearchOpen(true);
-                          }}
-                          className="px-3 py-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-xl transition-all font-sans"
-                        >
-                          + Add Company
-                        </button>
-                      </div>
-
-                      {linkedCompaniesLoading ? (
-                        <div className="py-4 text-center text-xs text-slate-400 font-sans">Loading linked companies...</div>
-                      ) : linkedCompanies.length === 0 ? (
-                        <div className="p-4 rounded-xl bg-slate-50/50 border border-dashed border-slate-200 text-xs text-slate-400 font-sans text-center">
-                          No companies linked to this personal policy yet.
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {linkedCompanies.map((comp) => (
-                            <div key={comp.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200/80 rounded-xl shadow-xs">
-                              <div className="min-w-0 pr-2">
-                                <h5 className="text-xs font-bold text-slate-900 font-sans truncate">
-                                  {comp.agency_name || comp.full_name || 'Commercial Company'}
-                                </h5>
-                                <p className="text-[10px] text-slate-400 font-sans truncate">
-                                  {comp.email || comp.phone || 'Company Client'}
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveLinkedCompany(comp.linkId)}
-                                className="text-xs font-bold text-rose-500 hover:text-rose-700 px-2 py-1 bg-rose-50 hover:bg-rose-100 rounded-lg transition-all font-sans flex-shrink-0"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                    {/* 2. Total Premium */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Total Premium</label>
+                      <input
+                        type="number"
+                        value={totalPremium}
+                        onChange={e => setTotalPremium(e.target.value === '' ? '' : Number(e.target.value))}
+                        placeholder="e.g. 5000"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                      />
                     </div>
-                  )}
+
+                    {/* 3. Policy Payment Frequency */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Payment Frequency</label>
+                      <select
+                        value={paymentFrequency}
+                        onChange={e => setPaymentFrequency(e.target.value as any)}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                        required
+                      >
+                        <option value="Annual">Annual</option>
+                        <option value="Monthly">Monthly</option>
+                      </select>
+                    </div>
+
+                    {/* 4. Billing Type */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Billing Type</label>
+                      <select
+                        value={billingType}
+                        onChange={e => setBillingType(e.target.value as any)}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                        required
+                      >
+                        <option value="Direct Bill">Direct Bill</option>
+                        <option value="Agency Bill">Agency Bill</option>
+                      </select>
+                    </div>
+
+                    {/* 5. Broker Name */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Broker Name</label>
+                      <input
+                        type="text"
+                        value={brokerName}
+                        onChange={e => setBrokerName(e.target.value)}
+                        placeholder="e.g. John Agent"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                      />
+                    </div>
+                  </div>
                 </form>
               </div>
             )}
           </div>
         </div>
       )}
-    </div>
+      </CrmPageContainer>
       {/* Unlink Personal Client Confirmation Modal */}
       {isConfirmUnlinkOpen && linkedPersonalClient && linkedPersonalClient.client && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
@@ -3116,82 +3156,6 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
-      {/* SEARCH & ADD COMPANY MODAL */}
-      {companySearchOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs font-sans animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-lg w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900">Link Commercial Company</h3>
-                <p className="text-xs text-slate-400">Search existing commercial company clients to link to this policy.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCompanySearchOpen(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <input
-                type="text"
-                value={companySearchQuery}
-                onChange={(e) => handleSearchCompanies(e.target.value)}
-                placeholder="Search company name, contact, email, or phone..."
-                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-4 py-2.5 text-xs text-slate-800 outline-none"
-                autoFocus
-              />
-
-              <div className="max-h-60 overflow-auto divide-y divide-slate-100 border border-slate-100 rounded-xl">
-                {companySearchLoading ? (
-                  <div className="p-4 text-center text-xs text-slate-400">Searching commercial companies...</div>
-                ) : companySearchResults.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-slate-400">
-                    {companySearchQuery.trim() ? 'No commercial company clients found.' : 'Type to search commercial companies.'}
-                  </div>
-                ) : (
-                  companySearchResults.map((comp) => {
-                    const isAlreadyLinked = linkedCompanies.some((lc) => lc.id === comp.id);
-                    return (
-                      <div key={comp.id} className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                        <div className="min-w-0 pr-3">
-                          <h5 className="text-xs font-bold text-slate-900 truncate">
-                            {comp.agency_name || comp.full_name || 'Commercial Company'}
-                          </h5>
-                          <p className="text-[10px] text-slate-400 truncate">
-                            {comp.email || comp.phone || 'Company Client'}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={isAlreadyLinked}
-                          onClick={() => handleAddLinkedCompany(comp.id)}
-                          className="px-3 py-1.5 text-xs font-bold rounded-lg transition-all text-blue-600 bg-blue-50 hover:bg-blue-100 disabled:opacity-40 font-sans"
-                        >
-                          {isAlreadyLinked ? 'Linked' : '+ Select'}
-                        </button>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setCompanySearchOpen(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <DocumentPreviewModal
         isOpen={pcPreviewState.isOpen}
         onClose={() => setPcPreviewState((prev) => ({ ...prev, isOpen: false, signedUrl: null, officePreview: null }))}
@@ -3203,6 +3167,162 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
         error={pcPreviewState.error}
         onDownload={pcPreviewState.doc ? () => handleDownloadDoc(pcPreviewState.doc!) : undefined}
       />
+
+      {/* RENEW POLICY MODAL */}
+      {isRenewModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs font-sans animate-fade-in">
+          <div className="bg-white border border-slate-100 rounded-2xl shadow-2xl p-6 max-w-md w-full space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-bold text-slate-900">Renew P&C Policy</h3>
+              <button
+                type="button"
+                onClick={() => setIsRenewModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              A new policy will be created using the current policy information. Effective Date, Expiration Date, and Total Premium must be entered for the new policy.
+            </p>
+
+            {renewError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs">
+                {renewError}
+              </div>
+            )}
+
+            <form onSubmit={handleRenewPolicySubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Effective Date <span className="text-rose-500">*</span></label>
+                <input
+                  type="text"
+                  value={renewEffectiveDate}
+                  onChange={e => setRenewEffectiveDate(formatAsDateInput(e.target.value))}
+                  placeholder="MM/DD/YYYY"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Expiration Date <span className="text-rose-500">*</span></label>
+                <input
+                  type="text"
+                  value={renewExpirationDate}
+                  onChange={e => setRenewExpirationDate(formatAsDateInput(e.target.value))}
+                  placeholder="MM/DD/YYYY"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Total Premium <span className="text-rose-500">*</span></label>
+                <input
+                  type="number"
+                  value={renewPremium}
+                  onChange={e => setRenewPremium(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="e.g. 5000"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsRenewModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 rounded-xl transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={renewing}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all shadow-xs disabled:opacity-50"
+                >
+                  {renewing ? 'Creating Renewal...' : 'Create Renewal Policy'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* CANCEL POLICY MODAL */}
+      {isCancelModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs font-sans animate-fade-in">
+          <div className="bg-white border border-slate-100 rounded-2xl shadow-2xl p-6 max-w-md w-full space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-bold text-slate-900">Cancel P&C Policy</h3>
+              <button
+                type="button"
+                onClick={() => setIsCancelModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to cancel this policy? This action will update the policy status to <strong>Cancelled</strong> and preserve all historical policy records, documents, notes, and chronology.
+            </p>
+
+            {cancelError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs">
+                {cancelError}
+              </div>
+            )}
+
+            <form onSubmit={handleCancelPolicySubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Cancellation Reason</label>
+                <select
+                  value={cancellationReason}
+                  onChange={e => setCancellationReason(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none focus:border-blue-500"
+                >
+                  <option value="Client Requested">Client Requested</option>
+                  <option value="Changed Carrier">Changed Carrier</option>
+                  <option value="Non-Renewal">Non-Renewal</option>
+                  <option value="Non-Payment">Non-Payment</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Notes / Reason Details (Optional)</label>
+                <textarea
+                  rows={3}
+                  value={cancellationNotes}
+                  onChange={e => setCancellationNotes(e.target.value)}
+                  placeholder="Additional context regarding cancellation..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 text-sm outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsCancelModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 rounded-xl transition-all"
+                >
+                  Keep Active
+                </button>
+                <button
+                  type="submit"
+                  disabled={cancelling}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-all shadow-xs disabled:opacity-50"
+                >
+                  {cancelling ? 'Cancelling...' : 'Confirm Cancellation'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }

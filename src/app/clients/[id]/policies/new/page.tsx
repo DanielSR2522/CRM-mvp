@@ -4,6 +4,7 @@ import React, { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
+import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import { supabase } from '@/lib/supabaseClient';
 import { LINES_OF_BUSINESS, COMMERCIAL_LINES_OF_BUSINESS, PERSONAL_LINES_OF_BUSINESS } from '@/constants/linesOfBusiness';
 import { usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
@@ -38,73 +39,72 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
   const [policyStatus, setPolicyStatus] = useState<'Active' | 'Cancelled' | 'Expired' | 'Pending'>('Active');
   const [policyOwnershipType, setPolicyOwnershipType] = useState<'personal' | 'company'>('personal');
 
-  // Selected Linked Companies State
-  const [selectedCompanies, setSelectedCompanies] = useState<Array<{ id: string; agency_name: string | null; full_name: string | null }>>([]);
-  const [companySearchQuery, setCompanySearchQuery] = useState('');
-  const [companySearchResults, setCompanySearchResults] = useState<any[]>([]);
-  const [companySearchLoading, setCompanySearchLoading] = useState(false);
-
-  const handleSearchCompanies = async (query: string) => {
-    setCompanySearchQuery(query);
-    if (!query.trim()) {
-      setCompanySearchResults([]);
-      return;
-    }
-
-    try {
-      setCompanySearchLoading(true);
-      const trimmed = query.trim();
-
-      const { data: matchedCompanies, error: clientsErr } = await supabase
-        .from('clients')
-        .select('id, agency_name, full_name, email, phone, client_type')
-        .eq('client_type', 'company')
-        .or(`full_name.ilike.%${trimmed}%,email.ilike.%${trimmed}%,phone.ilike.%${trimmed}%`)
-        .limit(20);
-
-      if (clientsErr || !matchedCompanies) {
-        setCompanySearchResults([]);
-        return;
-      }
-
-      setCompanySearchResults(matchedCompanies);
-    } catch (err) {
-      console.error('Error searching commercial companies:', err);
-      setCompanySearchResults([]);
-    } finally {
-      setCompanySearchLoading(false);
-    }
-  };
+  // Policy Address States
+  const [useAddressOnFile, setUseAddressOnFile] = useState(false);
+  const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [zipCode, setZipCode] = useState('');
+  const [residenceInfo, setResidenceInfo] = useState<any>(null);
+  const [noAddressMessage, setNoAddressMessage] = useState<string | null>(null);
+  const [residenceError, setResidenceError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchClient = async () => {
       try {
         setLoading(true);
-        const [clientRes, personalRes, policiesRes] = await Promise.all([
-          supabase.from('clients').select('full_name, agency_name').eq('id', id).single(),
-          supabase.from('client_personal_information').select('full_name, date_of_birth, ssn').eq('client_id', id).maybeSingle(),
-          supabase.from('policies').select('policy_ownership_type').eq('client_id', id)
+        const [clientRes, residenceRes] = await Promise.all([
+          supabase.from('clients').select('full_name, client_type').eq('id', id).single(),
+          supabase.from('client_residence_information').select('*').eq('client_id', id).maybeSingle(),
         ]);
 
         const clientData = clientRes.data;
-        const personalData = personalRes.data;
-        const existingPolicies = policiesRes.data || [];
+        const residenceData = residenceRes.data || null;
 
-        const isCompany = Boolean(
-          (existingPolicies.some(p => p.policy_ownership_type === 'company')) ||
-          (!personalData?.date_of_birth && !personalData?.ssn && personalData?.full_name && personalData?.full_name !== clientData?.full_name)
-        );
+        const isCompany = clientData?.client_type === 'company';
 
         setClientName(clientData?.full_name || '');
         setIsCompanyClient(isCompany);
+        setPolicyOwnershipType(isCompany ? 'company' : 'personal');
+        setResidenceInfo(residenceData);
       } catch (err: any) {
-        console.error('Error fetching client name:', err);
+        console.error('Error fetching client details:', err);
       } finally {
         setLoading(false);
       }
     };
     fetchClient();
   }, [id]);
+
+  const handleUseAddressOnFileToggle = (checked: boolean) => {
+    setUseAddressOnFile(checked);
+    setNoAddressMessage(null);
+    setResidenceError(null);
+
+    if (checked) {
+      if (!residenceInfo) {
+        setNoAddressMessage('No residence address found on client file. Please enter address manually.');
+        setUseAddressOnFile(false);
+        return;
+      }
+
+      const resStreet = residenceInfo.street_address || residenceInfo.address || '';
+      const resCity = residenceInfo.city || '';
+      const resState = residenceInfo.state || '';
+      const resZip = residenceInfo.zip_code || residenceInfo.zip || '';
+
+      if (!resStreet && !resCity && !resState && !resZip) {
+        setNoAddressMessage('Residence address on client file is empty. Please enter address manually.');
+        setUseAddressOnFile(false);
+        return;
+      }
+
+      setAddress(resStreet);
+      setCity(resCity);
+      setState(resState);
+      setZipCode(resZip);
+    }
+  };
 
   if (!isLineEnabled('property_casualty')) {
     return (
@@ -166,13 +166,15 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
     setSaving(true);
 
     try {
+      const premiumNum = totalPremium === '' ? 0 : Number(totalPremium);
+
       // Insert new policy record
       const { data, error } = await supabase
         .from('policies')
         .insert({
           client_id: id,
           policy_type: lob,
-          transaction_type: transactionType === 'New Business' ? 'New' : 'Renewal',
+          transaction_type: 'New',
           policy_number: policyNumber.trim() || null,
           policy_payment_frequency: paymentFrequency,
           effective_date: effIso,
@@ -181,11 +183,15 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
           broker_name: brokerName.trim() || null,
           writing_company: writingCompany.trim() || null,
           company_name: writingCompany.trim() || null, // Keep synced with legacy column
-          total_premium: totalPremium === '' ? 0 : Number(totalPremium),
-          premium: totalPremium === '' ? 0 : Number(totalPremium), // Keep synced with legacy column
-          annual_premium: annualPremium === '' ? 0 : Number(annualPremium),
+          total_premium: premiumNum,
+          premium: premiumNum, // Keep synced with legacy column
+          annual_premium: premiumNum,
           status: policyStatus,
           policy_ownership_type: isCompanyClient ? 'company' : 'personal',
+          address: address.trim() || null,
+          city: city.trim() || null,
+          state: state.trim() || null,
+          zip_code: zipCode.trim() || null,
           updated_at: new Date().toISOString(),
         })
         .select('id')
@@ -197,14 +203,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user?.id) {
-          if (data?.id && selectedCompanies.length > 0 && policyOwnershipType === 'personal') {
-            const companyRows = selectedCompanies.map((c) => ({
-              policy_id: data.id,
-              company_client_id: c.id,
-              created_by: session.user.id,
-            }));
-            await supabase.from('personal_policy_companies').insert(companyRows);
-          }
+
 
           await supabase.from('activity_events').insert({
             client_id: id,
@@ -235,7 +234,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
   return (
     <DashboardLayout>
-      <div className="max-w-7xl mx-auto space-y-6">
+      <CrmPageContainer>
         
         {/* Navigation Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-slate-500">
@@ -285,12 +284,13 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-sm">
               
               {/* LEFT COLUMN */}
               <div className="space-y-4">
+                {/* 1. Line of Business */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Line of Business</label>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Line of Business</label>
                   <select
                     value={lob}
                     onChange={e => setLob(e.target.value)}
@@ -304,21 +304,21 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                   </select>
                 </div>
 
+                {/* 2. Company */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Transaction Type</label>
-                  <select
-                    value={transactionType}
-                    onChange={e => setTransactionType(e.target.value as any)}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                    required
-                  >
-                    <option value="New Business">New Business</option>
-                    <option value="Renewal">Renewal</option>
-                  </select>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Company</label>
+                  <input
+                    type="text"
+                    value={writingCompany}
+                    onChange={e => setWritingCompany(e.target.value)}
+                    placeholder="e.g. Progressive"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                  />
                 </div>
 
+                {/* 3. Policy Number */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Policy Number</label>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Number</label>
                   <input
                     type="text"
                     value={policyNumber}
@@ -328,19 +328,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Policy Payment Frequency</label>
-                  <select
-                    value={paymentFrequency}
-                    onChange={e => setPaymentFrequency(e.target.value as any)}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                    required
-                  >
-                    <option value="Annual">Annual</option>
-                    <option value="Monthly">Monthly</option>
-                  </select>
-                </div>
-
+                {/* 4. Effective Date */}
                 <div>
                   <DatePicker
                     label="Effective Date"
@@ -357,6 +345,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                   />
                 </div>
 
+                {/* 5. Expiration Date */}
                 <div>
                   <DatePicker
                     label="Expiration Date"
@@ -373,68 +362,96 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Billing Type</label>
-                  <select
-                    value={billingType}
-                    onChange={e => setBillingType(e.target.value as any)}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-                    required
-                  >
-                    <option value="Direct Bill">Direct Bill</option>
-                    <option value="Agency Bill">Agency Bill</option>
-                  </select>
+                {/* 6. Policy Address */}
+                <div className="border-t border-slate-100 pt-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-semibold text-slate-900">Policy Address</h4>
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={useAddressOnFile}
+                        onChange={e => handleUseAddressOnFileToggle(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                      />
+                      <span className="text-xs font-semibold text-slate-700">Use Address on File</span>
+                    </label>
+                  </div>
+
+                  {noAddressMessage && (
+                    <div className="p-3 mb-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold leading-relaxed">
+                      {noAddressMessage}
+                    </div>
+                  )}
+
+                  {residenceError && (
+                    <div className="p-3 mb-4 rounded-lg bg-rose-50 border border-rose-100 text-rose-600 text-xs leading-relaxed">
+                      {residenceError}
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Street Address</label>
+                      <input
+                        type="text"
+                        value={address}
+                        onChange={e => setAddress(e.target.value)}
+                        disabled={useAddressOnFile}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm disabled:opacity-60 disabled:cursor-not-allowed outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">City</label>
+                      <input
+                        type="text"
+                        value={city}
+                        onChange={e => setCity(e.target.value)}
+                        disabled={useAddressOnFile}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm disabled:opacity-60 disabled:cursor-not-allowed outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">State</label>
+                        <input
+                          type="text"
+                          value={state}
+                          onChange={e => setState(e.target.value)}
+                          disabled={useAddressOnFile}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm disabled:opacity-60 disabled:cursor-not-allowed outline-none focus:border-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ZIP Code</label>
+                        <input
+                          type="text"
+                          value={zipCode}
+                          onChange={e => setZipCode(e.target.value)}
+                          disabled={useAddressOnFile}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 text-sm disabled:opacity-60 disabled:cursor-not-allowed outline-none focus:border-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               {/* RIGHT COLUMN */}
               <div className="space-y-4">
+                {/* 1. Policy Type (Read-Only) */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Broker Name</label>
-                  <input
-                    type="text"
-                    value={brokerName}
-                    onChange={e => setBrokerName(e.target.value)}
-                    placeholder="e.g. John Agent"
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                  />
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Type</label>
+                  <div className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-700 text-sm font-semibold flex items-center justify-between cursor-not-allowed select-none">
+                    <span>{isCompanyClient ? 'Company' : 'Personal'}</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-200 text-slate-600">
+                      Derived from Client Profile
+                    </span>
+                  </div>
                 </div>
 
+                {/* 2. Policy Status */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Writing Company</label>
-                  <input
-                    type="text"
-                    value={writingCompany}
-                    onChange={e => setWritingCompany(e.target.value)}
-                    placeholder="e.g. Progressive"
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-850 placeholder-slate-400 text-sm outline-none transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Total Premium</label>
-                  <input
-                    type="number"
-                    value={totalPremium}
-                    onChange={e => setTotalPremium(e.target.value === '' ? '' : Number(e.target.value))}
-                    placeholder="e.g. 5000"
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Annual Premium</label>
-                  <input
-                    type="number"
-                    value={annualPremium}
-                    onChange={e => setAnnualPremium(e.target.value === '' ? '' : Number(e.target.value))}
-                    placeholder="e.g. 5000"
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Policy Status</label>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Status</label>
                   <select
                     value={policyStatus}
                     onChange={e => setPolicyStatus(e.target.value as any)}
@@ -447,89 +464,63 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                     <option value="Pending">Pending</option>
                   </select>
                 </div>
-              </div>
 
-              {/* LINKED COMPANIES (OPTIONAL FOR PERSONAL POLICY CREATION) */}
-              {!isCompanyClient && (
-                <div className="md:col-span-2 border-t border-slate-100 pt-6 space-y-4">
-                  <div>
-                    <h4 className="text-sm font-extrabold text-slate-900 font-sans">Linked Companies (Optional)</h4>
-                    <p className="text-xs text-slate-400 font-sans">
-                      Select commercial companies associated with this personal policy.
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <input
-                      type="text"
-                      value={companySearchQuery}
-                      onChange={(e) => handleSearchCompanies(e.target.value)}
-                      placeholder="Search company name, contact, email, or phone to link..."
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl px-4 py-2 text-xs text-slate-800 outline-none"
-                    />
-
-                    {companySearchQuery.trim() !== '' && (
-                      <div className="max-h-48 overflow-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-white">
-                        {companySearchLoading ? (
-                          <div className="p-3 text-center text-xs text-slate-400">Searching commercial companies...</div>
-                        ) : companySearchResults.length === 0 ? (
-                          <div className="p-3 text-center text-xs text-slate-400">No commercial company clients found.</div>
-                        ) : (
-                          companySearchResults.map((comp) => {
-                            const isSelected = selectedCompanies.some((sc) => sc.id === comp.id);
-                            return (
-                              <div key={comp.id} className="p-2.5 flex items-center justify-between hover:bg-slate-50">
-                                <div className="min-w-0 pr-2">
-                                  <h5 className="text-xs font-bold text-slate-900 truncate">
-                                    {comp.agency_name || comp.full_name || 'Commercial Company'}
-                                  </h5>
-                                  <p className="text-[10px] text-slate-400 truncate">{comp.email || comp.phone || 'Company Client'}</p>
-                                </div>
-                                <button
-                                  type="button"
-                                  disabled={isSelected}
-                                  onClick={() => {
-                                    if (!isSelected) {
-                                      setSelectedCompanies((prev) => [...prev, comp]);
-                                    }
-                                  }}
-                                  className="px-2.5 py-1 text-xs font-bold rounded-lg text-blue-600 bg-blue-50 hover:bg-blue-100 disabled:opacity-40"
-                                >
-                                  {isSelected ? 'Selected' : '+ Select'}
-                                </button>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-
-                    {selectedCompanies.length > 0 && (
-                      <div className="flex flex-wrap gap-2 pt-2">
-                        {selectedCompanies.map((comp) => (
-                          <span
-                            key={comp.id}
-                            className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold rounded-xl"
-                          >
-                            <span>{comp.agency_name || comp.full_name}</span>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedCompanies((prev) => prev.filter((c) => c.id !== comp.id))}
-                              className="text-blue-500 hover:text-rose-600 font-bold ml-1"
-                            >
-                              ✕
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                {/* 3. Total Premium */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Total Premium</label>
+                  <input
+                    type="number"
+                    value={totalPremium}
+                    onChange={e => setTotalPremium(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder="e.g. 5000"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                  />
                 </div>
-              )}
+
+                {/* 4. Policy Payment Frequency */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Payment Frequency</label>
+                  <select
+                    value={paymentFrequency}
+                    onChange={e => setPaymentFrequency(e.target.value as any)}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                    required
+                  >
+                    <option value="Annual">Annual</option>
+                    <option value="Monthly">Monthly</option>
+                  </select>
+                </div>
+
+                {/* 5. Billing Type */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Billing Type</label>
+                  <select
+                    value={billingType}
+                    onChange={e => setBillingType(e.target.value as any)}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
+                    required
+                  >
+                    <option value="Direct Bill">Direct Bill</option>
+                    <option value="Agency Bill">Agency Bill</option>
+                  </select>
+                </div>
+
+                {/* 6. Broker Name */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Broker Name</label>
+                  <input
+                    type="text"
+                    value={brokerName}
+                    onChange={e => setBrokerName(e.target.value)}
+                    placeholder="e.g. John Agent"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                  />
+                </div>
+              </div>
             </form>
           </div>
         )}
-      </div>
+      </CrmPageContainer>
     </DashboardLayout>
   );
 }

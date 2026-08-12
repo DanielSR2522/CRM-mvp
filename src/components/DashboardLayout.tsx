@@ -49,6 +49,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     setMobileMenuOpen(false);
   }, [pathname]);
 
+  const [todayApptsCount, setTodayApptsCount] = useState<number>(0);
+
   useEffect(() => {
     const getUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -70,6 +72,27 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           setUserName(full);
         } else {
           setUserName(session.user.email?.split('@')[0] || 'Agent');
+        }
+
+        // Fetch Today's Pending Appointments count for Calendar Badge
+        try {
+          const now = new Date();
+          const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).toISOString();
+          const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
+
+          const { count, error } = await supabase
+            .from('calendar_appointments')
+            .select('id', { count: 'exact', head: true })
+            .eq('agent_id', session.user.id)
+            .eq('status', 'scheduled')
+            .gte('starts_at', start)
+            .lte('starts_at', end);
+
+          if (!error && count !== null) {
+            setTodayApptsCount(count);
+          }
+        } catch (err) {
+          console.error('Error loading sidebar appointment count:', err);
         }
       }
     };
@@ -234,6 +257,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 >
                   <span className={isActive ? 'text-[#2563EB]' : 'text-[#556176]'}>{item.icon}</span>
                   <span>{item.name}</span>
+                  {item.name === 'Calendar' && todayApptsCount > 0 && (
+                    <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-bold bg-[#EEF4FF] text-[#2563EB] border border-[#BFDBFE]">
+                      {todayApptsCount}
+                    </span>
+                  )}
                 </NextLink>
               );
             })}
@@ -303,16 +331,30 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                       }
                     }}
                     title={isCollapsed ? item.name : undefined}
-                    className={`flex items-center px-3 py-2 rounded-md text-xs font-medium transition-colors gap-2.5 ${
+                    className={`flex items-center px-3 py-2 rounded-md text-xs font-medium transition-colors gap-2.5 relative ${
                       isActive
                         ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
                         : 'text-[#556176] hover:bg-[#F2F6FF] hover:text-[#172033]'
                     } ${isCollapsed ? 'justify-center px-0' : ''}`}
                   >
-                    <span className={`flex-shrink-0 ${isActive ? 'text-[#2563EB]' : 'text-[#556176]'}`}>
+                    <span className={`flex-shrink-0 relative ${isActive ? 'text-[#2563EB]' : 'text-[#556176]'}`}>
                       {item.icon}
+                      {isCollapsed && item.name === 'Calendar' && todayApptsCount > 0 && (
+                        <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-[#2563EB] text-white font-bold text-[8px] flex items-center justify-center border border-white">
+                          {todayApptsCount}
+                        </span>
+                      )}
                     </span>
-                    {!isCollapsed && <span className="truncate">{item.name}</span>}
+                    {!isCollapsed && (
+                      <>
+                        <span className="truncate">{item.name}</span>
+                        {item.name === 'Calendar' && todayApptsCount > 0 && (
+                          <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#EEF4FF] text-[#2563EB] border border-[#BFDBFE]">
+                            {todayApptsCount}
+                          </span>
+                        )}
+                      </>
+                    )}
                   </NextLink>
                 );
               })}

@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import DashboardLayout from '@/components/DashboardLayout';
+import CrmPageContainer from '@/components/layout/CrmPageContainer';
+import PolicyQuickViewDrawer, { PolicyModuleType } from '@/components/dashboard/PolicyQuickViewDrawer';
 import { supabase } from '@/lib/supabaseClient';
-import { formatIsoToUsDate, extractUsDateAnd12hTime } from '@/utils/dateUtils';
+import { formatIsoToUsDate } from '@/utils/dateUtils';
 import { formatDateMMDDYYYY } from '@/lib/formatters/date';
-import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 
 interface UserProfile {
   name: string | null;
@@ -18,68 +19,101 @@ interface ClientRow {
   full_name: string;
 }
 
-interface PolicyRow {
+export interface PcDashboardPolicy {
   id: string;
   client_id: string;
+  module_type: 'property_casualty';
   policy_type: string;
   policy_number: string | null;
   company_name: string | null;
+  effective_date: string | null;
   expiration_date: string | null;
+  premium: number | null;
   status: string;
 }
 
 interface LeadRow {
   id: string;
-  first_name: string;
-  last_name: string;
   status: string;
-  priority: string;
   next_follow_up_at: string | null;
 }
 
 interface AppointmentRow {
   id: string;
-  client_id: string | null;
-  title: string;
-  location: string | null;
   starts_at: string;
   status: string;
 }
 
-interface NeedsAttentionItem {
-  id: string;
-  type: 'expired_policy' | 'expiring_7d' | 'overdue_lead' | 'expiring_30d' | 'today_appt';
-  urgency: 'Critical' | 'High' | 'Medium' | 'Upcoming';
-  urgencyClass: string;
-  entityName: string;
-  reason: string;
-  relevantDate: string;
-  statusLabel: string;
-  actionUrl: string;
-  actionLabel: string;
-}
+export type SortableColumn =
+  | 'client_name'
+  | 'policy_number'
+  | 'policy_type'
+  | 'company_name'
+  | 'effective_date'
+  | 'expiration_date'
+  | 'days_left'
+  | 'premium'
+  | 'status';
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const { isLineEnabled } = useBusinessLines();
 
-  // Independent Data States
+  // Data States
   const [clients, setClients] = useState<ClientRow[]>([]);
-  const [policies, setPolicies] = useState<PolicyRow[]>([]);
+  const [policies, setPolicies] = useState<PcDashboardPolicy[]>([]);
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
 
   // Section Loading & Error States
   const [clientsLoading, setClientsLoading] = useState(true);
-  const [leadsLoading, setLeadsLoading] = useState(true);
-  const [apptsLoading, setApptsLoading] = useState(true);
-
   const [clientsError, setClientsError] = useState<string | null>(null);
-  const [leadsError, setLeadsError] = useState<string | null>(null);
-  const [apptsError, setApptsError] = useState<string | null>(null);
+
+  // Compact Toolbar Filter States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [lineFilter, setLineFilter] = useState('ALL');
+  const [companyFilter, setCompanyFilter] = useState('ALL');
+  const [daysFilter, setDaysFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+
+  // Column Header Sorting States (Default: Expiration Date Soonest First)
+  const [sortColumn, setSortColumn] = useState<SortableColumn>('expiration_date');
+  const [sortAscending, setSortAscending] = useState(true);
+
+  // Policy Quick View Drawer State
+  const [quickViewDrawer, setQuickViewDrawer] = useState<{
+    isOpen: boolean;
+    policyId: string | null;
+    clientId: string | null;
+    moduleType: PolicyModuleType | null;
+    policyTypeLabel?: string | null;
+  }>({
+    isOpen: false,
+    policyId: null,
+    clientId: null,
+    moduleType: null,
+    policyTypeLabel: null,
+  });
+
+  const handleOpenQuickView = useCallback((
+    policyId: string,
+    clientId: string,
+    policyTypeLabel?: string
+  ) => {
+    setQuickViewDrawer({
+      isOpen: true,
+      policyId,
+      clientId,
+      moduleType: 'property_casualty',
+      policyTypeLabel,
+    });
+  }, []);
+
+  const handleCloseQuickView = useCallback(() => {
+    setQuickViewDrawer((prev) => ({ ...prev, isOpen: false }));
+  }, []);
 
   // Client Map for quick lookup
-  const clientMap = React.useMemo(() => {
+  const clientMap = useMemo(() => {
     const map: Record<string, string> = {};
     clients.forEach((c) => {
       map[c.id] = c.full_name;
@@ -111,7 +145,7 @@ export default function DashboardPage() {
     fetchProfile();
   }, []);
 
-  // Query 1: Clients & Policies (Isolated Query)
+  // Query 1: P&C Clients & P&C Policies Only
   const loadClientsAndPolicies = useCallback(async () => {
     try {
       setClientsLoading(true);
@@ -135,69 +169,80 @@ export default function DashboardPage() {
 
       if (pcEligibleClients && pcEligibleClients.length > 0) {
         const clientIds = pcEligibleClients.map((c) => c.id);
-        const { data: policiesData, error: polErr } = await supabase
+
+        // Fetch P&C Policies ONLY (excluding Supplemental, Health, Life)
+        const { data: pcPoliciesData, error: polErr } = await supabase
           .from('policies')
-          .select('id, client_id, policy_type, policy_number, company_name, expiration_date, status')
+          .select('id, client_id, policy_type, policy_number, company_name, writing_company, effective_date, expiration_date, premium, total_premium, annual_premium, status')
           .in('client_id', clientIds);
 
         if (polErr) throw polErr;
-        setPolicies(policiesData || []);
+
+        const pcOnlyList: PcDashboardPolicy[] = [];
+
+        (pcPoliciesData || []).forEach((p: any) => {
+          const pTypeLower = (p.policy_type || '').trim().toLowerCase();
+          if (pTypeLower === 'supplemental' || pTypeLower === 'health' || pTypeLower === 'life') {
+            return;
+          }
+
+          pcOnlyList.push({
+            id: p.id,
+            client_id: p.client_id,
+            module_type: 'property_casualty',
+            policy_type: p.policy_type || 'P&C Policy',
+            policy_number: p.policy_number,
+            company_name: p.company_name || p.writing_company || null,
+            effective_date: p.effective_date,
+            expiration_date: p.expiration_date,
+            premium: p.premium || p.total_premium || p.annual_premium || null,
+            status: p.status || 'Active',
+          });
+        });
+
+        setPolicies(pcOnlyList);
       } else {
         setPolicies([]);
       }
     } catch (err: any) {
-      console.error('Error loading clients/policies:', err);
-      setClientsError(err?.message || 'Failed to load clients and policies data.');
+      console.error('Error loading clients/P&C policies:', err);
+      setClientsError(err?.message || 'Failed to load clients and P&C policies data.');
     } finally {
       setClientsLoading(false);
     }
   }, []);
 
-  // Query 2: Leads (Isolated Query)
+  // Query 2: Leads (For KPI calculation)
   const loadLeadsData = useCallback(async () => {
     try {
-      setLeadsLoading(true);
-      setLeadsError(null);
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error: fetchErr } = await supabase
+      const { data } = await supabase
         .from('leads')
-        .select('id, first_name, last_name, status, priority, next_follow_up_at')
+        .select('id, status, next_follow_up_at')
         .eq('agent_id', user.id);
 
-      if (fetchErr) throw fetchErr;
       setLeads(data || []);
-    } catch (err: any) {
-      console.error('Error loading leads:', err);
-      setLeadsError(err?.message || 'Failed to load leads data.');
-    } finally {
-      setLeadsLoading(false);
+    } catch (err) {
+      console.error('Error loading leads metrics:', err);
     }
   }, []);
 
-  // Query 3: Calendar Appointments (Isolated Query)
+  // Query 3: Calendar Appointments (For KPI calculation)
   const loadCalendarAppointments = useCallback(async () => {
     try {
-      setApptsLoading(true);
-      setApptsError(null);
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error: fetchErr } = await supabase
+      const { data } = await supabase
         .from('calendar_appointments')
-        .select('id, client_id, title, location, starts_at, status')
+        .select('id, starts_at, status')
         .eq('agent_id', user.id);
 
-      if (fetchErr) throw fetchErr;
       setAppointments(data || []);
-    } catch (err: any) {
-      console.error('Error loading appointments:', err);
-      setApptsError(err?.message || 'Failed to load calendar schedule.');
-    } finally {
-      setApptsLoading(false);
+    } catch (err) {
+      console.error('Error loading calendar appointments metrics:', err);
     }
   }, []);
 
@@ -210,193 +255,254 @@ export default function DashboardPage() {
   // DATE HELPERS & METRIC COMPUTATIONS
   const now = new Date();
   const todayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().split('T')[0];
-  
-  const in7Days = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
-  const in7DaysIso = in7Days.toISOString().split('T')[0];
 
   const in30Days = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30);
   const in30DaysIso = in30Days.toISOString().split('T')[0];
 
-  // 1. KPI Metric Calculations
+  // KPI Metrics
   const totalClientsCount = clients.length;
-  const activePolicies = policies.filter((p) => p.status === 'Active');
-  const activePoliciesCount = activePolicies.length;
+  const activePcPolicies = useMemo(() => policies.filter((p) => p.status === 'Active'), [policies]);
+  const activePcPoliciesCount = activePcPolicies.length;
 
-  const policiesExpiring30Days = activePolicies.filter((p) => {
-    if (!p.expiration_date) return false;
-    return p.expiration_date >= todayIso && p.expiration_date <= in30DaysIso;
-  });
-  const policiesExpiring30DaysCount = policiesExpiring30Days.length;
+  const pcPoliciesExpiring30Days = useMemo(() => {
+    return activePcPolicies.filter((p) => {
+      if (!p.expiration_date) return false;
+      return p.expiration_date >= todayIso && p.expiration_date <= in30DaysIso;
+    });
+  }, [activePcPolicies, todayIso, in30DaysIso]);
+  const pcPoliciesExpiring30DaysCount = pcPoliciesExpiring30Days.length;
 
-  const leadsInProgress = leads.filter((l) => ['new', 'contacted', 'in_progress', 'qualified'].includes(l.status));
-  const leadsInProgressCount = leadsInProgress.length;
+  const leadsInProgressCount = useMemo(() => leads.filter((l) => ['new', 'contacted', 'in_progress', 'qualified'].includes(l.status)).length, [leads]);
 
-  const leadFollowUpsDue = leads.filter((l) => {
-    if (!l.next_follow_up_at || ['converted', 'lost'].includes(l.status)) return false;
-    return new Date(l.next_follow_up_at) <= now;
-  });
-  const leadFollowUpsDueCount = leadFollowUpsDue.length;
+  const leadFollowUpsDueCount = useMemo(() => {
+    return leads.filter((l) => {
+      if (!l.next_follow_up_at || ['converted', 'lost'].includes(l.status)) return false;
+      return new Date(l.next_follow_up_at) <= now;
+    }).length;
+  }, [leads, now]);
 
-  // Local Day Range for Today's Appointments
+  // Today's Appointments
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
 
-  const appointmentsToday = appointments.filter((a) => {
-    if (a.status !== 'scheduled') return false;
-    const start = new Date(a.starts_at);
-    return start >= todayStart && start <= todayEnd;
-  }).sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime());
+  const appointmentsTodayCount = useMemo(() => {
+    return appointments.filter((a) => {
+      if (a.status !== 'scheduled') return false;
+      const start = new Date(a.starts_at);
+      return start >= todayStart && start <= todayEnd;
+    }).length;
+  }, [appointments, todayStart, todayEnd]);
 
-  const appointmentsTodayCount = appointmentsToday.length;
-
-  // 2. Needs Attention Item Assembly (Prioritized & Capped at 8-10)
-  const needsAttentionItems = React.useMemo<NeedsAttentionItem[]>(() => {
-    const items: NeedsAttentionItem[] = [];
-
-    if (isLineEnabled('property_casualty')) {
-      // Priority 1: Expired Policies
-      activePolicies.forEach((p) => {
-        if (p.expiration_date && p.expiration_date < todayIso) {
-          items.push({
-            id: `exp-pol-${p.id}`,
-            type: 'expired_policy',
-            urgency: 'Critical',
-            urgencyClass: 'bg-rose-100 text-rose-800 border-rose-200',
-            entityName: clientMap[p.client_id] || 'Client Policy',
-            reason: `Policy #${p.policy_number || 'N/A'} (${p.policy_type}) has expired!`,
-            relevantDate: formatIsoToUsDate(p.expiration_date),
-            statusLabel: 'Expired',
-            actionUrl: `/clients/${p.client_id}`,
-            actionLabel: 'View Client',
-          });
-        }
-      });
-
-      // Priority 2: Policies Expiring within 7 Days
-      activePolicies.forEach((p) => {
-        if (p.expiration_date && p.expiration_date >= todayIso && p.expiration_date <= in7DaysIso) {
-          const days = Math.ceil((new Date(p.expiration_date + 'T00:00:00').getTime() - new Date(todayIso + 'T00:00:00').getTime()) / (1000 * 3600 * 24));
-          items.push({
-            id: `exp-7d-${p.id}`,
-            type: 'expiring_7d',
-            urgency: 'High',
-            urgencyClass: 'bg-amber-100 text-amber-800 border-amber-200',
-            entityName: clientMap[p.client_id] || 'Client Policy',
-            reason: `Policy #${p.policy_number || 'N/A'} expires in ${days} ${days === 1 ? 'day' : 'days'}.`,
-            relevantDate: formatIsoToUsDate(p.expiration_date),
-            statusLabel: `Expires in ${days}d`,
-            actionUrl: `/clients/${p.client_id}`,
-            actionLabel: 'Renew Policy',
-          });
-        }
-      });
-    }
-
-    // Priority 3: Leads with Overdue Follow-ups
-    leadFollowUpsDue.forEach((l) => {
-      const { dateUs, hour12, minute, ampm } = extractUsDateAnd12hTime(l.next_follow_up_at);
-      items.push({
-        id: `overdue-lead-${l.id}`,
-        type: 'overdue_lead',
-        urgency: 'High',
-        urgencyClass: 'bg-purple-100 text-purple-800 border-purple-200',
-        entityName: `${l.first_name} ${l.last_name}`,
-        reason: 'Overdue scheduled follow-up outreach.',
-        relevantDate: `${dateUs} ${hour12}:${minute} ${ampm}`,
-        statusLabel: 'Overdue Follow-up',
-        actionUrl: `/leads/${l.id}`,
-        actionLabel: 'Contact Lead',
-      });
+  // DYNAMIC FILTER DROPDOWN OPTIONS (From loaded P&C dataset)
+  const availableLines = useMemo(() => {
+    const lines = new Set<string>();
+    activePcPolicies.forEach((p) => {
+      if (p.policy_type) lines.add(p.policy_type);
     });
+    return Array.from(lines).sort();
+  }, [activePcPolicies]);
 
-    if (isLineEnabled('property_casualty')) {
-      // Priority 4: Policies Expiring in 8–30 Days
-      activePolicies.forEach((p) => {
-        if (p.expiration_date && p.expiration_date > in7DaysIso && p.expiration_date <= in30DaysIso) {
-          const days = Math.ceil((new Date(p.expiration_date + 'T00:00:00').getTime() - new Date(todayIso + 'T00:00:00').getTime()) / (1000 * 3600 * 24));
-          items.push({
-            id: `exp-30d-${p.id}`,
-            type: 'expiring_30d',
-            urgency: 'Medium',
-            urgencyClass: 'bg-blue-100 text-blue-800 border-blue-200',
-            entityName: clientMap[p.client_id] || 'Client Policy',
-            reason: `Policy #${p.policy_number || 'N/A'} expires in ${days} days.`,
-            relevantDate: formatIsoToUsDate(p.expiration_date),
-            statusLabel: `Expires in ${days}d`,
-            actionUrl: `/clients/${p.client_id}`,
-            actionLabel: 'Review',
-          });
+  const availableCompanies = useMemo(() => {
+    const compMap = new Map<string, string>();
+    activePcPolicies.forEach((p) => {
+      if (p.company_name && p.company_name.trim()) {
+        const clean = p.company_name.trim();
+        const lower = clean.toLowerCase();
+        if (!compMap.has(lower)) {
+          compMap.set(lower, clean);
         }
-      });
-    }
-
-    // Priority 5: Today's Pending Appointments
-    appointmentsToday.forEach((a) => {
-      const { hour12, minute, ampm } = extractUsDateAnd12hTime(a.starts_at);
-      items.push({
-        id: `today-appt-${a.id}`,
-        type: 'today_appt',
-        urgency: 'Upcoming',
-        urgencyClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-        entityName: a.client_id ? (clientMap[a.client_id] || 'Client') : 'Scheduled Meeting',
-        reason: `Today's Appointment: "${a.title}"`,
-        relevantDate: `Today at ${hour12}:${minute} ${ampm}`,
-        statusLabel: 'Scheduled Today',
-        actionUrl: '/calendar',
-        actionLabel: 'View Schedule',
-      });
+      }
     });
+    return Array.from(compMap.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [activePcPolicies]);
 
-    // Cap at 10 items max
-    return items.slice(0, 10);
-  }, [activePolicies, leadFollowUpsDue, appointmentsToday, clientMap, todayIso, in7DaysIso, in30DaysIso]);
+  const availableStatuses = useMemo(() => {
+    const statuses = new Set<string>();
+    policies.forEach((p) => {
+      if (p.status) statuses.add(p.status);
+    });
+    return Array.from(statuses).sort();
+  }, [policies]);
 
-  // 3. Upcoming Expirations List (Nearest 5–8 items)
-  const upcomingExpirationsList = React.useMemo(() => {
-    return activePolicies
-      .filter((p) => p.expiration_date && p.expiration_date >= todayIso)
-      .sort((a, b) => (a.expiration_date! > b.expiration_date! ? 1 : -1))
-      .slice(0, 8)
+  // CLEAR FILTERS STATE CHECK
+  const isFiltered = useMemo(() => {
+    return (
+      searchQuery.trim() !== '' ||
+      lineFilter !== 'ALL' ||
+      companyFilter !== 'ALL' ||
+      daysFilter !== 'ALL' ||
+      statusFilter !== 'ALL' ||
+      sortColumn !== 'expiration_date' ||
+      !sortAscending
+    );
+  }, [searchQuery, lineFilter, companyFilter, daysFilter, statusFilter, sortColumn, sortAscending]);
+
+  const handleClearFilters = useCallback(() => {
+    setSearchQuery('');
+    setLineFilter('ALL');
+    setCompanyFilter('ALL');
+    setDaysFilter('ALL');
+    setStatusFilter('ALL');
+    setSortColumn('expiration_date');
+    setSortAscending(true);
+  }, []);
+
+  // Column Header Click Handler
+  const handleHeaderSort = useCallback((column: SortableColumn) => {
+    if (sortColumn === column) {
+      setSortAscending((prev) => !prev);
+    } else {
+      setSortColumn(column);
+      setSortAscending(true);
+    }
+  }, [sortColumn]);
+
+  // DERIVED PIPELINE: activePcPolicies -> search -> filters -> sorting
+  const displayedPolicies = useMemo(() => {
+    return activePcPolicies
       .map((p) => {
-        const daysRemaining = Math.ceil(
-          (new Date(p.expiration_date + 'T00:00:00').getTime() - new Date(todayIso + 'T00:00:00').getTime()) / (1000 * 3600 * 24)
-        );
+        const daysRemaining = p.expiration_date
+          ? Math.ceil(
+              (new Date(p.expiration_date + 'T00:00:00').getTime() - new Date(todayIso + 'T00:00:00').getTime()) /
+                (1000 * 3600 * 24)
+            )
+          : 9999;
         return {
           ...p,
           clientName: clientMap[p.client_id] || 'Client Record',
-          formattedExpDate: formatIsoToUsDate(p.expiration_date),
+          formattedEffDate: p.effective_date ? formatIsoToUsDate(p.effective_date) : '—',
+          formattedExpDate: p.expiration_date ? formatIsoToUsDate(p.expiration_date) : '—',
           daysRemaining,
         };
+      })
+      .filter((p) => {
+        // 1. Future/Active Expiration filter
+        if (!p.expiration_date || p.expiration_date < todayIso) return false;
+
+        // 2. Search Query (Client, Policy #, Carrier, Type)
+        if (searchQuery.trim()) {
+          const q = searchQuery.trim().toLowerCase();
+          const matchesName = p.clientName.toLowerCase().includes(q);
+          const matchesPolNum = (p.policy_number || '').toLowerCase().includes(q);
+          const matchesCompany = (p.company_name || '').toLowerCase().includes(q);
+          const matchesType = (p.policy_type || '').toLowerCase().includes(q);
+          if (!matchesName && !matchesPolNum && !matchesCompany && !matchesType) {
+            return false;
+          }
+        }
+
+        // 3. Line / Type Filter
+        if (lineFilter !== 'ALL' && p.policy_type !== lineFilter) {
+          return false;
+        }
+
+        // 4. Company / Carrier Filter
+        if (companyFilter !== 'ALL') {
+          const pCompLower = (p.company_name || '').trim().toLowerCase();
+          if (pCompLower !== companyFilter.trim().toLowerCase()) {
+            return false;
+          }
+        }
+
+        // 5. Days Left Filter
+        if (daysFilter !== 'ALL') {
+          const days = p.daysRemaining;
+          if (daysFilter === '0-7' && (days < 0 || days > 7)) return false;
+          if (daysFilter === '8-15' && (days < 8 || days > 15)) return false;
+          if (daysFilter === '16-30' && (days < 16 || days > 30)) return false;
+          if (daysFilter === '31-60' && (days < 31 || days > 60)) return false;
+          if (daysFilter === '61-90' && (days < 61 || days > 90)) return false;
+          if (daysFilter === '90+' && days <= 90) return false;
+        }
+
+        // 6. Status Filter
+        if (statusFilter !== 'ALL' && p.status !== statusFilter) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        let comparison = 0;
+
+        if (sortColumn === 'expiration_date') {
+          const dateA = a.expiration_date || '9999-12-31';
+          const dateB = b.expiration_date || '9999-12-31';
+          comparison = dateA.localeCompare(dateB);
+        } else if (sortColumn === 'effective_date') {
+          const dateA = a.effective_date || '9999-12-31';
+          const dateB = b.effective_date || '9999-12-31';
+          comparison = dateA.localeCompare(dateB);
+        } else if (sortColumn === 'client_name') {
+          comparison = a.clientName.localeCompare(b.clientName, undefined, { sensitivity: 'base' });
+        } else if (sortColumn === 'policy_number') {
+          const numA = a.policy_number || '';
+          const numB = b.policy_number || '';
+          comparison = numA.localeCompare(numB, undefined, { numeric: true, sensitivity: 'base' });
+        } else if (sortColumn === 'policy_type') {
+          comparison = a.policy_type.localeCompare(b.policy_type, undefined, { sensitivity: 'base' });
+        } else if (sortColumn === 'company_name') {
+          const compA = a.company_name || '';
+          const compB = b.company_name || '';
+          comparison = compA.localeCompare(compB, undefined, { sensitivity: 'base' });
+        } else if (sortColumn === 'days_left') {
+          comparison = a.daysRemaining - b.daysRemaining;
+        } else if (sortColumn === 'premium') {
+          const premA = a.premium || 0;
+          const premB = b.premium || 0;
+          comparison = premA - premB;
+        } else if (sortColumn === 'status') {
+          comparison = a.status.localeCompare(b.status, undefined, { sensitivity: 'base' });
+        }
+
+        return sortAscending ? comparison : -comparison;
       });
-  }, [activePolicies, clientMap, todayIso]);
+  }, [
+    activePcPolicies,
+    clientMap,
+    todayIso,
+    searchQuery,
+    lineFilter,
+    companyFilter,
+    daysFilter,
+    statusFilter,
+    sortColumn,
+    sortAscending,
+  ]);
 
-  // 4. Lead Pipeline Snapshot Counts
-  const leadPipelineSnapshot = React.useMemo(() => {
-    const counts = {
-      new: 0,
-      contacted: 0,
-      in_progress: 0,
-      qualified: 0,
-      converted: 0,
-      lost: 0,
-    };
-    leads.forEach((l) => {
-      if (l.status in counts) {
-        counts[l.status as keyof typeof counts]++;
-      }
-    });
-    const totalActiveLeads = leads.filter((l) => !['converted', 'lost'].includes(l.status)).length;
-    return { counts, totalActiveLeads };
-  }, [leads]);
-
-  // US Current Date Formatting
   const currentDateFormatted = formatDateMMDDYYYY(now);
+
+  const formatCurrency = (val?: number | null) => {
+    if (val === undefined || val === null) return '—';
+    return `$${Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  // Helper for rendering clickable sortable table headers with chevron indicators
+  const renderSortableHeader = (label: string, column: SortableColumn, alignRight = false) => {
+    const isActive = sortColumn === column;
+    return (
+      <th className={`py-2.5 px-3 ${alignRight ? 'text-right' : ''}`}>
+        <button
+          type="button"
+          onClick={() => handleHeaderSort(column)}
+          className={`inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider hover:text-[#172033] transition-colors focus:outline-none ${
+            isActive ? 'text-[#2563EB] font-bold' : 'text-[#556176]'
+          } ${alignRight ? 'ml-auto' : ''}`}
+        >
+          <span>{label}</span>
+          <span className={`text-[10px] ${isActive ? 'text-[#2563EB] font-bold' : 'text-[#7C8799]'}`}>
+            {isActive ? (sortAscending ? '↑' : '↓') : '↕'}
+          </span>
+        </button>
+      </th>
+    );
+  };
 
   return (
     <DashboardLayout>
-      <div className="space-y-6 max-w-7xl mx-auto pb-10 font-sans">
+      <CrmPageContainer className="pb-10">
         
-        {/* SECTION 1: COMPACT HEADER */}
+        {/* SECTION 1: HEADER */}
         <div className="crm-card p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
@@ -408,7 +514,7 @@ export default function DashboardPage() {
               </span>
             </div>
             <p className="text-xs text-[#556176] mt-0.5">
-              Here is an overview of your active clients, policies, and priority items today.
+              Property & Casualty operational renewal dashboard and client portfolio summary.
             </p>
           </div>
 
@@ -452,10 +558,10 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Active Policies */}
+          {/* Active P&C Policies */}
           <div className="crm-card p-4">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#556176]">Active Policies</span>
+              <span className="text-[11px] font-semibold text-[#556176]">Active P&C Policies</span>
               <div className="w-7 h-7 rounded bg-[#EEF4FF] text-[#2563EB] flex items-center justify-center border border-[#BFDBFE]">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -463,15 +569,15 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{clientsLoading ? '...' : activePoliciesCount}</div>
-              <span className="text-[10px] text-[#7C8799]">In-force policies</span>
+              <div className="text-2xl font-bold text-[#172033]">{clientsLoading ? '...' : activePcPoliciesCount}</div>
+              <span className="text-[10px] text-[#7C8799]">In-force P&C policies</span>
             </div>
           </div>
 
-          {/* Policies Expiring in 30 Days */}
+          {/* Expiring P&C 30 Days */}
           <div className="crm-card p-4">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#556176]">Expiring 30 Days</span>
+              <span className="text-[11px] font-semibold text-[#556176]">Expiring P&C 30 Days</span>
               <div className="w-7 h-7 rounded bg-[#FEFCE8] text-[#B7791F] flex items-center justify-center border border-[#FEF08A]">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -479,8 +585,8 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{clientsLoading ? '...' : policiesExpiring30DaysCount}</div>
-              <span className="text-[10px] text-[#7C8799]">Require renewal</span>
+              <div className="text-2xl font-bold text-[#172033]">{clientsLoading ? '...' : pcPoliciesExpiring30DaysCount}</div>
+              <span className="text-[10px] text-[#7C8799]">P&C renewals due</span>
             </div>
           </div>
 
@@ -495,7 +601,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{leadsLoading ? '...' : leadsInProgressCount}</div>
+              <div className="text-2xl font-bold text-[#172033]">{leadsInProgressCount}</div>
               <span className="text-[10px] text-[#7C8799]">In pipeline</span>
             </div>
           </div>
@@ -511,7 +617,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{leadsLoading ? '...' : leadFollowUpsDueCount}</div>
+              <div className="text-2xl font-bold text-[#172033]">{leadFollowUpsDueCount}</div>
               <span className="text-[10px] text-[#7C8799]">Overdue / Scheduled</span>
             </div>
           </div>
@@ -527,252 +633,211 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{apptsLoading ? '...' : appointmentsTodayCount}</div>
+              <div className="text-2xl font-bold text-[#172033]">{appointmentsTodayCount}</div>
               <span className="text-[10px] text-[#7C8799]">Scheduled today</span>
             </div>
           </div>
         </div>
 
-        {/* MIDDLE ROW: NEEDS ATTENTION & TODAY'S SCHEDULE */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* SECTION 3: NEEDS ATTENTION (Span 2 cols on Desktop) */}
-          <div className="lg:col-span-2 crm-card p-5 space-y-4">
-            <div className="flex items-center justify-between border-b border-[#E8ECF2] pb-3">
-              <div>
-                <h2 className="text-sm font-semibold text-[#172033]">Needs Attention</h2>
-                <p className="text-xs text-[#556176]">Prioritized operational items requiring immediate action</p>
+        {/* SECTION 3: MAIN OPERATIONAL WORKFLOW — UPCOMING P&C POLICY EXPIRATIONS (FULL WIDTH) */}
+        <div className="crm-card p-5 space-y-4 w-full">
+          {/* Card Title Header */}
+          <div className="flex items-center justify-between border-b border-[#E8ECF2] pb-3">
+            <div>
+              <h2 className="text-sm font-semibold text-[#172033]">Upcoming P&C Policy Expirations</h2>
+              <p className="text-xs text-[#556176]">Primary operational P&C policy renewals requiring immediate attention</p>
+            </div>
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-[#F8FAFC] border border-[#DCE2EA] text-[#556176]">
+              {displayedPolicies.length} {displayedPolicies.length === 1 ? 'P&C policy' : 'P&C policies'}
+            </span>
+          </div>
+
+          {/* SINGLE COMPACT TOOLBAR ROW (Search + Line + Company + Days + Status + Clear) */}
+          <div className="flex flex-wrap items-center gap-2.5 bg-[#F8FAFC] p-3 rounded-md border border-[#E8ECF2]">
+            {/* Compact Search Input */}
+            <div className="relative w-48 sm:w-56">
+              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-[#7C8799]">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
               </div>
-              <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-[#F8FAFC] border border-[#DCE2EA] text-[#556176]">
-                {needsAttentionItems.length} items
-              </span>
+              <input
+                type="text"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 bg-white border border-[#DCE2EA] rounded-md text-xs text-[#172033] placeholder-[#7C8799] focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
+              />
             </div>
 
-            {(clientsLoading || leadsLoading || apptsLoading) ? (
-              <div className="p-8 text-center text-xs text-[#7C8799]">Loading priority queue...</div>
-            ) : clientsError ? (
-              <div className="p-3.5 rounded-md bg-[#FEF2F2] border border-[#FECACA] text-[#C24141] text-xs font-semibold">{clientsError}</div>
-            ) : needsAttentionItems.length === 0 ? (
-              <div className="p-8 text-center text-xs text-[#7C8799]">
-                No urgent policy expirations, overdue follow-ups, or pending tasks.
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {needsAttentionItems.map((item) => (
-                  <div key={item.id} className="p-3 rounded-md border border-[#E8ECF2] hover:bg-[#F8FAFC] transition-colors flex items-center justify-between gap-4">
-                    <div className="space-y-0.5 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border uppercase tracking-wider ${
-                          item.urgency === 'Critical' ? 'bg-[#FEF2F2] text-[#C24141] border-[#FECACA]' :
-                          item.urgency === 'High' ? 'bg-[#FEFCE8] text-[#B7791F] border-[#FEF08A]' :
-                          'bg-[#EEF4FF] text-[#2563EB] border-[#BFDBFE]'
-                        }`}>
-                          {item.urgency}
-                        </span>
-                        <span className="font-semibold text-xs text-[#172033] truncate">{item.entityName}</span>
-                        <span className="text-[11px] text-[#7C8799]">• {item.relevantDate}</span>
-                      </div>
-                      <p className="text-xs text-[#556176] truncate">{item.reason}</p>
-                    </div>
-
-                    <Link
-                      href={item.actionUrl}
-                      className="crm-btn-primary text-xs px-3 py-1.5 flex-shrink-0"
-                    >
-                      {item.actionLabel}
-                    </Link>
-                  </div>
+            {/* Line / Type Filter Dropdown */}
+            <div className="flex-shrink-0">
+              <select
+                value={lineFilter}
+                onChange={(e) => setLineFilter(e.target.value)}
+                className="bg-white border border-[#DCE2EA] rounded-md px-2.5 py-1.5 text-xs text-[#172033] font-medium focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
+              >
+                <option value="ALL">All P&C Lines</option>
+                {availableLines.map((line) => (
+                  <option key={line} value={line}>{line}</option>
                 ))}
-              </div>
+              </select>
+            </div>
+
+            {/* Company / Carrier Filter Dropdown */}
+            <div className="flex-shrink-0">
+              <select
+                value={companyFilter}
+                onChange={(e) => setCompanyFilter(e.target.value)}
+                className="bg-white border border-[#DCE2EA] rounded-md px-2.5 py-1.5 text-xs text-[#172033] font-medium focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
+              >
+                <option value="ALL">All Companies</option>
+                {availableCompanies.map((comp) => (
+                  <option key={comp} value={comp}>{comp}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Days Left Filter Dropdown */}
+            <div className="flex-shrink-0">
+              <select
+                value={daysFilter}
+                onChange={(e) => setDaysFilter(e.target.value)}
+                className="bg-white border border-[#DCE2EA] rounded-md px-2.5 py-1.5 text-xs text-[#172033] font-medium focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
+              >
+                <option value="ALL">All Days Left</option>
+                <option value="0-7">0–7 days</option>
+                <option value="8-15">8–15 days</option>
+                <option value="16-30">16–30 days</option>
+                <option value="31-60">31–60 days</option>
+                <option value="61-90">61–90 days</option>
+                <option value="90+">90+ days</option>
+              </select>
+            </div>
+
+            {/* Status Filter Dropdown */}
+            <div className="flex-shrink-0">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="bg-white border border-[#DCE2EA] rounded-md px-2.5 py-1.5 text-xs text-[#172033] font-medium focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
+              >
+                <option value="ALL">All Statuses</option>
+                {availableStatuses.map((st) => (
+                  <option key={st} value={st}>{st}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Clear Filters Button */}
+            {isFiltered && (
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                className="flex-shrink-0 text-xs font-semibold text-[#C24141] hover:text-[#991B1B] hover:bg-[#FEF2F2] px-2.5 py-1.5 rounded-md border border-[#FECACA] transition-colors"
+              >
+                Clear Filters
+              </button>
             )}
           </div>
 
-          {/* SECTION 4: TODAY'S SCHEDULE (Span 1 col on Desktop) */}
-          <div className="crm-card p-5 space-y-4">
-            <div className="flex items-center justify-between border-b border-[#E8ECF2] pb-3">
-              <div>
-                <h2 className="text-sm font-semibold text-[#172033]">Today's Schedule</h2>
-                <p className="text-xs text-[#556176]">Appointments scheduled for today</p>
-              </div>
-              <Link href="/calendar" className="text-xs font-semibold text-[#2563EB] hover:underline">
-                Open Calendar →
-              </Link>
+          {/* TABLE OR EMPTY STATE */}
+          {clientsLoading ? (
+            <div className="p-12 text-center text-xs text-[#7C8799]">Loading P&C expirations...</div>
+          ) : clientsError ? (
+            <div className="p-4 rounded-md bg-[#FEF2F2] border border-[#FECACA] text-[#C24141] text-xs font-semibold">{clientsError}</div>
+          ) : displayedPolicies.length === 0 ? (
+            <div className="p-12 text-center space-y-3">
+              <p className="text-xs text-[#556176] font-medium">
+                {isFiltered ? 'No P&C policies match the current filters.' : 'No active P&C policies expiring in the near future.'}
+              </p>
+              {isFiltered && (
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="crm-btn-secondary text-xs px-3.5 py-1.5"
+                >
+                  Clear Filters
+                </button>
+              )}
             </div>
-
-            {apptsLoading ? (
-              <div className="p-8 text-center text-xs text-slate-400">Loading schedule...</div>
-            ) : apptsError ? (
-              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">{apptsError}</div>
-            ) : appointmentsToday.length === 0 ? (
-              <div className="p-8 text-center text-xs text-slate-500">
-                No appointments scheduled for today.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {appointmentsToday.map((appt) => {
-                  const { hour12, minute, ampm } = extractUsDateAnd12hTime(appt.starts_at);
-                  const clientName = appt.client_id ? (clientMap[appt.client_id] || 'Client') : 'Scheduled Meeting';
-
-                  return (
-                    <div key={appt.id} className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-blue-600">{hour12}:{minute} {ampm}</span>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase">
-                          {appt.status}
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[#F8FAFC] border-b border-[#E8ECF2] text-[11px] font-semibold text-[#556176] uppercase tracking-wider">
+                    {renderSortableHeader('Client', 'client_name')}
+                    {renderSortableHeader('Policy / Number', 'policy_number')}
+                    {renderSortableHeader('Line / Type', 'policy_type')}
+                    {renderSortableHeader('Company', 'company_name')}
+                    {renderSortableHeader('Effective Date', 'effective_date')}
+                    {renderSortableHeader('Expiration Date', 'expiration_date')}
+                    {renderSortableHeader('Days Left', 'days_left')}
+                    {renderSortableHeader('Premium', 'premium')}
+                    {renderSortableHeader('Status', 'status')}
+                    <th className="py-2.5 px-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E8ECF2] text-xs text-[#172033]">
+                  {displayedPolicies.map((p) => (
+                    <tr key={p.id} className="hover:bg-[#F8FAFC] transition-colors">
+                      <td className="py-3 px-3 font-semibold text-[#172033]">{p.clientName}</td>
+                      <td className="py-3 px-3">
+                        <div className="font-medium text-[#172033]">{p.policy_type}</div>
+                        <div className="text-[10px] text-[#7C8799] font-mono">#{p.policy_number || 'N/A'}</div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-semibold border uppercase tracking-wider bg-[#EEF4FF] text-[#2563EB] border-[#BFDBFE]">
+                          Property & Casualty
                         </span>
-                      </div>
-                      <div className="font-semibold text-xs text-slate-900">{appt.title}</div>
-                      <div className="text-[11px] text-slate-500 flex items-center justify-between">
-                        <span>{clientName}</span>
-                        {appt.location && <span className="truncate max-w-[120px]">{appt.location}</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* LOWER ROW: UPCOMING EXPIRATIONS & LEAD PIPELINE SNAPSHOT */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* SECTION 5: UPCOMING POLICY EXPIRATIONS (Span 2 cols on Desktop) */}
-          <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Upcoming Policy Expirations</h2>
-                <p className="text-xs text-slate-500">Nearest policy expirations requiring renewal attention</p>
-              </div>
-              <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                {upcomingExpirationsList.length} items
-              </span>
-            </div>
-
-            {clientsLoading ? (
-              <div className="p-8 text-center text-xs text-slate-400">Loading expirations...</div>
-            ) : upcomingExpirationsList.length === 0 ? (
-              <div className="p-8 text-center text-xs text-slate-500">
-                No active policies expiring in the near future.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                      <th className="py-2.5 px-3">Client</th>
-                      <th className="py-2.5 px-3">Policy / Number</th>
-                      <th className="py-2.5 px-3">Company</th>
-                      <th className="py-2.5 px-3">Expiration Date</th>
-                      <th className="py-2.5 px-3">Days Left</th>
-                      <th className="py-2.5 px-3 text-right">Action</th>
+                      </td>
+                      <td className="py-3 px-3 text-[#556176]">{p.company_name || '—'}</td>
+                      <td className="py-3 px-3 text-[#556176]">{p.formattedEffDate}</td>
+                      <td className="py-3 px-3 font-medium text-[#172033]">{p.formattedExpDate}</td>
+                      <td className="py-3 px-3">
+                        <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-semibold ${
+                          p.daysRemaining <= 7 ? 'bg-[#FEFCE8] text-[#B7791F] border border-[#FEF08A]' : 'bg-[#EEF4FF] text-[#2563EB] border border-[#BFDBFE]'
+                        }`}>
+                          {p.daysRemaining} {p.daysRemaining === 1 ? 'day' : 'days'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 font-medium text-[#172033]">
+                        {formatCurrency(p.premium)}
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-semibold border ${
+                          p.status === 'Active' ? 'bg-[#F0FDF4] text-[#15803D] border-[#DCFCE7]' : 'bg-[#FEF2F2] text-[#C24141] border-[#FECACA]'
+                        }`}>
+                          {p.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        <button
+                          onClick={() => handleOpenQuickView(p.id, p.client_id, p.policy_type)}
+                          className="crm-btn-secondary text-xs px-3 py-1"
+                        >
+                          Preview
+                        </button>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-xs text-slate-800">
-                    {upcomingExpirationsList.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-3 font-semibold text-slate-900">{p.clientName}</td>
-                        <td className="py-3 px-3">
-                          <div className="font-medium text-slate-900">{p.policy_type}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">#{p.policy_number || 'N/A'}</div>
-                        </td>
-                        <td className="py-3 px-3 text-slate-600">{p.company_name || 'N/A'}</td>
-                        <td className="py-3 px-3 font-medium text-slate-900">{p.formattedExpDate}</td>
-                        <td className="py-3 px-3">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-bold ${
-                            p.daysRemaining <= 7 ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {p.daysRemaining} {p.daysRemaining === 1 ? 'day' : 'days'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-right">
-                          <Link
-                            href={`/clients/${p.client_id}`}
-                            className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-semibold transition-colors"
-                          >
-                            Open
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* SECTION 6: LEAD PIPELINE SNAPSHOT (Span 1 col on Desktop) */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Lead Pipeline</h2>
-                <p className="text-xs text-slate-500">Stage breakdown & active summary</p>
-              </div>
-              <Link href="/leads" className="text-xs font-bold text-purple-600 hover:underline">
-                Open Leads →
-              </Link>
+                  ))}
+                </tbody>
+              </table>
             </div>
-
-            {leadsLoading ? (
-              <div className="p-8 text-center text-xs text-slate-400">Loading pipeline...</div>
-            ) : leadsError ? (
-              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">{leadsError}</div>
-            ) : (
-              <div className="space-y-4">
-                {/* Stage Breakdown Grid */}
-                <div className="grid grid-cols-2 gap-2.5 text-xs">
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                    <span className="font-semibold text-slate-600">New</span>
-                    <span className="font-extrabold text-slate-900">{leadPipelineSnapshot.counts.new}</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                    <span className="font-semibold text-slate-600">Contacted</span>
-                    <span className="font-extrabold text-slate-900">{leadPipelineSnapshot.counts.contacted}</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                    <span className="font-semibold text-slate-600">In Progress</span>
-                    <span className="font-extrabold text-slate-900">{leadPipelineSnapshot.counts.in_progress}</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                    <span className="font-semibold text-slate-600">Qualified</span>
-                    <span className="font-extrabold text-slate-900">{leadPipelineSnapshot.counts.qualified}</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center justify-between">
-                    <span className="font-semibold">Converted</span>
-                    <span className="font-extrabold">{leadPipelineSnapshot.counts.converted}</span>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 flex items-center justify-between">
-                    <span className="font-semibold">Lost</span>
-                    <span className="font-extrabold">{leadPipelineSnapshot.counts.lost}</span>
-                  </div>
-                </div>
-
-                {/* Pipeline Summary Footer */}
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-700">
-                  <span>Total Active Leads: <strong className="text-slate-900">{leadPipelineSnapshot.totalActiveLeads}</strong></span>
-                  <span>Follow-ups: <strong className="text-rose-600">{leadFollowUpsDueCount}</strong></span>
-                </div>
-
-                <div className="flex items-center gap-2 pt-1">
-                  <Link
-                    href="/leads"
-                    className="flex-1 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold text-center transition-colors shadow-sm"
-                  >
-                    Open Leads
-                  </Link>
-                  <Link
-                    href="/leads"
-                    className="flex-1 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold text-center transition-colors"
-                  >
-                    + New Lead
-                  </Link>
-                </div>
-              </div>
-            )}
-          </div>
+          )}
         </div>
 
-      </div>
+        {/* POLICY QUICK VIEW DRAWER COMPONENT (RIGHT SLIDE-OVER) */}
+        <PolicyQuickViewDrawer
+          isOpen={quickViewDrawer.isOpen}
+          onClose={handleCloseQuickView}
+          policyId={quickViewDrawer.policyId}
+          clientId={quickViewDrawer.clientId}
+          moduleType={quickViewDrawer.moduleType}
+          policyTypeLabel={quickViewDrawer.policyTypeLabel}
+        />
+
+      </CrmPageContainer>
     </DashboardLayout>
   );
 }

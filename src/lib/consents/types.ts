@@ -72,7 +72,11 @@ export type BlockType =
   | 'consent'
   | 'signature_placeholder'
   | 'date'
-  | 'footer';
+  | 'footer'
+  | 'image'
+  | 'checkbox'
+  | 'yes_no'
+  | 'initials';
 
 export const BLOCK_TYPES: BlockType[] = [
   'heading',
@@ -85,6 +89,10 @@ export const BLOCK_TYPES: BlockType[] = [
   'signature_placeholder',
   'date',
   'footer',
+  'image',
+  'checkbox',
+  'yes_no',
+  'initials',
 ];
 
 export const BLOCK_LABELS: Record<BlockType, string> = {
@@ -98,6 +106,10 @@ export const BLOCK_LABELS: Record<BlockType, string> = {
   signature_placeholder: 'Signature area',
   date: 'Date',
   footer: 'Footer',
+  image: 'Image',
+  checkbox: 'Checkbox',
+  yes_no: 'Yes / No',
+  initials: 'Initials',
 };
 
 export type HeadingLevel = 1 | 2 | 3;
@@ -138,6 +150,39 @@ export interface SpacerBlock extends BaseBlock {
   size: 'small' | 'medium' | 'large';
 }
 
+export interface ImageBlock extends BaseBlock {
+  type: 'image';
+  url?: string | null;
+  storage_path?: string | null;
+  alt_text?: string;
+  caption?: string;
+  alignment?: 'left' | 'center' | 'right';
+  size?: 'small' | 'medium' | 'large' | 'full';
+}
+
+export interface CheckboxBlock extends BaseBlock {
+  type: 'checkbox';
+  label: string;
+  description?: string;
+  required?: boolean;
+  alignment?: 'left' | 'center' | 'right';
+}
+
+export interface YesNoBlock extends BaseBlock {
+  type: 'yes_no';
+  question: string;
+  yes_label?: string;
+  no_label?: string;
+  required?: boolean;
+  alignment?: 'left' | 'center' | 'right';
+}
+
+export interface InitialsBlock extends BaseBlock {
+  type: 'initials';
+  label: string;
+  required?: boolean;
+}
+
 /**
  * The in-document consent paragraph. Distinct from consent_text, which is the
  * checkbox statement the signer must tick. A template may show the wording in
@@ -173,7 +218,17 @@ export type TemplateBlock =
   | ConsentBlock
   | SignaturePlaceholderBlock
   | DateBlock
-  | FooterBlock;
+  | FooterBlock
+  | ImageBlock
+  | CheckboxBlock
+  | YesNoBlock
+  | InitialsBlock;
+
+export interface ConsentFieldResponse {
+  element_id: string;
+  element_type: 'checkbox' | 'yes_no' | 'initials';
+  response_value: boolean | 'yes' | 'no' | string;
+}
 
 /** consent_template_versions.content — the CHECK requires a JSON object. */
 export interface TemplateContent {

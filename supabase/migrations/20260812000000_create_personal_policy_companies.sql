@@ -37,24 +37,26 @@ CREATE INDEX IF NOT EXISTS idx_personal_policy_companies_company_client_id ON pu
 -- Enable Row Level Security
 ALTER TABLE public.personal_policy_companies ENABLE ROW LEVEL SECURITY;
 
--- SELECT policy: Authorized if authenticated agent owns the underlying Personal P&C policy or has explicit P&C scoped shared access
+-- SELECT policy: Authorized if authenticated agent owns the underlying Personal P&C policy via clients.agent_id or has explicit P&C scoped shared access
 DROP POLICY IF EXISTS "Agents select personal_policy_companies" ON public.personal_policy_companies;
 CREATE POLICY "Agents select personal_policy_companies"
     ON public.personal_policy_companies FOR SELECT
     TO authenticated
     USING (
         EXISTS (
-            SELECT 1 FROM public.policies p
+            SELECT 1
+            FROM public.policies p
+            JOIN public.clients owner_client ON owner_client.id = p.client_id
             WHERE p.id = personal_policy_companies.policy_id
             AND p.policy_ownership_type = 'personal'
             AND (
-                p.agent_id = auth.uid()
-                OR public.can_access_agent(p.agent_id, 'property_casualty')
+                owner_client.agent_id = auth.uid()
+                OR public.can_access_agent(owner_client.agent_id, 'property_casualty')
             )
         )
     );
 
--- INSERT policy: Must be created_by auth.uid(), target policy must be personal, agent must have explicit P&C scoped authorization, and company_client_id must have client_type = 'company'
+-- INSERT policy: Must be created_by auth.uid(), target policy must be personal (resolving owner agent through clients), and company_client_id must have client_type = 'company'
 DROP POLICY IF EXISTS "Agents insert personal_policy_companies" ON public.personal_policy_companies;
 CREATE POLICY "Agents insert personal_policy_companies"
     ON public.personal_policy_companies FOR INSERT
@@ -62,12 +64,14 @@ CREATE POLICY "Agents insert personal_policy_companies"
     WITH CHECK (
         created_by = auth.uid()
         AND EXISTS (
-            SELECT 1 FROM public.policies p
+            SELECT 1
+            FROM public.policies p
+            JOIN public.clients owner_client ON owner_client.id = p.client_id
             WHERE p.id = personal_policy_companies.policy_id
             AND p.policy_ownership_type = 'personal'
             AND (
-                p.agent_id = auth.uid()
-                OR public.can_access_agent(p.agent_id, 'property_casualty')
+                owner_client.agent_id = auth.uid()
+                OR public.can_access_agent(owner_client.agent_id, 'property_casualty')
             )
         )
         AND EXISTS (
@@ -77,19 +81,21 @@ CREATE POLICY "Agents insert personal_policy_companies"
         )
     );
 
--- DELETE policy: Authorized policy owner or P&C shared access agent only
+-- DELETE policy: Authorized policy owner or P&C shared access agent only (resolving owner agent through clients)
 DROP POLICY IF EXISTS "Agents delete personal_policy_companies" ON public.personal_policy_companies;
 CREATE POLICY "Agents delete personal_policy_companies"
     ON public.personal_policy_companies FOR DELETE
     TO authenticated
     USING (
         EXISTS (
-            SELECT 1 FROM public.policies p
+            SELECT 1
+            FROM public.policies p
+            JOIN public.clients owner_client ON owner_client.id = p.client_id
             WHERE p.id = personal_policy_companies.policy_id
             AND p.policy_ownership_type = 'personal'
             AND (
-                p.agent_id = auth.uid()
-                OR public.can_access_agent(p.agent_id, 'property_casualty')
+                owner_client.agent_id = auth.uid()
+                OR public.can_access_agent(owner_client.agent_id, 'property_casualty')
             )
         )
     );

@@ -73,6 +73,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         // shown to the signer came from us in the first place. Sending it back is
         // how we record what was on screen at that moment.
         consentText: typeof payload.consentText === 'string' ? payload.consentText : '',
+        fieldResponses: typeof payload.fieldResponses === 'object' && payload.fieldResponses !== null ? payload.fieldResponses : {},
       },
       { ip, userAgent }
     );

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DOMPurify from 'isomorphic-dompurify';
 import DashboardLayout from '@/components/DashboardLayout';
+import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import TemplateStatusBadge from '@/components/consent-templates/TemplateStatusBadge';
 import type { ConsentTemplate, ConsentTemplateVersion, TemplateStatus } from '@/lib/consents/types';
 import {
@@ -156,7 +157,7 @@ export default function ConsentTemplatesPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-[1600px] mx-auto space-y-6 font-sans">
+      <CrmPageContainer>
         
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
@@ -446,7 +447,7 @@ export default function ConsentTemplatesPage() {
             </div>
           </div>
         )}
-      </div>
+      </CrmPageContainer>
     </DashboardLayout>
   );
 }

@@ -137,6 +137,17 @@ export async function generateFinalDocuments(requestId: string): Promise<Generat
     const consentText = signer.consent_text_snapshot ?? snapshot?.rendered_consent_text ?? '';
     const signedAt = new Date(signer.signed_at);
 
+    const { data: signedEventRow } = await admin
+      .from('signature_events')
+      .select('metadata')
+      .eq('request_id', requestId)
+      .eq('event_type', 'document_signed')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const fieldResponses = (signedEventRow?.metadata as any)?.field_responses;
+
     // ---- Build ----------------------------------------------------------
     // rendered_content, not a fresh merge: this is the document the client read.
     const signedPdf = await buildSignedPdf({
@@ -151,6 +162,7 @@ export async function generateFinalDocuments(requestId: string): Promise<Generat
       typedSignature: signer.typed_signature,
       signedAt,
       documentHash: request.original_document_hash ?? '(not recorded)',
+      fieldResponses,
     });
 
     const { data: events } = await admin

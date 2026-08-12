@@ -1,0 +1,770 @@
+[
+  {
+    "file": "migration.sql",
+    "policy": "Agents can manage their own clients",
+    "table": "clients",
+    "sql": "CREATE POLICY \"Agents can manage their own clients\"\nON public.clients\nFOR ALL\nUSING (agent_id = auth.uid())\nWITH CHECK (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration.sql",
+    "policy": "Agents can manage policies of their clients",
+    "table": "policies",
+    "sql": "CREATE POLICY \"Agents can manage policies of their clients\"\nON public.policies\nFOR ALL\nUSING (\n    EXISTS (\n        SELECT 1 FROM public.clients c\n        WHERE c.id = policies.client_id\n        AND c.agent_id = auth.uid()\n    )\n)\nWITH CHECK (\n    EXISTS (\n        SELECT 1 FROM public.clients c\n        WHERE c.id = policies.client_id\n        AND c.agent_id = auth.uid()\n    )\n);"
+  },
+  {
+    "file": "migration_leads.sql",
+    "policy": "Agents can select their own leads",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select their own leads\"\r\n            ON public.leads\r\n            FOR SELECT\r\n            TO authenticated\r\n            USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_leads.sql",
+    "policy": "Agents can insert their own leads",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert their own leads\"\r\n            ON public.leads\r\n            FOR INSERT\r\n            TO authenticated\r\n            WITH CHECK (\r\n                agent_id = auth.uid() AND\r\n                (\r\n                    converted_client_id IS NULL OR\r\n                    EXISTS (\r\n                        SELECT 1 FROM public.clients\r\n                        WHERE clients.id = leads.converted_client_id\r\n                          AND clients.agent_id = auth.uid()\r\n                    )\r\n                )\r\n            );"
+  },
+  {
+    "file": "migration_leads.sql",
+    "policy": "Agents can update their own leads",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can update their own leads\"\r\n            ON public.leads\r\n            FOR UPDATE\r\n            TO authenticated\r\n            USING (agent_id = auth.uid())\r\n            WITH CHECK (\r\n                agent_id = auth.uid() AND\r\n                (\r\n                    converted_client_id IS NULL OR\r\n                    EXISTS (\r\n                        SELECT 1 FROM public.clients\r\n                        WHERE clients.id = leads.converted_client_id\r\n                          AND clients.agent_id = auth.uid()\r\n                    )\r\n                )\r\n            );"
+  },
+  {
+    "file": "migration_leads.sql",
+    "policy": "Agents can delete their own leads",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can delete their own leads\"\r\n            ON public.leads\r\n            FOR DELETE\r\n            TO authenticated\r\n            USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can select notes of their leads",
+    "table": "lead_notes",
+    "sql": "CREATE POLICY \"Agents can select notes of their leads\" ON public.lead_notes\r\n        FOR SELECT TO authenticated\r\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can insert notes for their leads",
+    "table": "lead_notes",
+    "sql": "CREATE POLICY \"Agents can insert notes for their leads\" ON public.lead_notes\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            agent_id = auth.uid() AND\r\n            EXISTS (SELECT 1 FROM public.leads WHERE id = lead_notes.lead_id AND agent_id = auth.uid())\r\n        );"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can update notes of their leads",
+    "table": "lead_notes",
+    "sql": "CREATE POLICY \"Agents can update notes of their leads\" ON public.lead_notes\r\n        FOR UPDATE TO authenticated\r\n        USING (agent_id = auth.uid())\r\n        WITH CHECK (\r\n            agent_id = auth.uid() AND\r\n            EXISTS (SELECT 1 FROM public.leads WHERE id = lead_notes.lead_id AND agent_id = auth.uid())\r\n        );"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can delete notes of their leads",
+    "table": "lead_notes",
+    "sql": "CREATE POLICY \"Agents can delete notes of their leads\" ON public.lead_notes\r\n        FOR DELETE TO authenticated\r\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can select attachments of their leads",
+    "table": "lead_note_attachments",
+    "sql": "CREATE POLICY \"Agents can select attachments of their leads\" ON public.lead_note_attachments\r\n        FOR SELECT TO authenticated\r\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can insert attachments for their leads",
+    "table": "lead_note_attachments",
+    "sql": "CREATE POLICY \"Agents can insert attachments for their leads\" ON public.lead_note_attachments\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            agent_id = auth.uid() AND\r\n            EXISTS (SELECT 1 FROM public.leads WHERE id = lead_note_attachments.lead_id AND agent_id = auth.uid())\r\n        );"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can delete attachments of their leads",
+    "table": "lead_note_attachments",
+    "sql": "CREATE POLICY \"Agents can delete attachments of their leads\" ON public.lead_note_attachments\r\n        FOR DELETE TO authenticated\r\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can select documents of their leads",
+    "table": "lead_documents",
+    "sql": "CREATE POLICY \"Agents can select documents of their leads\" ON public.lead_documents\r\n        FOR SELECT TO authenticated\r\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can insert documents for their leads",
+    "table": "lead_documents",
+    "sql": "CREATE POLICY \"Agents can insert documents for their leads\" ON public.lead_documents\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            agent_id = auth.uid() AND\r\n            EXISTS (SELECT 1 FROM public.leads WHERE id = lead_documents.lead_id AND agent_id = auth.uid())\r\n        );"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can update documents of their leads",
+    "table": "lead_documents",
+    "sql": "CREATE POLICY \"Agents can update documents of their leads\" ON public.lead_documents\r\n        FOR UPDATE TO authenticated\r\n        USING (agent_id = auth.uid())\r\n        WITH CHECK (\r\n            agent_id = auth.uid() AND\r\n            EXISTS (SELECT 1 FROM public.leads WHERE id = lead_documents.lead_id AND agent_id = auth.uid())\r\n        );"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can delete documents of their leads",
+    "table": "lead_documents",
+    "sql": "CREATE POLICY \"Agents can delete documents of their leads\" ON public.lead_documents\r\n        FOR DELETE TO authenticated\r\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "Agents can select timeline events of their leads",
+    "table": "lead_timeline_events",
+    "sql": "CREATE POLICY \"Agents can select timeline events of their leads\" ON public.lead_timeline_events\r\n        FOR SELECT TO authenticated\r\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "lead_files_storage_select",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"lead_files_storage_select\" ON storage.objects\r\n        FOR SELECT TO authenticated\r\n        USING (\r\n            bucket_id = 'lead-files' AND\r\n            auth.uid()::text = split_part(name, '/', 1)\r\n        );"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "lead_files_storage_insert",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"lead_files_storage_insert\" ON storage.objects\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            bucket_id = 'lead-files' AND\r\n            auth.uid()::text = split_part(name, '/', 1)\r\n        );"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "lead_files_storage_update",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"lead_files_storage_update\" ON storage.objects\r\n        FOR UPDATE TO authenticated\r\n        USING (\r\n            bucket_id = 'lead-files' AND\r\n            auth.uid()::text = split_part(name, '/', 1)\r\n        )\r\n        WITH CHECK (\r\n            bucket_id = 'lead-files' AND\r\n            auth.uid()::text = split_part(name, '/', 1)\r\n        );"
+  },
+  {
+    "file": "migration_lead_notes_documents_timeline.sql",
+    "policy": "lead_files_storage_delete",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"lead_files_storage_delete\" ON storage.objects\r\n        FOR DELETE TO authenticated\r\n        USING (\r\n            bucket_id = 'lead-files' AND\r\n            auth.uid()::text = split_part(name, '/', 1)\r\n        );"
+  },
+  {
+    "file": "migration_client_personal_info.sql",
+    "policy": "Agents can manage personal info of their clients",
+    "table": "client_personal_information",
+    "sql": "CREATE POLICY \"Agents can manage personal info of their clients\"\nON public.client_personal_information\nFOR ALL\nUSING (\n    EXISTS (\n        SELECT 1 FROM public.clients c\n        WHERE c.id = client_personal_information.client_id\n        AND c.agent_id = auth.uid()\n    )\n)\nWITH CHECK (\n    EXISTS (\n        SELECT 1 FROM public.clients c\n        WHERE c.id = client_personal_information.client_id\n        AND c.agent_id = auth.uid()\n    )\n);"
+  },
+  {
+    "file": "migration_client_personal_info.sql",
+    "policy": "Agents can manage residence info of their clients",
+    "table": "client_residence_information",
+    "sql": "CREATE POLICY \"Agents can manage residence info of their clients\"\nON public.client_residence_information\nFOR ALL\nUSING (\n    EXISTS (\n        SELECT 1 FROM public.clients c\n        WHERE c.id = client_residence_information.client_id\n        AND c.agent_id = auth.uid()\n    )\n)\nWITH CHECK (\n    EXISTS (\n        SELECT 1 FROM public.clients c\n        WHERE c.id = client_residence_information.client_id\n        AND c.agent_id = auth.uid()\n    )\n);"
+  },
+  {
+    "file": "migration_client_personal_info.sql",
+    "policy": "Agents can manage income info of their clients",
+    "table": "client_income_information",
+    "sql": "CREATE POLICY \"Agents can manage income info of their clients\"\nON public.client_income_information\nFOR ALL\nUSING (\n    EXISTS (\n        SELECT 1 FROM public.clients c\n        WHERE c.id = client_income_information.client_id\n        AND c.agent_id = auth.uid()\n    )\n)\nWITH CHECK (\n    EXISTS (\n        SELECT 1 FROM public.clients c\n        WHERE c.id = client_income_information.client_id\n        AND c.agent_id = auth.uid()\n    )\n);"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can select health policies of their clients",
+    "table": "health_policies",
+    "sql": "CREATE POLICY \"Agents can select health policies of their clients\" ON public.health_policies\r\n        FOR SELECT USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                WHERE c.id = health_policies.client_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can insert health policies for their clients",
+    "table": "health_policies",
+    "sql": "CREATE POLICY \"Agents can insert health policies for their clients\" ON public.health_policies\r\n        FOR INSERT WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                WHERE c.id = health_policies.client_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can update health policies of their clients",
+    "table": "health_policies",
+    "sql": "CREATE POLICY \"Agents can update health policies of their clients\" ON public.health_policies\r\n        FOR UPDATE USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                WHERE c.id = health_policies.client_id AND c.agent_id = auth.uid()\r\n            )\r\n        )\r\n        WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                WHERE c.id = health_policies.client_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can delete health policies of their clients",
+    "table": "health_policies",
+    "sql": "CREATE POLICY \"Agents can delete health policies of their clients\" ON public.health_policies\r\n        FOR DELETE USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                WHERE c.id = health_policies.client_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can select notes of their health policies",
+    "table": "health_policy_notes",
+    "sql": "CREATE POLICY \"Agents can select notes of their health policies\" ON public.health_policy_notes\r\n        FOR SELECT USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_notes.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can insert notes for their health policies",
+    "table": "health_policy_notes",
+    "sql": "CREATE POLICY \"Agents can insert notes for their health policies\" ON public.health_policy_notes\r\n        FOR INSERT WITH CHECK (\r\n            author_id = auth.uid() AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_notes.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can update health notes they authored",
+    "table": "health_policy_notes",
+    "sql": "CREATE POLICY \"Agents can update health notes they authored\" ON public.health_policy_notes\r\n        FOR UPDATE USING (\r\n            author_id = auth.uid() AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_notes.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        )\r\n        WITH CHECK (\r\n            author_id = auth.uid() AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_notes.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can delete health notes they authored",
+    "table": "health_policy_notes",
+    "sql": "CREATE POLICY \"Agents can delete health notes they authored\" ON public.health_policy_notes\r\n        FOR DELETE USING (\r\n            author_id = auth.uid() AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_notes.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can select document sections of their health policies",
+    "table": "health_policy_document_sections",
+    "sql": "CREATE POLICY \"Agents can select document sections of their health policies\" ON public.health_policy_document_sections\r\n        FOR SELECT USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_document_sections.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can insert document sections for their health policies",
+    "table": "health_policy_document_sections",
+    "sql": "CREATE POLICY \"Agents can insert document sections for their health policies\" ON public.health_policy_document_sections\r\n        FOR INSERT WITH CHECK (\r\n            created_by = auth.uid() AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_document_sections.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can update document sections of their health policies",
+    "table": "health_policy_document_sections",
+    "sql": "CREATE POLICY \"Agents can update document sections of their health policies\" ON public.health_policy_document_sections\r\n        FOR UPDATE USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_document_sections.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        )\r\n        WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_document_sections.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can delete document sections of their health policies",
+    "table": "health_policy_document_sections",
+    "sql": "CREATE POLICY \"Agents can delete document sections of their health policies\" ON public.health_policy_document_sections\r\n        FOR DELETE USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_document_sections.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can select documents of their health policies",
+    "table": "health_policy_documents",
+    "sql": "CREATE POLICY \"Agents can select documents of their health policies\" ON public.health_policy_documents\r\n        FOR SELECT USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_documents.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can insert documents for their health policies",
+    "table": "health_policy_documents",
+    "sql": "CREATE POLICY \"Agents can insert documents for their health policies\" ON public.health_policy_documents\r\n        FOR INSERT WITH CHECK (\r\n            uploaded_by = auth.uid() AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_documents.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can update documents of their health policies",
+    "table": "health_policy_documents",
+    "sql": "CREATE POLICY \"Agents can update documents of their health policies\" ON public.health_policy_documents\r\n        FOR UPDATE USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_documents.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        )\r\n        WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_documents.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n            AND EXISTS (\r\n                SELECT 1 FROM public.health_policy_document_sections hds\r\n                WHERE hds.id = health_policy_documents.section_id AND hds.health_policy_id = health_policy_documents.health_policy_id\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can delete documents of their health policies",
+    "table": "health_policy_documents",
+    "sql": "CREATE POLICY \"Agents can delete documents of their health policies\" ON public.health_policy_documents\r\n        FOR DELETE USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_documents.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can select note attachments of their health policies",
+    "table": "health_policy_note_attachments",
+    "sql": "CREATE POLICY \"Agents can select note attachments of their health policies\" ON public.health_policy_note_attachments\r\n        FOR SELECT USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_note_attachments.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can insert note attachments for their health policies",
+    "table": "health_policy_note_attachments",
+    "sql": "CREATE POLICY \"Agents can insert note attachments for their health policies\" ON public.health_policy_note_attachments\r\n        FOR INSERT WITH CHECK (\r\n            uploaded_by = auth.uid() AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_note_attachments.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can delete note attachments of their health policies",
+    "table": "health_policy_note_attachments",
+    "sql": "CREATE POLICY \"Agents can delete note attachments of their health policies\" ON public.health_policy_note_attachments\r\n        FOR DELETE USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.health_policies hp\r\n                JOIN public.clients c ON hp.client_id = c.id\r\n                WHERE hp.id = health_policy_note_attachments.health_policy_id AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can select health policy documents in their folder",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"Agents can select health policy documents in their folder\" ON storage.objects\r\n        FOR SELECT TO authenticated\r\n        USING (\r\n            bucket_id = 'health-policy-documents' AND\r\n            split_part(name, '/', 1) = auth.uid()::text AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                JOIN public.health_policies hp ON hp.client_id = c.id\r\n                WHERE c.id::text = split_part(name, '/', 2)\r\n                  AND c.agent_id = auth.uid()\r\n                  AND hp.id::text = split_part(name, '/', 3)\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can insert health policy documents in their folder",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"Agents can insert health policy documents in their folder\" ON storage.objects\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            bucket_id = 'health-policy-documents' AND\r\n            split_part(name, '/', 1) = auth.uid()::text AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                JOIN public.health_policies hp ON hp.client_id = c.id\r\n                WHERE c.id::text = split_part(name, '/', 2)\r\n                  AND c.agent_id = auth.uid()\r\n                  AND hp.id::text = split_part(name, '/', 3)\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can update health policy documents in their folder",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"Agents can update health policy documents in their folder\" ON storage.objects\r\n        FOR UPDATE TO authenticated\r\n        USING (\r\n            bucket_id = 'health-policy-documents' AND\r\n            split_part(name, '/', 1) = auth.uid()::text AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                JOIN public.health_policies hp ON hp.client_id = c.id\r\n                WHERE c.id::text = split_part(name, '/', 2)\r\n                  AND c.agent_id = auth.uid()\r\n                  AND hp.id::text = split_part(name, '/', 3)\r\n            )\r\n        )\r\n        WITH CHECK (\r\n            bucket_id = 'health-policy-documents' AND\r\n            split_part(name, '/', 1) = auth.uid()::text AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                JOIN public.health_policies hp ON hp.client_id = c.id\r\n                WHERE c.id::text = split_part(name, '/', 2)\r\n                  AND c.agent_id = auth.uid()\r\n                  AND hp.id::text = split_part(name, '/', 3)\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_health_policies.sql",
+    "policy": "Agents can delete health policy documents in their folder",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"Agents can delete health policy documents in their folder\" ON storage.objects\r\n        FOR DELETE TO authenticated\r\n        USING (\r\n            bucket_id = 'health-policy-documents' AND\r\n            split_part(name, '/', 1) = auth.uid()::text AND\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                JOIN public.health_policies hp ON hp.client_id = c.id\r\n                WHERE c.id::text = split_part(name, '/', 2)\r\n                  AND c.agent_id = auth.uid()\r\n                  AND hp.id::text = split_part(name, '/', 3)\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Agents can manage life profile of their clients",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can manage life profile of their clients\"\r\n        ON public.client_life_profile FOR ALL\r\n        USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_life_profile.client_id AND c.agent_id = auth.uid()))\r\n        WITH CHECK (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = client_life_profile.client_id AND c.agent_id = auth.uid()));"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Agents can manage life policies of their clients",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can manage life policies of their clients\"\r\n        ON public.life_policies FOR ALL\r\n        USING (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = life_policies.client_id AND c.agent_id = auth.uid()))\r\n        WITH CHECK (EXISTS (SELECT 1 FROM public.clients c WHERE c.id = life_policies.client_id AND c.agent_id = auth.uid()));"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Agents can manage life policy products",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can manage life policy products\"\r\n        ON public.life_policy_products FOR ALL\r\n        USING (EXISTS (SELECT 1 FROM public.life_policies lp JOIN public.clients c ON lp.client_id = c.id WHERE lp.id = life_policy_products.life_policy_id AND c.agent_id = auth.uid()))\r\n        WITH CHECK (EXISTS (SELECT 1 FROM public.life_policies lp JOIN public.clients c ON lp.client_id = c.id WHERE lp.id = life_policy_products.life_policy_id AND c.agent_id = auth.uid()));"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Agents can manage life policy beneficiaries",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can manage life policy beneficiaries\"\r\n        ON public.life_policy_beneficiaries FOR ALL\r\n        USING (EXISTS (SELECT 1 FROM public.life_policies lp JOIN public.clients c ON lp.client_id = c.id WHERE lp.id = life_policy_beneficiaries.life_policy_id AND c.agent_id = auth.uid()))\r\n        WITH CHECK (EXISTS (SELECT 1 FROM public.life_policies lp JOIN public.clients c ON lp.client_id = c.id WHERE lp.id = life_policy_beneficiaries.life_policy_id AND c.agent_id = auth.uid()));"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Agents can manage life policy documents",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can manage life policy documents\"\r\n        ON public.life_policy_documents FOR ALL\r\n        USING (EXISTS (SELECT 1 FROM public.life_policies lp JOIN public.clients c ON lp.client_id = c.id WHERE lp.id = life_policy_documents.life_policy_id AND c.agent_id = auth.uid()))\r\n        WITH CHECK (EXISTS (SELECT 1 FROM public.life_policies lp JOIN public.clients c ON lp.client_id = c.id WHERE lp.id = life_policy_documents.life_policy_id AND c.agent_id = auth.uid()));"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Agents can manage life policy notes",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can manage life policy notes\"\r\n        ON public.life_policy_notes FOR ALL\r\n        USING (agent_id = auth.uid())\r\n        WITH CHECK (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Agents can manage life policy note attachments",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can manage life policy note attachments\"\r\n        ON public.life_policy_note_attachments FOR ALL\r\n        USING (EXISTS (SELECT 1 FROM public.life_policy_notes lpn WHERE lpn.id = life_policy_note_attachments.note_id AND lpn.agent_id = auth.uid()))\r\n        WITH CHECK (EXISTS (SELECT 1 FROM public.life_policy_notes lpn WHERE lpn.id = life_policy_note_attachments.note_id AND lpn.agent_id = auth.uid()));"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Agents can view life policy timeline events",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can view life policy timeline events\"\r\n        ON public.life_policy_timeline_events FOR SELECT\r\n        USING (EXISTS (SELECT 1 FROM public.life_policies lp JOIN public.clients c ON lp.client_id = c.id WHERE lp.id = life_policy_timeline_events.life_policy_id AND c.agent_id = auth.uid()));"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Agents can insert life policy timeline events",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert life policy timeline events\"\r\n        ON public.life_policy_timeline_events FOR INSERT\r\n        WITH CHECK (EXISTS (SELECT 1 FROM public.life_policies lp JOIN public.clients c ON lp.client_id = c.id WHERE lp.id = life_policy_timeline_events.life_policy_id AND c.agent_id = auth.uid()));"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Authenticated agents life documents insert",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Authenticated agents life documents insert\"\r\n        ON storage.objects FOR INSERT TO authenticated\r\n        WITH CHECK (bucket_id = 'life-documents');"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Authenticated agents life documents select",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Authenticated agents life documents select\"\r\n        ON storage.objects FOR SELECT TO authenticated\r\n        USING (bucket_id = 'life-documents');"
+  },
+  {
+    "file": "migration_life_policies.sql",
+    "policy": "Authenticated agents life documents delete",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Authenticated agents life documents delete\"\r\n        ON storage.objects FOR DELETE TO authenticated\r\n        USING (bucket_id = 'life-documents');"
+  },
+  {
+    "file": "migration_notes_timeline.sql",
+    "policy": "Agents can select notes of their policies",
+    "table": "policy_notes",
+    "sql": "CREATE POLICY \"Agents can select notes of their policies\" ON public.policy_notes\n        FOR SELECT USING (\n            EXISTS (\n                SELECT 1 FROM public.policies p \n                JOIN public.clients c ON p.client_id = c.id \n                WHERE p.id = policy_notes.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_notes_timeline.sql",
+    "policy": "Agents can insert notes for their policies",
+    "table": "policy_notes",
+    "sql": "CREATE POLICY \"Agents can insert notes for their policies\" ON public.policy_notes\n        FOR INSERT WITH CHECK (\n            author_id = auth.uid() AND \n            EXISTS (\n                SELECT 1 FROM public.policies p \n                JOIN public.clients c ON p.client_id = c.id \n                WHERE p.id = policy_notes.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_notes_timeline.sql",
+    "policy": "Agents can update notes they authored",
+    "table": "policy_notes",
+    "sql": "CREATE POLICY \"Agents can update notes they authored\" ON public.policy_notes\n        FOR UPDATE USING (\n            author_id = auth.uid() AND \n            EXISTS (\n                SELECT 1 FROM public.policies p \n                JOIN public.clients c ON p.client_id = c.id \n                WHERE p.id = policy_notes.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_notes_timeline.sql",
+    "policy": "Agents can delete notes they authored",
+    "table": "policy_notes",
+    "sql": "CREATE POLICY \"Agents can delete notes they authored\" ON public.policy_notes\n        FOR DELETE USING (\n            author_id = auth.uid() AND \n            EXISTS (\n                SELECT 1 FROM public.policies p \n                JOIN public.clients c ON p.client_id = c.id \n                WHERE p.id = policy_notes.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_notes_timeline.sql",
+    "policy": "Agents can select events of their clients",
+    "table": "activity_events",
+    "sql": "CREATE POLICY \"Agents can select events of their clients\" ON public.activity_events\n        FOR SELECT USING (\n            EXISTS (\n                SELECT 1 FROM public.clients c \n                WHERE c.id = activity_events.client_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_notes_timeline.sql",
+    "policy": "Agents can insert events for their clients",
+    "table": "activity_events",
+    "sql": "CREATE POLICY \"Agents can insert events for their clients\" ON public.activity_events\n        FOR INSERT WITH CHECK (\n            actor_id = auth.uid() AND \n            EXISTS (\n                SELECT 1 FROM public.clients c \n                WHERE c.id = activity_events.client_id AND c.agent_id = auth.uid()\n            ) AND (\n                policy_id IS NULL OR \n                EXISTS (\n                    SELECT 1 FROM public.policies p \n                    WHERE p.id = policy_id AND p.client_id = client_id\n                )\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "Agents can select sections of their policies",
+    "table": "policy_document_sections",
+    "sql": "CREATE POLICY \"Agents can select sections of their policies\" ON public.policy_document_sections\n        FOR SELECT USING (\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_document_sections.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "Agents can insert sections for their policies",
+    "table": "policy_document_sections",
+    "sql": "CREATE POLICY \"Agents can insert sections for their policies\" ON public.policy_document_sections\n        FOR INSERT WITH CHECK (\n            created_by = auth.uid() AND\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_document_sections.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "Agents can update sections of their policies",
+    "table": "policy_document_sections",
+    "sql": "CREATE POLICY \"Agents can update sections of their policies\" ON public.policy_document_sections\n        FOR UPDATE USING (\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_document_sections.policy_id AND c.agent_id = auth.uid()\n            )\n        )\n        WITH CHECK (\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_document_sections.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "Agents can delete sections of their policies",
+    "table": "policy_document_sections",
+    "sql": "CREATE POLICY \"Agents can delete sections of their policies\" ON public.policy_document_sections\n        FOR DELETE USING (\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_document_sections.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "Agents can select documents of their policies",
+    "table": "policy_documents",
+    "sql": "CREATE POLICY \"Agents can select documents of their policies\" ON public.policy_documents\n        FOR SELECT USING (\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_documents.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "Agents can insert documents for their policies",
+    "table": "policy_documents",
+    "sql": "CREATE POLICY \"Agents can insert documents for their policies\" ON public.policy_documents\n        FOR INSERT WITH CHECK (\n            uploaded_by = auth.uid() AND\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_documents.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "Agents can update documents of their policies",
+    "table": "policy_documents",
+    "sql": "CREATE POLICY \"Agents can update documents of their policies\" ON public.policy_documents\n        FOR UPDATE USING (\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_documents.policy_id AND c.agent_id = auth.uid()\n            )\n        )\n        WITH CHECK (\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_documents.policy_id AND c.agent_id = auth.uid()\n            )\n            AND EXISTS (\n                SELECT 1 FROM public.policy_document_sections pds\n                WHERE pds.id = policy_documents.section_id AND pds.policy_id = policy_documents.policy_id\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "Agents can delete documents of their policies",
+    "table": "policy_documents",
+    "sql": "CREATE POLICY \"Agents can delete documents of their policies\" ON public.policy_documents\n        FOR DELETE USING (\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_documents.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "policy_documents_storage_select",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"policy_documents_storage_select\" ON storage.objects\n        FOR SELECT TO authenticated\n        USING (\n            bucket_id = 'policy-documents' AND\n            auth.uid()::text = split_part(name, '/', 1)\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "policy_documents_storage_insert",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"policy_documents_storage_insert\" ON storage.objects\n        FOR INSERT TO authenticated\n        WITH CHECK (\n            bucket_id = 'policy-documents' AND\n            auth.uid()::text = split_part(name, '/', 1)\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "policy_documents_storage_update",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"policy_documents_storage_update\" ON storage.objects\n        FOR UPDATE TO authenticated\n        USING (\n            bucket_id = 'policy-documents' AND\n            auth.uid()::text = split_part(name, '/', 1)\n        )\n        WITH CHECK (\n            bucket_id = 'policy-documents' AND\n            auth.uid()::text = split_part(name, '/', 1)\n        );"
+  },
+  {
+    "file": "migration_policy_documents.sql",
+    "policy": "policy_documents_storage_delete",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"policy_documents_storage_delete\" ON storage.objects\n        FOR DELETE TO authenticated\n        USING (\n            bucket_id = 'policy-documents' AND\n            auth.uid()::text = split_part(name, '/', 1)\n        );"
+  },
+  {
+    "file": "migration_policy_expiration_reminders.sql",
+    "policy": "Agents can select their own reminder history",
+    "table": "policy_expiration_reminders",
+    "sql": "CREATE POLICY \"Agents can select their own reminder history\" ON public.policy_expiration_reminders\n        FOR SELECT TO authenticated\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_policy_note_attachments.sql",
+    "policy": "Agents can select note attachments of their policies",
+    "table": "policy_note_attachments",
+    "sql": "CREATE POLICY \"Agents can select note attachments of their policies\" ON public.policy_note_attachments\n        FOR SELECT USING (\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_note_attachments.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_note_attachments.sql",
+    "policy": "Agents can insert note attachments for their policies",
+    "table": "policy_note_attachments",
+    "sql": "CREATE POLICY \"Agents can insert note attachments for their policies\" ON public.policy_note_attachments\n        FOR INSERT WITH CHECK (\n            uploaded_by = auth.uid() AND\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_note_attachments.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_policy_note_attachments.sql",
+    "policy": "Agents can delete note attachments of their policies",
+    "table": "policy_note_attachments",
+    "sql": "CREATE POLICY \"Agents can delete note attachments of their policies\" ON public.policy_note_attachments\n        FOR DELETE USING (\n            EXISTS (\n                SELECT 1 FROM public.policies p\n                JOIN public.clients c ON p.client_id = c.id\n                WHERE p.id = policy_note_attachments.policy_id AND c.agent_id = auth.uid()\n            )\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can select their own consent templates",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select their own consent templates\"\r\n        ON public.consent_templates\r\n        FOR SELECT TO authenticated\r\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can insert their own consent templates",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert their own consent templates\"\r\n        ON public.consent_templates\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (agent_id = auth.uid() AND created_by = auth.uid());"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can update their own consent templates",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can update their own consent templates\"\r\n        ON public.consent_templates\r\n        FOR UPDATE TO authenticated\r\n        USING (agent_id = auth.uid())\r\n        WITH CHECK (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can delete their own unused draft templates",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can delete their own unused draft templates\"\r\n        ON public.consent_templates\r\n        FOR DELETE TO authenticated\r\n        USING (agent_id = auth.uid() AND status = 'draft' AND usage_count = 0);"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can select versions of their templates",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select versions of their templates\"\r\n        ON public.consent_template_versions\r\n        FOR SELECT TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.consent_templates t\r\n                WHERE t.id = consent_template_versions.template_id\r\n                  AND t.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can insert versions for their templates",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert versions for their templates\"\r\n        ON public.consent_template_versions\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            created_by = auth.uid()\r\n            AND EXISTS (\r\n                SELECT 1 FROM public.consent_templates t\r\n                WHERE t.id = consent_template_versions.template_id\r\n                  AND t.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can update unused versions of their templates",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can update unused versions of their templates\"\r\n        ON public.consent_template_versions\r\n        FOR UPDATE TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.consent_templates t\r\n                WHERE t.id = consent_template_versions.template_id\r\n                  AND t.agent_id = auth.uid()\r\n            )\r\n        )\r\n        WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.consent_templates t\r\n                WHERE t.id = consent_template_versions.template_id\r\n                  AND t.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can delete unused versions of their templates",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can delete unused versions of their templates\"\r\n        ON public.consent_template_versions\r\n        FOR DELETE TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.consent_templates t\r\n                WHERE t.id = consent_template_versions.template_id\r\n                  AND t.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can select requests of their clients",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select requests of their clients\"\r\n        ON public.signature_requests\r\n        FOR SELECT TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                WHERE c.id = signature_requests.client_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can insert requests for their clients",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert requests for their clients\"\r\n        ON public.signature_requests\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            created_by = auth.uid()\r\n            AND EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                WHERE c.id = signature_requests.client_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can update requests of their clients",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can update requests of their clients\"\r\n        ON public.signature_requests\r\n        FOR UPDATE TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                WHERE c.id = signature_requests.client_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        )\r\n        WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                WHERE c.id = signature_requests.client_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can delete draft requests of their clients",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can delete draft requests of their clients\"\r\n        ON public.signature_requests\r\n        FOR DELETE TO authenticated\r\n        USING (\r\n            status = 'draft'\r\n            AND EXISTS (\r\n                SELECT 1 FROM public.clients c\r\n                WHERE c.id = signature_requests.client_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can select signers of their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select signers of their requests\"\r\n        ON public.signature_request_signers\r\n        FOR SELECT TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_request_signers.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can insert signers for their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert signers for their requests\"\r\n        ON public.signature_request_signers\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_request_signers.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can update signers of their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can update signers of their requests\"\r\n        ON public.signature_request_signers\r\n        FOR UPDATE TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_request_signers.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        )\r\n        WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_request_signers.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can delete signers of their draft requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can delete signers of their draft requests\"\r\n        ON public.signature_request_signers\r\n        FOR DELETE TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_request_signers.request_id\r\n                  AND c.agent_id = auth.uid()\r\n                  AND sr.status = 'draft'\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can select events of their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select events of their requests\"\r\n        ON public.signature_events\r\n        FOR SELECT TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_events.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can insert events for their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert events for their requests\"\r\n        ON public.signature_events\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            performed_by = auth.uid()\r\n            AND EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_events.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can select delivery attempts of their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select delivery attempts of their requests\"\r\n        ON public.signature_delivery_attempts\r\n        FOR SELECT TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_delivery_attempts.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can insert delivery attempts for their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert delivery attempts for their requests\"\r\n        ON public.signature_delivery_attempts\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_delivery_attempts.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can update delivery attempts of their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can update delivery attempts of their requests\"\r\n        ON public.signature_delivery_attempts\r\n        FOR UPDATE TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_delivery_attempts.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        )\r\n        WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_delivery_attempts.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can select files of their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select files of their requests\"\r\n        ON public.signature_files\r\n        FOR SELECT TO authenticated\r\n        USING (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_files.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can insert files for their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert files for their requests\"\r\n        ON public.signature_files\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_files.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "Agents can delete non evidence files of their requests",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can delete non evidence files of their requests\"\r\n        ON public.signature_files\r\n        FOR DELETE TO authenticated\r\n        USING (\r\n            file_type IN ('signature_image', 'original_snapshot')\r\n            AND EXISTS (\r\n                SELECT 1 FROM public.signature_requests sr\r\n                JOIN public.clients c ON c.id = sr.client_id\r\n                WHERE sr.id = signature_files.request_id\r\n                  AND c.agent_id = auth.uid()\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "signatures_storage_select",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"signatures_storage_select\" ON storage.objects\r\n        FOR SELECT TO authenticated\r\n        USING (\r\n            bucket_id = 'signatures'\r\n            AND auth.uid()::text = split_part(name, '/', 1)\r\n        );"
+  },
+  {
+    "file": "migration_electronic_signatures.sql",
+    "policy": "signed_documents_storage_select",
+    "table": "storage.objects",
+    "sql": "CREATE POLICY \"signed_documents_storage_select\" ON storage.objects\r\n        FOR SELECT TO authenticated\r\n        USING (\r\n            bucket_id = 'signed-documents'\r\n            AND auth.uid()::text = split_part(name, '/', 1)\r\n        );"
+  },
+  {
+    "file": "migration_calendar_appointments.sql",
+    "policy": "Agents can select their own appointments",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select their own appointments\"\r\n        ON public.calendar_appointments\r\n        FOR SELECT TO authenticated\r\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_calendar_appointments.sql",
+    "policy": "Agents can insert their own appointments",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert their own appointments\"\r\n        ON public.calendar_appointments\r\n        FOR INSERT TO authenticated\r\n        WITH CHECK (\r\n            agent_id = auth.uid() \r\n            AND (\r\n                client_id IS NULL \r\n                OR EXISTS (\r\n                    SELECT 1 FROM public.clients c \r\n                    WHERE c.id = client_id AND c.agent_id = auth.uid()\r\n                )\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_calendar_appointments.sql",
+    "policy": "Agents can update their own appointments",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can update their own appointments\"\r\n        ON public.calendar_appointments\r\n        FOR UPDATE TO authenticated\r\n        USING (agent_id = auth.uid())\r\n        WITH CHECK (\r\n            agent_id = auth.uid() \r\n            AND (\r\n                client_id IS NULL \r\n                OR EXISTS (\r\n                    SELECT 1 FROM public.clients c \r\n                    WHERE c.id = client_id AND c.agent_id = auth.uid()\r\n                )\r\n            )\r\n        );"
+  },
+  {
+    "file": "migration_calendar_appointments.sql",
+    "policy": "Agents can delete their own appointments",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can delete their own appointments\"\r\n        ON public.calendar_appointments\r\n        FOR DELETE TO authenticated\r\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_calendar_recurrence.sql",
+    "policy": "Agents can select their own recurrence series",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select their own recurrence series\"\n        ON public.calendar_recurrence_series\n        FOR SELECT TO authenticated\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "migration_calendar_recurrence.sql",
+    "policy": "Agents can insert their own recurrence series",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert their own recurrence series\"\n        ON public.calendar_recurrence_series\n        FOR INSERT TO authenticated\n        WITH CHECK (\n            agent_id = auth.uid() \n            AND (\n                client_id IS NULL \n                OR EXISTS (\n                    SELECT 1 FROM public.clients c \n                    WHERE c.id = client_id AND c.agent_id = auth.uid()\n                )\n            )\n        );"
+  },
+  {
+    "file": "migration_calendar_recurrence.sql",
+    "policy": "Agents can update their own recurrence series",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can update their own recurrence series\"\n        ON public.calendar_recurrence_series\n        FOR UPDATE TO authenticated\n        USING (agent_id = auth.uid())\n        WITH CHECK (\n            agent_id = auth.uid() \n            AND (\n                client_id IS NULL \n                OR EXISTS (\n                    SELECT 1 FROM public.clients c \n                    WHERE c.id = client_id AND c.agent_id = auth.uid()\n                )\n            )\n        );"
+  },
+  {
+    "file": "migration_calendar_recurrence.sql",
+    "policy": "Agents can delete their own recurrence series",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can delete their own recurrence series\"\n        ON public.calendar_recurrence_series\n        FOR DELETE TO authenticated\n        USING (agent_id = auth.uid());"
+  },
+  {
+    "file": "supabase/migrations/20260728_create_health_tax_household_members.sql",
+    "policy": "Agents can select tax household members of their health policies",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can select tax household members of their health policies\"\n      ON public.health_tax_household_members\n      FOR SELECT\n      USING (\n        EXISTS (\n          SELECT 1 FROM public.health_policies hp\n          JOIN public.clients c ON c.id = hp.client_id\n          WHERE hp.id = health_tax_household_members.health_policy_id\n            AND c.agent_id = auth.uid()\n        )\n      );"
+  },
+  {
+    "file": "supabase/migrations/20260728_create_health_tax_household_members.sql",
+    "policy": "Agents can insert tax household members for their health policies",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can insert tax household members for their health policies\"\n      ON public.health_tax_household_members\n      FOR INSERT\n      WITH CHECK (\n        EXISTS (\n          SELECT 1 FROM public.health_policies hp\n          JOIN public.clients c ON c.id = hp.client_id\n          WHERE hp.id = health_tax_household_members.health_policy_id\n            AND c.agent_id = auth.uid()\n        )\n      );"
+  },
+  {
+    "file": "supabase/migrations/20260728_create_health_tax_household_members.sql",
+    "policy": "Agents can update tax household members of their health policies",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can update tax household members of their health policies\"\n      ON public.health_tax_household_members\n      FOR UPDATE\n      USING (\n        EXISTS (\n          SELECT 1 FROM public.health_policies hp\n          JOIN public.clients c ON c.id = hp.client_id\n          WHERE hp.id = health_tax_household_members.health_policy_id\n            AND c.agent_id = auth.uid()\n        )\n      )\n      WITH CHECK (\n        EXISTS (\n          SELECT 1 FROM public.health_policies hp\n          JOIN public.clients c ON c.id = hp.client_id\n          WHERE hp.id = health_tax_household_members.health_policy_id\n            AND c.agent_id = auth.uid()\n        )\n      );"
+  },
+  {
+    "file": "supabase/migrations/20260728_create_health_tax_household_members.sql",
+    "policy": "Agents can delete tax household members of their health policies",
+    "table": "ON",
+    "sql": "CREATE POLICY \"Agents can delete tax household members of their health policies\"\n      ON public.health_tax_household_members\n      FOR DELETE\n      USING (\n        EXISTS (\n          SELECT 1 FROM public.health_policies hp\n          JOIN public.clients c ON c.id = hp.client_id\n          WHERE hp.id = health_tax_household_members.health_policy_id\n            AND c.agent_id = auth.uid()\n        )\n      );"
+  },
+  {
+    "file": "supabase/migrations/20260804_create_health_marketplace_plan_tables.sql",
+    "policy": "Authenticated users can select health marketplace plan snapshots",
+    "table": "N",
+    "sql": "CREATE POLICY \"Authenticated users can select health marketplace plan snapshots\"\n  ON public.health_marketplace_plan_snapshots FOR SELECT\n  TO authenticated\n  USING (true);"
+  },
+  {
+    "file": "supabase/migrations/20260804_create_health_marketplace_plan_tables.sql",
+    "policy": "Authenticated users can insert health marketplace plan snapshots",
+    "table": "N",
+    "sql": "CREATE POLICY \"Authenticated users can insert health marketplace plan snapshots\"\n  ON public.health_marketplace_plan_snapshots FOR INSERT\n  TO authenticated\n  WITH CHECK (true);"
+  },
+  {
+    "file": "supabase/migrations/20260804_create_health_marketplace_plan_tables.sql",
+    "policy": "Authenticated users can update health marketplace plan snapshots",
+    "table": "N",
+    "sql": "CREATE POLICY \"Authenticated users can update health marketplace plan snapshots\"\n  ON public.health_marketplace_plan_snapshots FOR UPDATE\n  TO authenticated\n  USING (true);"
+  },
+  {
+    "file": "supabase/migrations/20260804_create_health_marketplace_plan_tables.sql",
+    "policy": "Authenticated users can delete health marketplace plan snapshots",
+    "table": "N",
+    "sql": "CREATE POLICY \"Authenticated users can delete health marketplace plan snapshots\"\n  ON public.health_marketplace_plan_snapshots FOR DELETE\n  TO authenticated\n  USING (true);"
+  },
+  {
+    "file": "supabase/migrations/20260804_create_health_marketplace_plan_tables.sql",
+    "policy": "Authenticated users can select health marketplace plan benefits",
+    "table": "N",
+    "sql": "CREATE POLICY \"Authenticated users can select health marketplace plan benefits\"\n  ON public.health_marketplace_plan_benefits FOR SELECT\n  TO authenticated\n  USING (true);"
+  },
+  {
+    "file": "supabase/migrations/20260804_create_health_marketplace_plan_tables.sql",
+    "policy": "Authenticated users can insert health marketplace plan benefits",
+    "table": "N",
+    "sql": "CREATE POLICY \"Authenticated users can insert health marketplace plan benefits\"\n  ON public.health_marketplace_plan_benefits FOR INSERT\n  TO authenticated\n  WITH CHECK (true);"
+  },
+  {
+    "file": "supabase/migrations/20260804_create_health_marketplace_plan_tables.sql",
+    "policy": "Authenticated users can update health marketplace plan benefits",
+    "table": "N",
+    "sql": "CREATE POLICY \"Authenticated users can update health marketplace plan benefits\"\n  ON public.health_marketplace_plan_benefits FOR UPDATE\n  TO authenticated\n  USING (true);"
+  },
+  {
+    "file": "supabase/migrations/20260804_create_health_marketplace_plan_tables.sql",
+    "policy": "Authenticated users can delete health marketplace plan benefits",
+    "table": "N",
+    "sql": "CREATE POLICY \"Authenticated users can delete health marketplace plan benefits\"\n  ON public.health_marketplace_plan_benefits FOR DELETE\n  TO authenticated\n  USING (true);"
+  }
+]

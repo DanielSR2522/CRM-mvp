@@ -93,6 +93,10 @@ export function addBlock(blocks: TemplateBlock[], type: BlockType, index?: numbe
   else if (type === 'spacer') { newBlock.size = 'medium'; }
   else if (type === 'signature_placeholder') { newBlock.label = 'Signature'; }
   else if (type === 'date') { newBlock.label = 'Date'; }
+  else if (type === 'image') { newBlock.alignment = 'center'; newBlock.size = 'medium'; newBlock.alt_text = ''; newBlock.caption = ''; }
+  else if (type === 'checkbox') { newBlock.label = 'I agree to the terms'; newBlock.description = ''; newBlock.required = true; newBlock.alignment = 'left'; }
+  else if (type === 'yes_no') { newBlock.question = 'Do you authorize us to contact you?'; newBlock.yes_label = 'Yes, I authorize'; newBlock.no_label = 'No, I do not authorize'; newBlock.required = true; newBlock.alignment = 'left'; }
+  else if (type === 'initials') { newBlock.label = 'Initials'; newBlock.required = true; }
 
   const next = [...(blocks || [])];
   if (typeof index === 'number' && index >= 0 && index <= next.length) {
@@ -144,6 +148,10 @@ export function changeBlockType(blocks: TemplateBlock[], id: string, newType: Bl
     if (newType === 'spacer') return { ...base, type: 'spacer', size: 'medium' };
     if (newType === 'signature_placeholder') return { ...base, type: 'signature_placeholder', label: 'Signature' };
     if (newType === 'date') return { ...base, type: 'date', label: 'Date' };
+    if (newType === 'image') return { ...base, type: 'image', alignment: 'center', size: 'medium', alt_text: '', caption: '' };
+    if (newType === 'checkbox') return { ...base, type: 'checkbox', label: 'I agree to the terms', description: '', required: true, alignment: 'left' };
+    if (newType === 'yes_no') return { ...base, type: 'yes_no', question: 'Do you authorize us to contact you?', yes_label: 'Yes, I authorize', no_label: 'No, I do not authorize', required: true, alignment: 'left' };
+    if (newType === 'initials') return { ...base, type: 'initials', label: 'Initials', required: true };
     return { ...base, type: 'divider' } as TemplateBlock;
   });
 }
@@ -180,6 +188,9 @@ export function updateListItem(blocks: TemplateBlock[], id: string, index: numbe
 function extractBlockText(block: TemplateBlock): string {
   if (isTextBlock(block)) return block.text || '';
   if (isListBlock(block)) return (block.items || []).join('\n');
+  if (block.type === 'checkbox') return block.label || '';
+  if (block.type === 'yes_no') return block.question || '';
+  if (block.type === 'initials') return block.label || '';
   return '';
 }
 
@@ -203,6 +214,14 @@ export function contentToHtml(content: any): string {
         htmlParts.push(`<ol>${items}</ol>`);
       } else if (b.type === 'divider') {
         htmlParts.push('<hr/>');
+      } else if (b.type === 'image') {
+        htmlParts.push(`<div data-element-type="image" data-element-id="${b.id}" data-alignment="${b.alignment || 'center'}" data-size="${b.size || 'medium'}"><img src="${b.url || ''}" alt="${b.alt_text || ''}" />${b.caption ? `<figcaption>${b.caption}</figcaption>` : ''}</div>`);
+      } else if (b.type === 'checkbox') {
+        htmlParts.push(`<div data-element-type="checkbox" data-element-id="${b.id}" data-required="${b.required !== false}" data-label="${b.label || ''}" data-description="${b.description || ''}">☐ ${b.label || ''}</div>`);
+      } else if (b.type === 'yes_no') {
+        htmlParts.push(`<div data-element-type="yes_no" data-element-id="${b.id}" data-required="${b.required !== false}" data-question="${b.question || ''}" data-yes-label="${b.yes_label || 'Yes'}" data-no-label="${b.no_label || 'No'}">○ ${b.yes_label || 'Yes'} ○ ${b.no_label || 'No'}</div>`);
+      } else if (b.type === 'initials') {
+        htmlParts.push(`<div data-element-type="initials" data-element-id="${b.id}" data-required="${b.required !== false}" data-label="${b.label || 'Initials'}">[ ${b.label || 'Initials'} ]</div>`);
       }
     });
     return htmlParts.join('') || '<p></p>';
