@@ -44,6 +44,7 @@ export interface HealthPolicyNote {
   id: string;
   health_policy_id: string;
   author_id: string;
+  title?: string | null;
   content: string;
   created_at: string;
   updated_at: string;
@@ -154,4 +155,86 @@ export interface HealthTaxHouseholdMember {
 
   created_at?: string;
   updated_at?: string;
+}
+
+export interface HealthDoctor {
+  id: string;
+  health_policy_id: string;
+  client_id: string;
+  doctor_name: string;
+  address?: string | null;
+  phone?: string | null;
+  specialty?: string | null;
+  npi?: string | null;
+  created_at?: string;
+}
+
+export interface HealthHospital {
+  id: string;
+  health_policy_id: string;
+  client_id: string;
+  hospital_name: string;
+  address?: string | null;
+  phone?: string | null;
+  created_at?: string;
+}
+
+export interface HealthUrgentCare {
+  id: string;
+  health_policy_id: string;
+  client_id: string;
+  urgent_care_name: string;
+  address?: string | null;
+  phone?: string | null;
+  created_at?: string;
+}
+
+export interface HealthPharmacy {
+  id: string;
+  health_policy_id: string;
+  client_id: string;
+  pharmacy_name: string;
+  address?: string | null;
+  phone?: string | null;
+  created_at?: string;
+}
+
+export interface HealthCondition {
+  id: string;
+  health_policy_id: string;
+  client_id: string;
+  condition_name: string;
+  created_at?: string;
+}
+
+export interface HealthSpecialist {
+  id: string;
+  health_policy_id: string;
+  client_id: string;
+  specialist_name: string;
+  specialty?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  created_at?: string;
+}
+
+export interface HealthMedication {
+  id: string;
+  health_policy_id: string;
+  client_id: string;
+  medication_name: string;
+  dosage?: string | null;
+  frequency?: string | null;
+  instructions?: string | null;
+  created_at?: string;
+}
+
+export interface HealthMedicalData {
+  doctors: HealthDoctor[];
+  hospitals: HealthHospital[];
+  urgentCares: HealthUrgentCare[];
+  pharmacies: HealthPharmacy[];
+  conditions: HealthCondition[];
+  specialists: HealthSpecialist[];
+  medications: HealthMedication[];
 }

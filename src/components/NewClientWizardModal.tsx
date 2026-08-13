@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import PhoneInput from '@/components/common/PhoneInput';
 import GoogleAddressAutocomplete, { NormalizedAddress } from '@/components/address/GoogleAddressAutocomplete';
-import { parseDisplayDate } from '@/utils/dateUtils';
+import { parseDisplayDate, formatAsDateInput, isValidDisplayDate } from '@/utils/dateUtils';
 import { formatEIN } from '@/lib/formatters/ein';
 
 interface NewClientWizardModalProps {
@@ -161,6 +161,14 @@ export default function NewClientWizardModal({
     if (!email.trim() && !phone.trim()) {
       setFormError('Please provide at least an Email address or Phone number.');
       return;
+    }
+
+    if (!isCompany && dateOfBirth && dateOfBirth.trim()) {
+      const cleanDob = dateOfBirth.trim();
+      if (!isValidDisplayDate(cleanDob)) {
+        setFormError('Invalid Date of Birth. Please enter a valid calendar date in MM/DD/YYYY format.');
+        return;
+      }
     }
 
     setFormSaving(true);
@@ -600,9 +608,11 @@ export default function NewClientWizardModal({
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Date of Birth</label>
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={dateOfBirth}
-                      onChange={e => setDateOfBirth(e.target.value)}
+                      onChange={e => setDateOfBirth(formatAsDateInput(e.target.value))}
                       placeholder="MM/DD/YYYY"
+                      maxLength={10}
                       className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
                     />
                   </div>

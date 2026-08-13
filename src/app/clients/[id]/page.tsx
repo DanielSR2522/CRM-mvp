@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
+import CollapsibleSidebar from '@/components/common/CollapsibleSidebar';
+import HealthClientHeader from '@/components/health/HealthClientHeader';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
 import MedicareTab from '@/components/medicare/MedicareTab';
 import SupplementalTab from '@/components/supplemental/SupplementalTab';
@@ -209,6 +211,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   const activeTab = (normalizedSection === 'personal-information' ? 'personal-info' : normalizedSection) as 'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health' | 'life' | 'medicare' | 'supplemental';
 
+  const isModuleWorkspace = activeTab === 'health' || activeTab === 'medicare' || activeTab === 'supplemental' || activeTab === 'life';
+  const isCoreWorkspace = activeTab === 'overview' || activeTab === 'personal-info' || activeTab === 'documents' || activeTab === 'notes' || activeTab === 'timeline' || activeTab === 'policies';
+  const isModernClientWorkspace = isModuleWorkspace || isCoreWorkspace;
+  const isOperationalWorkspace = isModuleWorkspace;
+
 
 
   const handleTabChange = useCallback((tab: string) => {
@@ -245,6 +252,24 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
     return false;
   });
+
+  const [notesSummaryList, setNotesSummaryList] = useState<any[]>([]);
+
+  const loadNotesSummary = useCallback(async () => {
+    if (!clientId) return;
+    try {
+      const { data } = await supabase.from('client_notes').select('id, category').eq('client_id', clientId);
+      setNotesSummaryList(data || []);
+    } catch (err) {
+      console.error('Failed to load notes summary:', err);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (activeTab === 'notes') {
+      loadNotesSummary();
+    }
+  }, [activeTab, loadNotesSummary]);
 
   const toggleClientSidebar = useCallback(() => {
     setIsClientSidebarCollapsed((prev) => {
@@ -2800,13 +2825,37 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   return (
     <DashboardLayout>
-      <CrmPageContainer>
+      {['overview', 'personal-info', 'documents', 'notes', 'timeline', 'policies'].includes(activeTab) && client && (
+        <HealthClientHeader
+          clientId={clientId}
+          clientName={personalForm.full_name || client.full_name || 'Client Profile'}
+          photoUrl={(client as any).photo_url || null}
+          lastUpdated={null}
+          onSendEmail={() => {
+            const email = personalForm.email || client.email;
+            if (email) window.location.href = `mailto:${email}`;
+            else alert('No email address registered for this client.');
+          }}
+          onConsent={() => handleTabChange('consents')}
+          onDeleteProfile={() => {
+            setDeleteClientError(null);
+            setIsDeleteClientModalOpen(true);
+          }}
+          isCompanyClient={isCompanyClient}
+          activeSection={
+            activeTab === 'personal-info' ? 'personal-information' : (activeTab as any)
+          }
+        />
+      )}
+      <CrmPageContainer className={isModernClientWorkspace ? "px-4 py-6 md:px-8 md:py-8" : ""}>
         {/* Navigation Breadcrumb */}
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Link href="/clients" className="hover:text-blue-600 transition-colors">Clients</Link>
-          <span>/</span>
-          <span className="text-slate-800 font-semibold">{loadingClient ? 'Loading...' : client?.full_name}</span>
-        </div>
+        {!isModernClientWorkspace && (
+          <div className="flex items-center gap-2 text-sm text-slate-500">
+            <Link href="/clients" className="hover:text-blue-600 transition-colors">Clients</Link>
+            <span>/</span>
+            <span className="text-slate-800 font-semibold">{loadingClient ? 'Loading...' : client?.full_name}</span>
+          </div>
+        )}
 
         {loadingClient ? (
           <div className="flex justify-center items-center py-20 bg-white border border-slate-100 rounded-2xl shadow-sm">
@@ -2819,24 +2868,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           <div className="flex flex-col lg:flex-row gap-6 items-start">
             
             {/* Left Sidebar Summary */}
-            {isClientSidebarCollapsed ? (
-              <aside className="hidden lg:flex flex-col items-center bg-white border border-slate-100 rounded-2xl p-3 shadow-xs space-y-4 flex-shrink-0 lg:sticky lg:top-6">
-                <button
-                  type="button"
-                  onClick={toggleClientSidebar}
-                  title="Expand client details sidebar"
-                  className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                  </svg>
-                </button>
-                <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-extrabold flex items-center justify-center text-xs">
-                  {client?.full_name?.charAt(0) || 'C'}
-                </div>
-              </aside>
-            ) : (
-              <aside className="w-full lg:w-[280px] bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 flex-shrink-0 lg:sticky lg:top-6 relative">
+            {!isOperationalWorkspace && (
+              <CollapsibleSidebar title="Client Profile">
                 <div className="flex items-start justify-between">
                   <div>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -2846,16 +2879,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       {loadingClient ? 'Loading...' : (client?.full_name || personalInfo?.full_name || '-')}
                     </h2>
                   </div>
-                  <button
-                    type="button"
-                    onClick={toggleClientSidebar}
-                    title="Collapse sidebar"
-                    className="hidden lg:block p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-                    </svg>
-                  </button>
                 </div>
 
               <div className="border-t border-slate-100 pt-5 space-y-4">
@@ -2963,8 +2986,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                   </div>
                 )}
 
-                {/* Company Search & Linking Block for Personal Profiles */}
-                {!isCompanyClient && (
+                {/* Company Search & Linking Block for Personal Profiles (Excluded from Documents and Notes views) */}
+                {!isCompanyClient && activeTab !== 'documents' && activeTab !== 'notes' && (
                   <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
                     <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Link Company</span>
                     <div className="relative">
@@ -3039,8 +3062,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                   </div>
                 )}
 
-                {/* Persistent LINKED COMPANY Cards in Sidebar */}
-                {!isCompanyClient && (
+                {/* Persistent LINKED COMPANY Cards in Sidebar (Excluded from Documents and Notes views) */}
+                {!isCompanyClient && activeTab !== 'documents' && activeTab !== 'notes' && (
                   <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
                     <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       {linkedCompanyProfiles && linkedCompanyProfiles.length > 1 ? 'Linked Companies' : 'Linked Company'}
@@ -3068,6 +3091,88 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         No companies linked.
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* DOCUMENT SUMMARY Card (Rendered ONLY for activeTab === 'documents') */}
+                {activeTab === 'documents' && (
+                  <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
+                    <span className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                      Document Summary
+                    </span>
+                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 space-y-2 text-xs">
+                      <div className="flex items-center justify-between text-slate-600 font-semibold">
+                        <span>Health</span>
+                        <span className="font-extrabold text-slate-900">{clientDocsList.filter((d) => d.source === 'health').length}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 font-semibold">
+                        <span>Medicare</span>
+                        <span className="font-extrabold text-slate-900">{clientDocsList.filter((d) => (d.source as string) === 'medicare').length}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 font-semibold">
+                        <span>Supplemental</span>
+                        <span className="font-extrabold text-slate-900">{clientDocsList.filter((d) => (d.source as string) === 'supplemental').length}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 font-semibold">
+                        <span>Life</span>
+                        <span className="font-extrabold text-slate-900">{clientDocsList.filter((d) => d.source === 'life').length}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 font-semibold">
+                        <span>Property & Casualty</span>
+                        <span className="font-extrabold text-slate-900">{clientDocsList.filter((d) => d.source === 'property_casualty').length}</span>
+                      </div>
+                      {clientDocsList.filter((d) => !['health', 'medicare', 'supplemental', 'life', 'property_casualty'].includes(d.source || '')).length > 0 && (
+                        <div className="flex items-center justify-between text-slate-600 font-semibold">
+                          <span>General</span>
+                          <span className="font-extrabold text-slate-900">{clientDocsList.filter((d) => !['health', 'medicare', 'supplemental', 'life', 'property_casualty'].includes(d.source || '')).length}</span>
+                        </div>
+                      )}
+                      <div className="border-t border-slate-200/80 pt-2 flex items-center justify-between font-extrabold text-slate-900 text-xs">
+                        <span>TOTAL</span>
+                        <span className="text-blue-600">{clientDocsList.length}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* NOTES SUMMARY Card (Rendered ONLY for activeTab === 'notes') */}
+                {activeTab === 'notes' && (
+                  <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
+                    <span className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                      Notes Summary
+                    </span>
+                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 space-y-2 text-xs">
+                      <div className="flex items-center justify-between text-slate-600 font-semibold">
+                        <span>Health</span>
+                        <span className="font-extrabold text-slate-900">{notesSummaryList.filter((n) => n.category === 'health').length}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 font-semibold">
+                        <span>Medicare</span>
+                        <span className="font-extrabold text-slate-900">{notesSummaryList.filter((n) => n.category === 'medicare').length}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 font-semibold">
+                        <span>Supplemental</span>
+                        <span className="font-extrabold text-slate-900">{notesSummaryList.filter((n) => n.category === 'supplemental').length}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 font-semibold">
+                        <span>Life</span>
+                        <span className="font-extrabold text-slate-900">{notesSummaryList.filter((n) => n.category === 'life').length}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 font-semibold">
+                        <span>Property & Casualty</span>
+                        <span className="font-extrabold text-slate-900">{notesSummaryList.filter((n) => n.category === 'property_casualty').length}</span>
+                      </div>
+                      {notesSummaryList.filter((n) => !['health', 'medicare', 'supplemental', 'life', 'property_casualty'].includes(n.category || '')).length > 0 && (
+                        <div className="flex items-center justify-between text-slate-600 font-semibold">
+                          <span>General</span>
+                          <span className="font-extrabold text-slate-900">{notesSummaryList.filter((n) => !['health', 'medicare', 'supplemental', 'life', 'property_casualty'].includes(n.category || '')).length}</span>
+                        </div>
+                      )}
+                      <div className="border-t border-slate-200/80 pt-2 flex items-center justify-between font-extrabold text-slate-900 text-xs">
+                        <span>TOTAL</span>
+                        <span className="text-blue-600">{notesSummaryList.length}</span>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -3111,151 +3216,142 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                   </div>
                 )}
               </div>
-            </aside>
+            </CollapsibleSidebar>
           )}
 
             {/* Main Area */}
             <div className="flex-1 w-full space-y-6">
-              
-              {/* Tabs and Actions bar */}
-              <div className="crm-card p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-1 border-b sm:border-b-0 border-[#E8ECF2] pb-2 sm:pb-0">
-                  <button
-                    onClick={() => handleTabChange('overview')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      activeTab === 'overview'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                    }`}
-                  >
-                    Overview
-                  </button>
-                  <button
-                    onClick={() => handleTabChange('personal-info')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      activeTab === 'personal-info'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                    }`}
-                  >
-                    {isCompanyClient ? 'Company Information' : 'Personal Info'}
-                  </button>
-                  {isLineEnabled('property_casualty') && (
-                    <button
-                      onClick={() => handleTabChange('policies')}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                        activeTab === 'policies'
-                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                      }`}
-                    >
-                      Property & Casualty
-                    </button>
-                  )}
-                  {!isCompanyClient && isLineEnabled('life') && (
-                    <button
-                      onClick={() => handleTabChange('life')}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                        activeTab === 'life'
-                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                      }`}
-                    >
-                      Life
-                    </button>
-                  )}
-                  {!isCompanyClient && isLineEnabled('health') && (
-                    <button
-                      onClick={() => handleTabChange('health')}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                        activeTab === 'health'
-                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                      }`}
-                    >
-                      Health
-                    </button>
-                  )}
-                  {!isCompanyClient && isLineEnabled('medicare') && (
-                    <button
-                      onClick={() => handleTabChange('medicare')}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                        activeTab === 'medicare'
-                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                      }`}
-                    >
-                      Medicare
-                    </button>
-                  )}
-                  {!isCompanyClient && isLineEnabled('supplemental') && (
-                    <button
-                      onClick={() => handleTabChange('supplemental')}
-                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                        activeTab === 'supplemental'
-                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                          : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                      }`}
-                    >
-                      Supplemental
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleTabChange('documents')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      activeTab === 'documents'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                    }`}
-                  >
-                    Documents
-                  </button>
-                  <button
-                    onClick={() => handleTabChange('notes')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      activeTab === 'notes'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                    }`}
-                  >
-                    Notes
-                  </button>
-                  <button
-                    onClick={() => handleTabChange('consents')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      activeTab === 'consents'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                    }`}
-                  >
-                    Consents
-                  </button>
-                  <button
-                    onClick={() => handleTabChange('timeline')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                      activeTab === 'timeline'
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
-                    }`}
-                  >
-                    Timeline
-                  </button>
+                        {/* Tabs and Actions bar */}
+              {!isModernClientWorkspace && (
+                <div className="crm-card p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-1 border-b sm:border-b-0 border-[#E8ECF2] pb-2 sm:pb-0">
+                      <button
+                        onClick={() => handleTabChange('overview')}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                          (activeTab as string) === 'overview'
+                            ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                            : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                        }`}
+                      >
+                        Overview
+                      </button>
+                      <button
+                        onClick={() => handleTabChange('personal-info')}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                          (activeTab as string) === 'personal-info'
+                            ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                            : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                        }`}
+                      >
+                        {isCompanyClient ? 'Company Information' : 'Personal Info'}
+                      </button>
+                      {isLineEnabled('property_casualty') && (
+                        <button
+                          onClick={() => handleTabChange('policies')}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                            (activeTab as string) === 'policies'
+                              ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                              : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                          }`}
+                        >
+                          Property & Casualty
+                        </button>
+                      )}
+                      {!isCompanyClient && isLineEnabled('life') && (
+                        <button
+                          onClick={() => handleTabChange('life')}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                            (activeTab as string) === 'life'
+                              ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                              : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                          }`}
+                        >
+                          Life
+                        </button>
+                      )}
+                      {isLineEnabled('health') && (
+                        <button
+                          onClick={() => handleTabChange('health')}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                            (activeTab as string) === 'health'
+                              ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                              : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                          }`}
+                        >
+                          Health
+                        </button>
+                      )}
+                      {isLineEnabled('medicare') && (
+                        <button
+                          onClick={() => handleTabChange('medicare')}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                            (activeTab as string) === 'medicare'
+                              ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                              : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                          }`}
+                        >
+                          Medicare
+                        </button>
+                      )}
+                      {isLineEnabled('supplemental') && (
+                        <button
+                          onClick={() => handleTabChange('supplemental')}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                            (activeTab as string) === 'supplemental'
+                              ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                              : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                          }`}
+                        >
+                          Supplemental
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleTabChange('documents')}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                          (activeTab as string) === 'documents'
+                            ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                            : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                        }`}
+                      >
+                        Documents
+                      </button>
+                      <button
+                        onClick={() => handleTabChange('notes')}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                          (activeTab as string) === 'notes'
+                            ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                            : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                        }`}
+                      >
+                        Notes
+                      </button>
+                      <button
+                        onClick={() => handleTabChange('timeline')}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                          (activeTab as string) === 'timeline'
+                            ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                            : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                        }`}
+                      >
+                        Timeline
+                      </button>
+                    </div>
+                    
+                    {(activeTab as string) === 'policies' && policies.length > 0 && (
+                      <div className="flex justify-end gap-2">
+                        <Link
+                          href={`/clients/${clientId}/policies/new`}
+                          className="crm-btn-primary text-xs px-3 py-1.5"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+                          </svg>
+                          Add Policy
+                        </Link>
+                      </div>
+                    )}
                 </div>
-                
-                {activeTab === 'policies' && policies.length > 0 && (
-                  <div className="flex justify-end gap-2">
-                    <Link
-                      href={`/clients/${clientId}/policies/new`}
-                      className="crm-btn-primary text-xs px-3 py-1.5"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
-                      </svg>
-                      Add Policy
-                    </Link>
-                  </div>
-                )}
-              </div>
+              )}
 
               {/* OVERVIEW TAB CONTENT (Concise Read-only Dashboard) */}
               {activeTab === 'overview' && (
@@ -4276,228 +4372,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                     )}
                   </div>
 
-                  {/* SECTION 3: Income Information Card (Personal Clients Only) */}
-                  {!isCompanyClient && (
-                    <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative font-sans">
-                      <div
-                        onClick={() => setIsIncomeOpen(!isIncomeOpen)}
-                        className="flex items-center justify-between border-b border-slate-100 pb-4 cursor-pointer select-none group"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
-                            {isIncomeOpen ? (
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
-                            ) : (
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
-                            )}
-                          </span>
-                          <div>
-                            <h3 className="text-lg font-extrabold text-slate-900">Income Information</h3>
-                            <p className="text-xs text-slate-400 mt-0.5">Manage income records for health eligibility and tax household.</p>
-                          </div>
-                        </div>
-                        {isIncomeOpen && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setIsAddIncomeOpen(true);
-                            }}
-                            className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-2 rounded-xl transition-all shadow-md active:scale-95"
-                          >
-                            + Add Income
-                          </button>
-                        )}
-                      </div>
-
-                      {isIncomeOpen && (
-                        <div className="pt-6">
-                          {loadingIncome ? (
-                            <div className="flex justify-center items-center py-10">
-                              <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                              </svg>
-                            </div>
-                          ) : incomeList.length === 0 ? (
-                            <div className="text-center py-10 border border-dashed border-slate-200 rounded-xl">
-                              <svg className="w-10 h-10 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              <h4 className="text-xs font-bold text-slate-700">No income records registered</h4>
-                              <p className="text-[11px] text-slate-400 mt-0.5">Click "+ Add Income" above to add income details.</p>
-                            </div>
-                          ) : (
-                            <div className="space-y-4">
-                              {incomeList.map((income) => (
-                                <div
-                                  key={income.id}
-                                  className="p-4 border border-slate-150 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                                >
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 flex-1">
-                                    <InlineEditableSelect
-                                      label="Relationship"
-                                      value={income.relationship_to_applicant}
-                                      options={[
-                                        { label: 'Applicant', value: 'Applicant' },
-                                        { label: 'Spouse', value: 'Spouse' },
-                                        { label: 'Son/Daughter', value: 'Son/Daughter' },
-                                        { label: 'Mother', value: 'Mother' },
-                                        { label: 'Father', value: 'Father' },
-                                        { label: 'Other', value: 'Other' },
-                                      ]}
-                                      onSave={val => saveIncomeField(income.id, 'relationship_to_applicant', val)}
-                                    />
-
-                                    <InlineEditableSelect
-                                      label="Income Type"
-                                      value={income.income_type}
-                                      options={[
-                                        { label: 'W2', value: 'W2' },
-                                        { label: '1099', value: '1099' },
-                                      ]}
-                                      onSave={val => saveIncomeField(income.id, 'income_type', val)}
-                                    />
-
-                                    <InlineEditableText
-                                      label="Employer / Source"
-                                      value={income.employer_name}
-                                      onSave={val => saveIncomeField(income.id, 'employer_name', val)}
-                                    />
-
-                                    <InlineEditablePhone
-                                      label="Employer Phone"
-                                      value={income.employer_phone}
-                                      onSave={val => saveIncomeField(income.id, 'employer_phone', val)}
-                                    />
-
-                                    <InlineEditableText
-                                      label="Amount ($)"
-                                      type="number"
-                                      value={String(income.income || '')}
-                                      onSave={val => saveIncomeField(income.id, 'income', Number(val))}
-                                    />
-                                  </div>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteIncome(income.id)}
-                                    className="text-xs font-bold text-rose-500 hover:text-rose-700 p-1 self-end sm:self-center"
-                                    title="Delete income record"
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* ADD INCOME MODAL */}
-                          {isAddIncomeOpen && (
-                            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-                              <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 border border-slate-100">
-                                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                                  <h4 className="text-base font-extrabold text-slate-900">Add Income Record</h4>
-                                  <button
-                                    type="button"
-                                    onClick={() => setIsAddIncomeOpen(false)}
-                                    className="text-slate-400 hover:text-slate-600 font-bold"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-
-                                {incomeError && (
-                                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-xs font-semibold">
-                                    {incomeError}
-                                  </div>
-                                )}
-
-                                <div className="space-y-3 text-xs">
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Relationship</label>
-                                    <select
-                                      value={incomeRelationship}
-                                      onChange={e => setIncomeRelationship(e.target.value as any)}
-                                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                                    >
-                                      <option value="Applicant">Applicant</option>
-                                      <option value="Spouse">Spouse</option>
-                                      <option value="Son/Daughter">Son/Daughter</option>
-                                      <option value="Mother">Mother</option>
-                                      <option value="Father">Father</option>
-                                      <option value="Other">Other</option>
-                                    </select>
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Income Type</label>
-                                    <select
-                                      value={incomeType}
-                                      onChange={e => setIncomeType(e.target.value as any)}
-                                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                                    >
-                                      <option value="W2">W2</option>
-                                      <option value="1099">1099</option>
-                                    </select>
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer / Source</label>
-                                    <input
-                                      type="text"
-                                      value={incomeEmployerName}
-                                      onChange={e => setIncomeEmployerName(e.target.value)}
-                                      placeholder="e.g. Acme Corp"
-                                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer Phone</label>
-                                    <PhoneInput
-                                      value={incomeEmployerPhone}
-                                      onChange={val => setIncomeEmployerPhone(val)}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Annual Amount ($)</label>
-                                    <input
-                                      type="number"
-                                      value={incomeAmount}
-                                      onChange={e => setIncomeAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                                      placeholder="e.g. 55000"
-                                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none"
-                                      required
-                                    />
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                                  <button
-                                    type="button"
-                                    onClick={() => setIsAddIncomeOpen(false)}
-                                    className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 rounded-xl"
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={handleAddIncomeSubmit}
-                                    disabled={incomeSaving}
-                                    className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs disabled:opacity-50"
-                                  >
-                                    {incomeSaving ? 'Saving...' : 'Save Income'}
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {/* SECTION 3: Income Information moved canonically to Health workspace */}
 
                   {/* SECTION 4: Payment Information Card */}
                   <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative font-sans">
@@ -5382,66 +5257,122 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 );
               })()}
 
-      {activeTab === 'life' && client && (
-        client.agent_id !== currentUserId ? (
-          <div className="bg-rose-50 border border-rose-100 rounded-2xl p-8 text-center space-y-3 font-sans">
-            <h4 className="text-lg font-bold text-rose-800">Private Owner Module</h4>
-            <p className="text-sm text-rose-600 font-medium">The <strong>Life</strong> module is private to the primary client owner.</p>
-          </div>
-        ) : !isLineEnabled('life') ? (
-          <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
-            <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
-            <p className="text-sm text-slate-300">The <strong>Life</strong> module is disabled for your agent profile.</p>
-          </div>
-        ) : (
-          <LifePolicyTab
-            clientId={clientId}
-            onPoliciesChanged={() => { fetchPersonalInformation(); }}
-          />
-        )
-      )}
+              {activeTab === 'life' && client && (
+                client.agent_id !== currentUserId ? (
+                  <div className="bg-rose-50 border border-rose-100 rounded-2xl p-8 text-center space-y-3 font-sans">
+                    <h4 className="text-lg font-bold text-rose-800">Private Owner Module</h4>
+                    <p className="text-sm text-rose-600 font-medium">The <strong>Life</strong> module is private to the primary client owner.</p>
+                  </div>
+                ) : !isLineEnabled('life') ? (
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
+                    <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
+                    <p className="text-sm text-slate-300">The <strong>Life</strong> module is disabled for your agent profile.</p>
+                  </div>
+                ) : (
+                  <LifePolicyTab
+                    clientId={clientId}
+                    clientName={personalForm.full_name || client.full_name || 'Client Profile'}
+                    photoUrl={(client as any).photo_url || null}
+                    onSendEmail={() => {
+                      const email = personalForm.email || client.email;
+                      if (email) window.location.href = `mailto:${email}`;
+                      else alert('No email address registered for this client.');
+                    }}
+                    onConsent={() => handleTabChange('consents')}
+                    onDeleteProfile={() => {
+                      setDeleteClientError(null);
+                      setIsDeleteClientModalOpen(true);
+                    }}
+                    isCompanyClient={isCompanyClient}
+                    initialSubtab={(searchParams.get('subtab') as any) || 'summary'}
+                    onPoliciesChanged={() => { fetchPersonalInformation(); fetchOverviewPolicies(); }}
+                  />
+                )
+              )}
 
-      {activeTab === 'health' && client && (
-        client.agent_id !== currentUserId ? (
-          <div className="bg-rose-50 border border-rose-100 rounded-2xl p-8 text-center space-y-3 font-sans">
-            <h4 className="text-lg font-bold text-rose-800">Private Owner Module</h4>
-            <p className="text-sm text-rose-600 font-medium">The <strong>Health</strong> module is private to the primary client owner.</p>
-          </div>
-        ) : !isLineEnabled('health') ? (
-          <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
-            <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
-            <p className="text-sm text-slate-300">The <strong>Health</strong> module is disabled for your agent profile.</p>
-          </div>
-        ) : (
-          <HealthPolicyTab
-            clientId={clientId}
-            agentName={getAgentDisplayName()}
-            currentUserId={currentUserId}
-            formatIsoToUsDate={formatIsoToUsDate}
-          />
-        )
-      )}
+              {activeTab === 'health' && client && (
+                <HealthPolicyTab
+                  clientId={clientId}
+                  agentName={getAgentDisplayName()}
+                  currentUserId={currentUserId}
+                  formatIsoToUsDate={formatIsoToUsDate}
+                  clientName={personalForm.full_name || client.full_name || 'Client Profile'}
+                  photoUrl={(client as any).photo_url || null}
+                  lastUpdated={client.updated_at || client.created_at}
+                  onSendEmail={() => {
+                    const email = personalForm.email || client.email;
+                    if (email) {
+                      window.location.href = `mailto:${email}`;
+                    } else {
+                      alert('No email address registered for this client.');
+                    }
+                  }}
+                  onConsent={() => {
+                    handleTabChange('consents');
+                  }}
+                  onDeleteProfile={() => {
+                    setDeleteClientError(null);
+                    setIsDeleteClientModalOpen(true);
+                  }}
+                  isCompanyClient={isCompanyClient}
+                />
+              )}
 
-      {activeTab === 'medicare' && client && (
-        <MedicareTab
-          clientId={clientId}
-          isCompanyClient={isCompanyClient}
-          initialSubtab={(searchParams.get('subtab') as any) || 'summary'}
-          currentUserId={currentUserId}
-          onPolicyDeleted={() => fetchOverviewPolicies()}
-        />
-      )}
+              {activeTab === 'medicare' && client && (
+                <MedicareTab
+                  clientId={clientId}
+                  clientName={personalForm.full_name || client.full_name || 'Client Profile'}
+                  photoUrl={(client as any).photo_url || null}
+                  lastUpdated={client.updated_at || client.created_at}
+                  onSendEmail={() => {
+                    const email = personalForm.email || client.email;
+                    if (email) {
+                      window.location.href = `mailto:${email}`;
+                    } else {
+                      alert('No email address registered for this client.');
+                    }
+                  }}
+                  onConsent={() => {
+                    handleTabChange('consents');
+                  }}
+                  onDeleteProfile={() => {
+                    setDeleteClientError(null);
+                    setIsDeleteClientModalOpen(true);
+                  }}
+                  isCompanyClient={isCompanyClient}
+                  initialSubtab={(searchParams.get('subtab') as any) || 'summary'}
+                  currentUserId={currentUserId}
+                  onPolicyDeleted={() => fetchOverviewPolicies()}
+                />
+              )}
 
-      {activeTab === 'supplemental' && client && (
-        <SupplementalTab
-          clientId={clientId}
-          isCompanyClient={isCompanyClient}
-          initialPolicyId={searchParams.get('policy')}
-          initialSubtab={(searchParams.get('subtab') as any) || 'summary'}
-          currentUserId={currentUserId}
-          onPolicyDeleted={() => fetchOverviewPolicies()}
-        />
-      )}
+              {activeTab === 'supplemental' && client && (
+                <SupplementalTab
+                  clientId={clientId}
+                  clientName={personalForm.full_name || client.full_name || 'Client Profile'}
+                  photoUrl={(client as any).photo_url || null}
+                  onSendEmail={() => {
+                    const email = personalForm.email || client.email;
+                    if (email) {
+                      window.location.href = `mailto:${email}`;
+                    } else {
+                      alert('No email address registered for this client.');
+                    }
+                  }}
+                  onConsent={() => {
+                    handleTabChange('consents');
+                  }}
+                  onDeleteProfile={() => {
+                    setDeleteClientError(null);
+                    setIsDeleteClientModalOpen(true);
+                  }}
+                  isCompanyClient={isCompanyClient}
+                  initialPolicyId={searchParams.get('policy')}
+                  initialSubtab={(searchParams.get('subtab') as any) || 'summary'}
+                  currentUserId={currentUserId}
+                  onPolicyDeleted={() => fetchOverviewPolicies()}
+                />
+              )}
             </div>
           </div>
         )}
@@ -5452,6 +5383,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       {/* INCOME MODALS */}
 
       {/* DANGER ZONE */}
+      {!isModernClientWorkspace && (
         <div className="mt-12 bg-rose-50 border border-rose-100 rounded-2xl p-6">
           <h3 className="text-rose-800 font-extrabold text-lg mb-2">Danger Zone</h3>
           <p className="text-rose-600/80 text-sm mb-6">
@@ -5467,6 +5399,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             Delete Client Profile
           </button>
         </div>
+      )}
 
       {/* Delete Client Modal */}
       {isDeleteClientModalOpen && (

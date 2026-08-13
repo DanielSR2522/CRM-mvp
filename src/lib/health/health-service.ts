@@ -44,6 +44,58 @@ export async function fetchPrimaryApplicant(clientId: string): Promise<HealthPri
   };
 }
 
+/**
+ * Update a specific field in client_personal_information (and sync to clients table if applicable).
+ */
+export async function updatePrimaryApplicantField(clientId: string, field: string, value: any): Promise<void> {
+  const { error: subError } = await supabase
+    .from('client_personal_information')
+    .upsert({
+      client_id: clientId,
+      [field]: value,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'client_id' });
+
+  if (subError) throw subError;
+
+  if (['full_name', 'email', 'phone'].includes(field)) {
+    const masterField = field === 'full_name' ? 'full_name' : field;
+    await supabase
+      .from('clients')
+      .update({
+        [masterField]: value,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', clientId);
+  }
+}
+
+/**
+ * Update a specific field in client_residence_information (and sync address to clients table).
+ */
+export async function updateClientResidenceField(clientId: string, field: string, value: any): Promise<void> {
+  const { error: subError } = await supabase
+    .from('client_residence_information')
+    .upsert({
+      client_id: clientId,
+      [field]: value,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'client_id' });
+
+  if (subError) throw subError;
+
+  if (field === 'address') {
+    await supabase
+      .from('clients')
+      .update({
+        address: value,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', clientId);
+  }
+}
+
+
 export interface ClientResidenceData {
   address: string | null;
   city: string | null;
@@ -278,7 +330,7 @@ export async function fetchHealthNotes(healthPolicyId: string): Promise<HealthPo
   if (!data || data.length === 0) return [];
 
   const authorIds = Array.from(new Set(data.map(n => n.author_id).filter(Boolean)));
-  let profileMap: Record<string, { name: string | null; email: string | null }> = {};
+  const profileMap: Record<string, { name: string | null; email: string | null }> = {};
   if (authorIds.length > 0) {
     const { data: profs } = await supabase
       .from('profiles')
@@ -484,4 +536,87 @@ export async function saveTaxMemberSecret(
     const errData = await res.json();
     throw new Error(errData.error || 'Failed to save secret');
   }
+}
+
+/**
+ * Updates specific top-level fields on a HealthPolicy record (e.g. policy_status, action_pending)
+ */
+export async function updateHealthPolicyField(
+  policyId: string,
+  patch: Partial<HealthPolicy>
+): Promise<HealthPolicy> {
+  const { data, error } = await supabase
+    .from('health_policies')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', policyId)
+    .select('*')
+    .single();
+
+  if (error || !data) {
+    throw error || new Error('Failed to update Health Policy.');
+  }
+
+  return data as HealthPolicy;
+}
+
+/**
+ * Fetch all medical items for a Health policy
+ */
+export async function fetchHealthMedicalData(healthPolicyId: string) {
+  const [
+    doctorsRes,
+    hospitalsRes,
+    urgentCaresRes,
+    pharmaciesRes,
+    conditionsRes,
+    specialistsRes,
+    medicationsRes,
+  ] = await Promise.all([
+    supabase.from('client_health_doctors').select('*').eq('health_policy_id', healthPolicyId).order('created_at', { ascending: true }),
+    supabase.from('client_health_hospitals').select('*').eq('health_policy_id', healthPolicyId).order('created_at', { ascending: true }),
+    supabase.from('client_health_urgent_cares').select('*').eq('health_policy_id', healthPolicyId).order('created_at', { ascending: true }),
+    supabase.from('client_health_pharmacies').select('*').eq('health_policy_id', healthPolicyId).order('created_at', { ascending: true }),
+    supabase.from('client_health_conditions').select('*').eq('health_policy_id', healthPolicyId).order('created_at', { ascending: true }),
+    supabase.from('client_health_specialists').select('*').eq('health_policy_id', healthPolicyId).order('created_at', { ascending: true }),
+    supabase.from('client_health_medications').select('*').eq('health_policy_id', healthPolicyId).order('created_at', { ascending: true }),
+  ]);
+
+  return {
+    doctors: doctorsRes.data || [],
+    hospitals: hospitalsRes.data || [],
+    urgentCares: urgentCaresRes.data || [],
+    pharmacies: pharmaciesRes.data || [],
+    conditions: conditionsRes.data || [],
+    specialists: specialistsRes.data || [],
+    medications: medicationsRes.data || [],
+  };
+}
+
+export async function syncHealthPolicyMedicalSummaries(healthPolicyId: string): Promise<void> {
+  const data = await fetchHealthMedicalData(healthPolicyId);
+  const primaryDoctor = data.doctors[0]?.doctor_name || null;
+  const primaryDoctorAddress = data.doctors[0]?.address || null;
+  const primaryDoctorPhone = data.doctors[0]?.phone || null;
+  const hospital = data.hospitals.map((h: { hospital_name: string }) => h.hospital_name).join(', ') || null;
+  const urgentCare = data.urgentCares.map((u: { urgent_care_name: string }) => u.urgent_care_name).join(', ') || null;
+  const pharmacy = data.pharmacies.map((p: { pharmacy_name: string }) => p.pharmacy_name).join(', ') || null;
+  const conditions = data.conditions.map((c: { condition_name: string }) => c.condition_name).join(', ') || null;
+  const medicines = data.medications.map((m: { medication_name: string }) => m.medication_name).join(', ') || null;
+  const specialist = data.specialists.map((s: { specialist_name: string }) => s.specialist_name).join(', ') || null;
+
+  await supabase
+    .from('health_policies')
+    .update({
+      primary_doctor: primaryDoctor,
+      primary_doctor_address: primaryDoctorAddress,
+      primary_doctor_phone: primaryDoctorPhone,
+      hospital,
+      urgent_care: urgentCare,
+      pharmacy,
+      conditions,
+      medicines,
+      specialist,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', healthPolicyId);
 }

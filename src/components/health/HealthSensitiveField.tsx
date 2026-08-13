@@ -89,8 +89,8 @@ export default function HealthSensitiveField({
   };
 
   return (
-    <div className="py-2 flex items-center justify-between gap-4 min-h-[36px] font-sans w-full">
-      <span className="text-slate-500 font-medium text-xs">{label}</span>
+    <div className="py-2 grid grid-cols-[160px_minmax(0,1fr)] items-center gap-3 min-h-[36px] font-sans w-full">
+      <span className="text-slate-500 font-medium text-xs truncate">{label}</span>
 
       {isInlineEditing ? (
         <div className="flex items-center gap-2">

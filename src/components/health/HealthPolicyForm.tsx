@@ -1,12 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { HealthPolicy, HealthTaxHouseholdMember, HealthPrimaryApplicant } from '@/lib/health/types';
 import HealthSensitiveField from './HealthSensitiveField';
 import TaxMemberSensitiveField from './TaxMemberSensitiveField';
+import ClientIncomeInformationSection from '@/components/clients/ClientIncomeInformationSection';
 import {
   saveHealthPolicy,
   saveHealthSecret,
   fetchPrimaryApplicant,
+  updatePrimaryApplicantField,
   fetchClientResidence,
+  updateClientResidenceField,
   ClientResidenceData,
   fetchTotalHouseholdIncome,
   fetchTaxHouseholdMembers,
@@ -27,7 +30,9 @@ import {
   calculateAgeFromDateOnly,
   formatAsDateInput
 } from '@/utils/dateUtils';
+import { formatSsnInput } from '@/utils/ssnUtils';
 import MarketplacePlanLookupPanel from './MarketplacePlanLookupPanel';
+import HealthMedicalSection from './HealthMedicalSection';
 import { MarketplacePlanPreview, MarketplaceClientContext } from '@/lib/marketplace/types';
 import { transformHouseholdToMarketplacePeople } from '@/lib/marketplace/people-helper';
 import { saveMarketplacePlanSnapshot, fetchLatestMarketplaceSnapshot } from '@/lib/marketplace/snapshot-service';
@@ -45,6 +50,8 @@ interface HealthPolicyFormProps {
   isEditing: boolean;
   setIsEditing: (val: boolean) => void;
   onSaved: (policy: HealthPolicy) => void;
+  onMarketplacePlanLoaded?: (plan: any) => void;
+  onMarketplaceContextUpdated?: (info: any) => void;
   addToast: (toast: { title: string; description: string; type: 'success' | 'error' | 'warning' }) => void;
 }
 
@@ -55,6 +62,8 @@ export default function HealthPolicyForm({
   isEditing,
   setIsEditing,
   onSaved,
+  onMarketplacePlanLoaded,
+  onMarketplaceContextUpdated,
   addToast
 }: HealthPolicyFormProps) {
   // Form State
@@ -87,6 +96,15 @@ export default function HealthPolicyForm({
   const [taxMemberCount, setTaxMemberCount] = useState<number>(1);
   const [taxMembers, setTaxMembers] = useState<{ [memberNumber: number]: HealthTaxHouseholdMember }>({});
   const [taxMemberSecrets, setTaxMemberSecrets] = useState<{ [key: string]: string }>({});
+
+  // Automatically Derived Coverage Members Count (Strict explicit true check)
+  const calculatedCoverageMembersCount = useMemo(() => {
+    const applicantCount = applicantCoverage === true ? 1 : 0;
+    const membersCount = Object.values(taxMembers).filter(
+      (m: HealthTaxHouseholdMember) => m && m.coverage === true
+    ).length;
+    return applicantCount + membersCount;
+  }, [applicantCoverage, taxMembers]);
   const [pendingCountReduction, setPendingCountReduction] = useState<{ newCount: number; membersToDelete: number[] } | null>(null);
   const [deletedMemberNumbers, setDeletedMemberNumbers] = useState<number[]>([]);
 
@@ -135,6 +153,18 @@ export default function HealthPolicyForm({
   const [editingTaxMemberField, setEditingTaxMemberField] = useState<string | null>(null);
   const [taxMemberDraftValue, setTaxMemberDraftValue] = useState<any>(null);
   const [taxMemberFieldError, setTaxMemberFieldError] = useState<string | null>(null);
+
+  // Applicant Info Field-level Inline Edit State
+  const [editingApplicantField, setEditingApplicantField] = useState<string | null>(null);
+  const [applicantDraftValue, setApplicantDraftValue] = useState<any>(null);
+  const [applicantFieldSaving, setApplicantFieldSaving] = useState<boolean>(false);
+  const [applicantFieldError, setApplicantFieldError] = useState<string | null>(null);
+
+  // Residence Info Field-level Inline Edit State
+  const [editingResidenceField, setEditingResidenceField] = useState<string | null>(null);
+  const [residenceDraftValue, setResidenceDraftValue] = useState<any>(null);
+  const [residenceFieldSaving, setResidenceFieldSaving] = useState<boolean>(false);
+  const [residenceFieldError, setResidenceFieldError] = useState<string | null>(null);
 
   // Marketplace Applied Plan State
   const [appliedMarketplacePlan, setAppliedMarketplacePlan] = useState<MarketplacePlanPreview | null>(null);
@@ -494,7 +524,7 @@ export default function HealthPolicyForm({
           plan_cost: Number(planCost || 0),
           tax_credit: Number(taxCredit || 0),
           effective_date: effectiveDate || null,
-          coverage_members_count: coverageMembersCount ? Number(coverageMembersCount) : null,
+          coverage_members_count: calculatedCoverageMembersCount,
           primary_doctor: primaryDoctor || null,
           primary_doctor_address: primaryDoctorAddress || null,
           primary_doctor_phone: primaryDoctorPhone || null,
@@ -516,6 +546,36 @@ export default function HealthPolicyForm({
       setAgencyFieldError(msg);
     } finally {
       setAgencyFieldSaving(false);
+    }
+  };
+
+  const handleInlineSaveApplicantField = async (fieldName: string, newValue: any) => {
+    setApplicantFieldSaving(true);
+    setApplicantFieldError(null);
+    try {
+      await updatePrimaryApplicantField(clientId, fieldName, newValue);
+      const updated = await fetchPrimaryApplicant(clientId);
+      setPrimaryApplicant(updated);
+      setEditingApplicantField(null);
+    } catch (err: any) {
+      setApplicantFieldError(err?.message || 'Failed to save applicant field');
+    } finally {
+      setApplicantFieldSaving(false);
+    }
+  };
+
+  const handleInlineSaveResidenceField = async (fieldName: string, newValue: any) => {
+    setResidenceFieldSaving(true);
+    setResidenceFieldError(null);
+    try {
+      await updateClientResidenceField(clientId, fieldName, newValue);
+      const updated = await fetchClientResidence(clientId);
+      setClientResidence(updated);
+      setEditingResidenceField(null);
+    } catch (err: any) {
+      setResidenceFieldError(err?.message || 'Failed to save residence field');
+    } finally {
+      setResidenceFieldSaving(false);
     }
   };
 
@@ -592,7 +652,7 @@ export default function HealthPolicyForm({
           plan_cost: Number(updatedPlanCost || 0),
           tax_credit: Number(updatedTaxCredit || 0),
           effective_date: updatedEffectiveDate || null,
-          coverage_members_count: updatedCoverageMembersCount ? Number(updatedCoverageMembersCount) : null,
+          coverage_members_count: calculatedCoverageMembersCount,
           primary_doctor: primaryDoctor || null,
           primary_doctor_address: primaryDoctorAddress || null,
           primary_doctor_phone: primaryDoctorPhone || null,
@@ -701,7 +761,7 @@ export default function HealthPolicyForm({
         plan_cost: Number(planCost || 0),
         tax_credit: Number(taxCredit || 0),
         effective_date: effectiveDate || null,
-        coverage_members_count: coverageMembersCount ? Number(coverageMembersCount) : null,
+        coverage_members_count: calculatedCoverageMembersCount,
         number_of_people_on_tax_return: taxMemberCount,
         primary_doctor: primaryDoctor || null,
         primary_doctor_address: primaryDoctorAddress || null,
@@ -849,6 +909,53 @@ export default function HealthPolicyForm({
     }
   };
 
+  const activeCoverageYear = yearRenovation ? Number(yearRenovation) : 2026;
+  const activeZip = clientResidence?.zipCode || null;
+  const activeState = clientResidence?.state || null;
+  const activeIncome = totalHouseholdIncome !== null && totalHouseholdIncome !== undefined && totalHouseholdIncome > 0
+    ? totalHouseholdIncome
+    : null;
+
+  const peopleResult = useMemo(() => transformHouseholdToMarketplacePeople(
+    primaryApplicant,
+    applicantCoverage,
+    taxMembers,
+    taxMemberCount,
+    activeCoverageYear,
+    activeZip,
+    activeState,
+    activeIncome
+  ), [primaryApplicant, applicantCoverage, taxMembers, taxMemberCount, activeCoverageYear, activeZip, activeState, activeIncome]);
+
+  const marketplaceContext: MarketplaceClientContext = useMemo(() => ({
+    coverageYear: activeCoverageYear,
+    zipCode: activeZip,
+    state: activeState,
+    countyName: clientResidence?.county || null,
+    countyFips: null,
+    householdIncome: activeIncome,
+    householdSize: peopleResult.householdSize,
+    coveredApplicants: peopleResult.coveredApplicants,
+    people: peopleResult.people,
+    validationErrors: peopleResult.validationErrors
+  }), [activeCoverageYear, activeZip, activeState, clientResidence?.county, activeIncome, peopleResult]);
+
+  useEffect(() => {
+    if (onMarketplaceContextUpdated) {
+      onMarketplaceContextUpdated({
+        context: marketplaceContext,
+        planId,
+        appliedPlan: appliedMarketplacePlan,
+        onApplyPlan: (plan: MarketplacePlanPreview) => {
+          handleApplyMarketplacePlan(plan);
+          if (onMarketplacePlanLoaded) onMarketplacePlanLoaded(plan);
+        },
+        addToast,
+        isEditing
+      });
+    }
+  }, [marketplaceContext, planId, appliedMarketplacePlan, isEditing, onMarketplaceContextUpdated, onMarketplacePlanLoaded, addToast]);
+
   return (
     <form onSubmit={handleSave} className="space-y-8 font-sans relative">
       {/* Reduction Confirmation Modal */}
@@ -885,12 +992,10 @@ export default function HealthPolicyForm({
         </div>
       )}
 
-      {/* PARENT TWO-COLUMN PAGE LAYOUT STARTING AT AGENCY INFORMATION */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: Agency Info, Health Info, Applicant Info, Tax Members, Income, Medical Details */}
-        <div className="lg:col-span-7 space-y-6">
-          {/* SECTION 1 — Agency Information (Zoho Compact Inline Edit Style) */}
-          <div className="bg-white border border-slate-200/70 rounded-xl p-5 shadow-2xs space-y-4 font-sans">
+      {/* PARENT FULL-WIDTH PAGE LAYOUT STARTING AT AGENCY INFORMATION */}
+      <div className="w-full space-y-6">
+        {/* SECTION 1 — Agency Information */}
+        <div className="bg-white border border-slate-200/70 rounded-xl p-5 shadow-2xs space-y-4 font-sans">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
               <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                 Agency Information
@@ -900,12 +1005,12 @@ export default function HealthPolicyForm({
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-xs">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
           {/* LEFT COLUMN */}
           <div className="space-y-0 divide-y divide-slate-100/70">
             {/* 1. Enrolled */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Enrolled</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Enrolled</span>
               {editingAgencyField === 'active' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -956,15 +1061,15 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 2. Renovation Year 2026 */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Renovation Year 2026</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Renovation Year 2026</span>
               {editingAgencyField === 'yearRenovation' ? (
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
                     value={agencyDraftValue}
                     onChange={e => setAgencyDraftValue(e.target.value)}
-                    className="w-20 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold text-right outline-none"
+                    className="w-20 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingAgencyField(null);
@@ -1006,16 +1111,16 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 3. Notes */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Notes</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Notes</span>
               <span className="text-slate-900 font-semibold select-none">
                 {notesCount}
               </span>
             </div>
 
             {/* 4. Documents */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Documents</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Documents</span>
               <span className="text-slate-900 font-semibold select-none">
                 {documentsCount}
               </span>
@@ -1025,12 +1130,12 @@ export default function HealthPolicyForm({
           {/* RIGHT COLUMN */}
           <div className="space-y-0 divide-y divide-slate-100/70">
             {/* 1. Policy Status */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Policy Status</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Policy Status</span>
               {editingAgencyField === 'policyStatus' ? (
                 <div className="flex items-center gap-2">
                   <select
-                    value={agencyDraftValue}
+                    value={agencyDraftValue || 'Pending'}
                     onChange={e => setAgencyDraftValue(e.target.value)}
                     className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
                     autoFocus
@@ -1066,24 +1171,24 @@ export default function HealthPolicyForm({
                 <span
                   onClick={() => {
                     setEditingAgencyField('policyStatus');
-                    setAgencyDraftValue(policyStatus);
+                    setAgencyDraftValue(policyStatus || 'Pending');
                     setAgencyFieldError(null);
                   }}
                   className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Policy Status"
                 >
-                  {policyStatus}
+                  {policyStatus || '—'}
                 </span>
               )}
             </div>
 
             {/* 2. Action Pending */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Action Pending</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Action Pending</span>
               {editingAgencyField === 'actionPending' ? (
                 <div className="flex items-center gap-2">
                   <select
-                    value={agencyDraftValue}
+                    value={agencyDraftValue || 'Documents'}
                     onChange={e => setAgencyDraftValue(e.target.value)}
                     className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
                     autoFocus
@@ -1120,20 +1225,20 @@ export default function HealthPolicyForm({
                 <span
                   onClick={() => {
                     setEditingAgencyField('actionPending');
-                    setAgencyDraftValue(actionPending);
+                    setAgencyDraftValue(actionPending || 'Documents');
                     setAgencyFieldError(null);
                   }}
                   className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Action Pending"
                 >
-                  {actionPending}
+                  {actionPending || '—'}
                 </span>
               )}
             </div>
 
             {/* 3. Renovation Status */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Renovation Status</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Renovation Status</span>
               {editingAgencyField === 'renovationStatus' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -1179,22 +1284,22 @@ export default function HealthPolicyForm({
                   className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Renovation Status"
                 >
-                  {renovationStatus}
+                  {renovationStatus || '—'}
                 </span>
               )}
             </div>
 
             {/* 4. Agent */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Agent</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Agent</span>
               <span className="text-slate-900 font-semibold select-none">
                 {agentName || '—'}
               </span>
             </div>
 
             {/* 5. NPN */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">NPN</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">NPN</span>
               {editingAgencyField === 'npn' ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -1243,8 +1348,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 6. Consent Ready */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Consent Ready</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Consent Ready</span>
               <span className="text-slate-900 font-semibold select-none">
                 {isConsentReady ? 'Yes' : 'No'}
               </span>
@@ -1264,12 +1369,12 @@ export default function HealthPolicyForm({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-sm font-sans">
             {/* LEFT COLUMN */}
             <div className="space-y-0 divide-y divide-slate-100/70">
               {/* 1. Company 2026 */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Company 2026</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Company 2026</span>
                 {editingHealthField === 'company2026' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1319,8 +1424,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 2. Type Plan */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Type Plan</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Type Plan</span>
                 {editingHealthField === 'typePlan' ? (
                   <div className="flex items-center gap-2">
                     <select
@@ -1375,8 +1480,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 3. Plan ID */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Plan ID</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Plan ID</span>
                 {editingHealthField === 'planId' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1426,8 +1531,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 4. Plan Name */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Plan Name</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Plan Name</span>
                 {editingHealthField === 'planName' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1468,7 +1573,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(planName);
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors text-right break-words max-w-[260px]"
+                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors break-words max-w-[260px]"
                     title={planName || 'Click to edit Plan Name'}
                   >
                     {planName || '—'}
@@ -1477,8 +1582,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 5. No. Membership */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">No. Membership</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">No. Membership</span>
                 {editingHealthField === 'noMembership' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1528,8 +1633,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 6. Plan Cost */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Plan Cost</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Plan Cost</span>
                 {editingHealthField === 'planCost' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1538,7 +1643,7 @@ export default function HealthPolicyForm({
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
                       placeholder="0.00"
-                      className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold text-right outline-none"
+                      className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
                       autoFocus
                       onKeyDown={e => {
                         if (e.key === 'Escape') setEditingHealthField(null);
@@ -1580,8 +1685,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 7. Tax Credit */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Tax Credit</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Tax Credit</span>
                 {editingHealthField === 'taxCredit' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1590,7 +1695,7 @@ export default function HealthPolicyForm({
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
                       placeholder="0.00"
-                      className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold text-right outline-none"
+                      className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
                       autoFocus
                       onKeyDown={e => {
                         if (e.key === 'Escape') setEditingHealthField(null);
@@ -1632,16 +1737,16 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 8. Monthly Premium */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Monthly Premium</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Monthly Premium</span>
                 <span className="text-slate-900 font-bold select-none">
                   ${monthlyPremium}
                 </span>
               </div>
 
               {/* 9. Effective Date */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Effective Date</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Effective Date</span>
                 {editingHealthField === 'effectiveDate' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1691,117 +1796,19 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 10. Coverage Members Count */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Coverage Members Count</span>
-                {editingHealthField === 'coverageMembersCount' ? (
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={healthDraftValue}
-                      onChange={e => setHealthDraftValue(Number(e.target.value))}
-                      className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
-                      autoFocus
-                      onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('coverageMembersCount', healthDraftValue);
-                      }}
-                    >
-                      {[1, 2, 3, 4, 5, 6, 7].map(n => (
-                        <option key={n} value={n}>{n}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      disabled={healthFieldSaving}
-                      onClick={() => handleInlineSaveHealthField('coverageMembersCount', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
-                      title="Save"
-                    >
-                      ✓
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
-                      title="Cancel"
-                    >
-                      ✕
-                    </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
-                  </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('coverageMembersCount');
-                      setHealthDraftValue(coverageMembersCount);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Coverage Members Count"
-                  >
-                    {coverageMembersCount}
-                  </span>
-                )}
-              </div>
-
-              {/* 11. Number of People on Tax Return */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Number of People on Tax Return</span>
-                {editingHealthField === 'taxMemberCount' ? (
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={healthDraftValue}
-                      onChange={e => setHealthDraftValue(Number(e.target.value))}
-                      className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
-                      autoFocus
-                      onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveTaxMemberCount(healthDraftValue);
-                      }}
-                    >
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
-                        <option key={n} value={n}>{n}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      disabled={healthFieldSaving}
-                      onClick={() => handleInlineSaveTaxMemberCount(healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
-                      title="Save"
-                    >
-                      ✓
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
-                      title="Cancel"
-                    >
-                      ✕
-                    </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
-                  </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('taxMemberCount');
-                      setHealthDraftValue(taxMemberCount);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Tax Household Member Count"
-                  >
-                    {taxMemberCount}
-                  </span>
-                )}
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Coverage Members Count</span>
+                <span className="text-slate-900 font-semibold select-none">
+                  {calculatedCoverageMembersCount}
+                </span>
               </div>
             </div>
 
             {/* RIGHT COLUMN */}
             <div className="space-y-0 divide-y divide-slate-100/70">
               {/* 1. Application Number 2026 */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Application Number 2026</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Application Number 2026</span>
                 {editingHealthField === 'applicationNumber' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1851,8 +1858,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 2. Marketplace Account */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Marketplace Account</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Marketplace Account</span>
                 {editingHealthField === 'marketplaceAccount' ? (
                   <div className="flex items-center gap-2">
                     <select
@@ -1934,8 +1941,8 @@ export default function HealthPolicyForm({
               )}
 
               {/* 4. Company Account Toggle */}
-              <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                <span className="text-slate-500 font-medium">Company Account</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words">Company Account</span>
                 {editingHealthField === 'companyAccount' ? (
                   <div className="flex items-center gap-2">
                     <select
@@ -2016,7 +2023,7 @@ export default function HealthPolicyForm({
               Applicant Information
             </h4>
             <p className="text-xs text-slate-400 font-medium mt-0.5">
-              Primary Applicant — Tax Household Member 1
+              Primary Applicant — Tax Household Member 1 (Click value to edit)
             </p>
           </div>
           <span className="self-start sm:self-auto text-xs font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
@@ -2024,12 +2031,12 @@ export default function HealthPolicyForm({
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm font-sans">
           {/* LEFT COLUMN */}
           <div className="space-y-0 divide-y divide-slate-100/70">
             {/* 1. Coverage */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Coverage</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Coverage</span>
               {editingHealthField === 'applicantCoverage' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -2074,159 +2081,928 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 2. Applicant Name */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Applicant Name</span>
-              <span className="text-slate-900 font-semibold flex items-center gap-2">
-                {primaryApplicant?.fullName || '—'}
-                <span className="text-[10px] text-slate-400 font-normal italic">(Personal Info)</span>
-              </span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Applicant Name</span>
+              {editingApplicantField === 'full_name' ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={applicantDraftValue}
+                    onChange={e => setApplicantDraftValue(e.target.value)}
+                    className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingApplicantField(null);
+                      if (e.key === 'Enter') handleInlineSaveApplicantField('full_name', applicantDraftValue);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={applicantFieldSaving}
+                    onClick={() => handleInlineSaveApplicantField('full_name', applicantDraftValue)}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingApplicantField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                </div>
+              ) : (
+                <span
+                  onClick={() => {
+                    setEditingApplicantField('full_name');
+                    setApplicantDraftValue(primaryApplicant?.fullName || '');
+                    setApplicantFieldError(null);
+                  }}
+                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit Applicant Name"
+                >
+                  {primaryApplicant?.fullName || '—'}
+                </span>
+              )}
             </div>
 
             {/* 3. DOB */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">DOB</span>
-              <span className="text-slate-900 font-semibold">
-                {formatDateForDisplay(primaryApplicant?.dateOfBirth)}
-              </span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">DOB</span>
+              {editingApplicantField === 'date_of_birth' ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={applicantDraftValue}
+                    onChange={e => setApplicantDraftValue(formatAsDateInput(e.target.value))}
+                    placeholder="MM/DD/YYYY"
+                    className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingApplicantField(null);
+                      if (e.key === 'Enter') {
+                        const parsedIso = parseDisplayDate(applicantDraftValue);
+                        if (applicantDraftValue && !parsedIso) {
+                          setApplicantFieldError('Invalid date (MM/DD/YYYY)');
+                          return;
+                        }
+                        handleInlineSaveApplicantField('date_of_birth', parsedIso);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={applicantFieldSaving}
+                    onClick={() => {
+                      const parsedIso = parseDisplayDate(applicantDraftValue);
+                      if (applicantDraftValue && !parsedIso) {
+                        setApplicantFieldError('Invalid date (MM/DD/YYYY)');
+                        return;
+                      }
+                      handleInlineSaveApplicantField('date_of_birth', parsedIso);
+                    }}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingApplicantField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                </div>
+              ) : (
+                <span
+                  onClick={() => {
+                    setEditingApplicantField('date_of_birth');
+                    setApplicantDraftValue(primaryApplicant?.dateOfBirth ? formatDateForDisplay(primaryApplicant.dateOfBirth) : '');
+                    setApplicantFieldError(null);
+                  }}
+                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit Date of Birth"
+                >
+                  {formatDateForDisplay(primaryApplicant?.dateOfBirth)}
+                </span>
+              )}
             </div>
 
             {/* 4. Age */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Age</span>
-              <span className="text-slate-900 font-semibold">
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Age</span>
+              <span className="text-slate-900 font-semibold select-none">
                 {primaryApplicant?.dateOfBirth ? calculateAgeFromDob(primaryApplicant.dateOfBirth) : '—'}
               </span>
             </div>
 
-            {/* 5. SSN */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">SSN</span>
-              <span className="text-slate-900 font-semibold font-mono">
-                {primaryApplicant?.hasSsn ? '••••••••' : '—'}
-              </span>
+            {/* 5. SSN (Visible unmasked) */}
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">SSN</span>
+              {editingApplicantField === 'ssn' ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={applicantDraftValue}
+                    onChange={e => setApplicantDraftValue(formatSsnInput(e.target.value))}
+                    placeholder="XXX-XX-XXXX"
+                    className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold font-mono outline-none"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingApplicantField(null);
+                      if (e.key === 'Enter') handleInlineSaveApplicantField('ssn', applicantDraftValue.replace(/\D/g, ''));
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={applicantFieldSaving}
+                    onClick={() => handleInlineSaveApplicantField('ssn', applicantDraftValue.replace(/\D/g, ''))}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingApplicantField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                </div>
+              ) : (
+                <span
+                  onClick={() => {
+                    setEditingApplicantField('ssn');
+                    setApplicantDraftValue(primaryApplicant?.ssn ? formatSsnInput(primaryApplicant.ssn) : '');
+                    setApplicantFieldError(null);
+                  }}
+                  className="text-slate-900 font-semibold font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit SSN"
+                >
+                  {primaryApplicant?.ssn ? formatSsnInput(primaryApplicant.ssn) : '—'}
+                </span>
+              )}
             </div>
 
             {/* 6. Email */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Email</span>
-              <span className="text-slate-900 font-semibold truncate max-w-[180px]" title={primaryApplicant?.email || ''}>
-                {primaryApplicant?.email || '—'}
-              </span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Email</span>
+              {editingApplicantField === 'email' ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="email"
+                    value={applicantDraftValue}
+                    onChange={e => setApplicantDraftValue(e.target.value)}
+                    placeholder="email@domain.com"
+                    className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingApplicantField(null);
+                      if (e.key === 'Enter') handleInlineSaveApplicantField('email', applicantDraftValue);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={applicantFieldSaving}
+                    onClick={() => handleInlineSaveApplicantField('email', applicantDraftValue)}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingApplicantField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                </div>
+              ) : (
+                <span
+                  onClick={() => {
+                    setEditingApplicantField('email');
+                    setApplicantDraftValue(primaryApplicant?.email || '');
+                    setApplicantFieldError(null);
+                  }}
+                  className="text-slate-900 font-semibold truncate cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit Email"
+                >
+                  {primaryApplicant?.email || '—'}
+                </span>
+              )}
             </div>
 
             {/* 7. Phone */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Phone</span>
-              <span className="text-slate-900 font-semibold">
-                {primaryApplicant?.phone || '—'}
-              </span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Phone</span>
+              {editingApplicantField === 'phone' ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={applicantDraftValue}
+                    onChange={e => setApplicantDraftValue(e.target.value)}
+                    placeholder="Phone number"
+                    className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingApplicantField(null);
+                      if (e.key === 'Enter') handleInlineSaveApplicantField('phone', applicantDraftValue);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={applicantFieldSaving}
+                    onClick={() => handleInlineSaveApplicantField('phone', applicantDraftValue)}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingApplicantField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                </div>
+              ) : (
+                <span
+                  onClick={() => {
+                    setEditingApplicantField('phone');
+                    setApplicantDraftValue(primaryApplicant?.phone || '');
+                    setApplicantFieldError(null);
+                  }}
+                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit Phone"
+                >
+                  {primaryApplicant?.phone || '—'}
+                </span>
+              )}
+            </div>
+
+            {/* 8. Number of People on Tax Return */}
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Number of People on Tax Return</span>
+              {editingApplicantField === 'tax_household_count' ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={applicantDraftValue}
+                    onChange={e => setApplicantDraftValue(Number(e.target.value))}
+                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingApplicantField(null);
+                      if (e.key === 'Enter') {
+                        const count = Number(applicantDraftValue);
+                        setTaxMemberCount(count);
+                        if (initialPolicy?.id) {
+                          updateHealthPolicyTaxHouseholdCount(initialPolicy.id, count).catch(console.error);
+                        }
+                        setEditingApplicantField(null);
+                      }
+                    }}
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15].map(n => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const count = Number(applicantDraftValue);
+                      setTaxMemberCount(count);
+                      if (initialPolicy?.id) {
+                        updateHealthPolicyTaxHouseholdCount(initialPolicy.id, count).catch(console.error);
+                      }
+                      setEditingApplicantField(null);
+                    }}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingApplicantField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <span
+                  onClick={() => {
+                    setEditingApplicantField('tax_household_count');
+                    setApplicantDraftValue(taxMemberCount);
+                  }}
+                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit Number of People on Tax Return"
+                >
+                  {taxMemberCount}
+                </span>
+              )}
             </div>
           </div>
 
           {/* RIGHT COLUMN */}
           <div className="space-y-0 divide-y divide-slate-100/70">
             {/* 1. Relationship */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Relationship</span>
-              <span className="text-slate-900 font-semibold bg-slate-100 px-2 py-0.5 rounded text-[11px]">
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Relationship</span>
+              <span className="text-slate-900 font-semibold bg-slate-100 px-2 py-0.5 rounded text-[11px] w-fit">
                 Self
               </span>
             </div>
 
             {/* 2. Gender */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Gender</span>
-              <span className="text-slate-900 font-semibold">
-                {primaryApplicant?.gender || '—'}
-              </span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Gender</span>
+              {editingApplicantField === 'gender' ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={applicantDraftValue}
+                    onChange={e => setApplicantDraftValue(e.target.value)}
+                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingApplicantField(null);
+                      if (e.key === 'Enter') handleInlineSaveApplicantField('gender', applicantDraftValue);
+                    }}
+                  >
+                    <option value="">Select Gender...</option>
+                    <option value="Female">Female</option>
+                    <option value="Male">Male</option>
+                  </select>
+                  <button
+                    type="button"
+                    disabled={applicantFieldSaving}
+                    onClick={() => handleInlineSaveApplicantField('gender', applicantDraftValue)}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingApplicantField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                </div>
+              ) : (
+                <span
+                  onClick={() => {
+                    setEditingApplicantField('gender');
+                    setApplicantDraftValue(primaryApplicant?.gender || '');
+                    setApplicantFieldError(null);
+                  }}
+                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit Gender"
+                >
+                  {primaryApplicant?.gender || '—'}
+                </span>
+              )}
             </div>
 
             {/* 3. Marital Status */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Marital Status</span>
-              <span className="text-slate-900 font-semibold">
-                {primaryApplicant?.maritalStatus || '—'}
-              </span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Marital Status</span>
+              {editingApplicantField === 'marital_status' ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={applicantDraftValue}
+                    onChange={e => setApplicantDraftValue(e.target.value)}
+                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingApplicantField(null);
+                      if (e.key === 'Enter') handleInlineSaveApplicantField('marital_status', applicantDraftValue);
+                    }}
+                  >
+                    <option value="">Select Marital Status...</option>
+                    <option value="Single">Single</option>
+                    <option value="Married">Married</option>
+                    <option value="Divorced">Divorced</option>
+                    <option value="Widowed">Widowed</option>
+                    <option value="Separated">Separated</option>
+                  </select>
+                  <button
+                    type="button"
+                    disabled={applicantFieldSaving}
+                    onClick={() => handleInlineSaveApplicantField('marital_status', applicantDraftValue)}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingApplicantField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                </div>
+              ) : (
+                <span
+                  onClick={() => {
+                    setEditingApplicantField('marital_status');
+                    setApplicantDraftValue(primaryApplicant?.maritalStatus || '');
+                    setApplicantFieldError(null);
+                  }}
+                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit Marital Status"
+                >
+                  {primaryApplicant?.maritalStatus || '—'}
+                </span>
+              )}
             </div>
 
-            {/* 4. Born in USA? */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Born in USA?</span>
-              <span className="text-slate-900 font-semibold">
-                {primaryApplicant?.bornInUsa !== null && primaryApplicant?.bornInUsa !== undefined
-                  ? (primaryApplicant.bornInUsa ? 'Yes' : 'No')
-                  : '—'}
-              </span>
+            {/* 4. U.S. Citizen */}
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">U.S. Citizen</span>
+              {editingApplicantField === 'us_citizen' ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={applicantDraftValue ? 'Yes' : 'No'}
+                    onChange={e => setApplicantDraftValue(e.target.value === 'Yes')}
+                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingApplicantField(null);
+                      if (e.key === 'Enter') handleInlineSaveApplicantField('born_in_usa', applicantDraftValue);
+                    }}
+                  >
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                  </select>
+                  <button
+                    type="button"
+                    disabled={applicantFieldSaving}
+                    onClick={() => handleInlineSaveApplicantField('born_in_usa', applicantDraftValue)}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingApplicantField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                </div>
+              ) : (
+                <span
+                  onClick={() => {
+                    setEditingApplicantField('us_citizen');
+                    setApplicantDraftValue(primaryApplicant?.usCitizen !== false);
+                    setApplicantFieldError(null);
+                  }}
+                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit U.S. Citizen"
+                >
+                  {primaryApplicant?.usCitizen !== null && primaryApplicant?.usCitizen !== undefined
+                    ? (primaryApplicant.usCitizen ? 'Yes' : 'No')
+                    : '—'}
+                </span>
+              )}
             </div>
 
-            {/* 5. U.S. Citizen */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">U.S. Citizen</span>
-              <span className="text-slate-900 font-semibold">
-                {primaryApplicant?.usCitizen !== null && primaryApplicant?.usCitizen !== undefined
-                  ? (primaryApplicant.usCitizen ? 'Yes' : 'No')
-                  : '—'}
-              </span>
-            </div>
-
-            {/* 6. Immigration Status */}
-            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-              <span className="text-slate-500 font-medium">Immigration Status</span>
-              <span className="text-slate-900 font-semibold">
-                {primaryApplicant?.immigrationStatus || '—'}
-              </span>
+            {/* 5. Immigration Status */}
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words">Immigration Status</span>
+              {editingApplicantField === 'immigration_status' ? (
+                <div className="flex items-center gap-2">
+                  <select
+                    value={applicantDraftValue}
+                    onChange={e => setApplicantDraftValue(e.target.value)}
+                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Escape') setEditingApplicantField(null);
+                      if (e.key === 'Enter') handleInlineSaveApplicantField('immigration_status', applicantDraftValue);
+                    }}
+                  >
+                    <option value="">Select Immigration Status...</option>
+                    <option value="Citizen">Citizen</option>
+                    <option value="Permanent Resident">Permanent Resident</option>
+                    <option value="Work Permit">Work Permit</option>
+                    <option value="Other">Other</option>
+                  </select>
+                  <button
+                    type="button"
+                    disabled={applicantFieldSaving}
+                    onClick={() => handleInlineSaveApplicantField('immigration_status', applicantDraftValue)}
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    title="Save"
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingApplicantField(null)}
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    title="Cancel"
+                  >
+                    ✕
+                  </button>
+                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                </div>
+              ) : (
+                <span
+                  onClick={() => {
+                    setEditingApplicantField('immigration_status');
+                    setApplicantDraftValue(primaryApplicant?.immigrationStatus || '');
+                    setApplicantFieldError(null);
+                  }}
+                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  title="Click to edit Immigration Status"
+                >
+                  {primaryApplicant?.immigrationStatus || '—'}
+                </span>
+              )}
             </div>
 
             {/* CONDITIONAL IMMIGRATION FIELDS: Work Permit */}
             {primaryApplicant?.immigrationStatus === 'Work Permit' && (
               <>
-                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                  <span className="text-slate-500 font-medium">Card Number</span>
-                  <span className="text-slate-900 font-semibold font-mono">
-                    {primaryApplicant?.hasCardNumber ? '••••••••' : '—'}
-                  </span>
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words">Card Number</span>
+                  {editingApplicantField === 'card_number' ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={applicantDraftValue}
+                        onChange={e => setApplicantDraftValue(e.target.value)}
+                        placeholder="Card Number..."
+                        className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold font-mono outline-none"
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') setEditingApplicantField(null);
+                          if (e.key === 'Enter') handleInlineSaveApplicantField('card_number', applicantDraftValue);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={applicantFieldSaving}
+                        onClick={() => handleInlineSaveApplicantField('card_number', applicantDraftValue)}
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        title="Save"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingApplicantField(null)}
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      onClick={() => {
+                        setEditingApplicantField('card_number');
+                        setApplicantDraftValue(primaryApplicant?.cardNumber || '');
+                      }}
+                      className="text-slate-900 font-semibold font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      title="Click to edit Card Number"
+                    >
+                      {primaryApplicant?.cardNumber || '—'}
+                    </span>
+                  )}
                 </div>
-                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                  <span className="text-slate-500 font-medium">USCIS Number</span>
-                  <span className="text-slate-900 font-semibold font-mono">
-                    {primaryApplicant?.hasUscisNumber ? '••••••••' : '—'}
-                  </span>
+
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words">USCIS Number</span>
+                  {editingApplicantField === 'uscis_number' ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={applicantDraftValue}
+                        onChange={e => setApplicantDraftValue(e.target.value)}
+                        placeholder="USCIS Number..."
+                        className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold font-mono outline-none"
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') setEditingApplicantField(null);
+                          if (e.key === 'Enter') handleInlineSaveApplicantField('uscis_number', applicantDraftValue);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={applicantFieldSaving}
+                        onClick={() => handleInlineSaveApplicantField('uscis_number', applicantDraftValue)}
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        title="Save"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingApplicantField(null)}
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      onClick={() => {
+                        setEditingApplicantField('uscis_number');
+                        setApplicantDraftValue(primaryApplicant?.uscisNumber || '');
+                      }}
+                      className="text-slate-900 font-semibold font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      title="Click to edit USCIS Number"
+                    >
+                      {primaryApplicant?.uscisNumber || '—'}
+                    </span>
+                  )}
                 </div>
-                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                  <span className="text-slate-500 font-medium">Category</span>
-                  <span className="text-slate-900 font-semibold">
-                    {primaryApplicant?.immigrationCategory || '—'}
-                  </span>
+
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words">Category</span>
+                  {editingApplicantField === 'immigration_category' ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={applicantDraftValue}
+                        onChange={e => setApplicantDraftValue(e.target.value)}
+                        placeholder="Category..."
+                        className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') setEditingApplicantField(null);
+                          if (e.key === 'Enter') handleInlineSaveApplicantField('immigration_category', applicantDraftValue);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={applicantFieldSaving}
+                        onClick={() => handleInlineSaveApplicantField('immigration_category', applicantDraftValue)}
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        title="Save"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingApplicantField(null)}
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      onClick={() => {
+                        setEditingApplicantField('immigration_category');
+                        setApplicantDraftValue(primaryApplicant?.immigrationCategory || '');
+                      }}
+                      className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      title="Click to edit Category"
+                    >
+                      {primaryApplicant?.immigrationCategory || '—'}
+                    </span>
+                  )}
                 </div>
-                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                  <span className="text-slate-500 font-medium">Expiration Date</span>
-                  <span className="text-slate-900 font-semibold">
-                    {formatDateForDisplay(primaryApplicant?.immigrationExpirationDate)}
-                  </span>
+
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words">Expiration Date</span>
+                  {editingApplicantField === 'immigration_expiration_date' ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={applicantDraftValue}
+                        onChange={e => setApplicantDraftValue(formatAsDateInput(e.target.value))}
+                        placeholder="MM/DD/YYYY"
+                        className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') setEditingApplicantField(null);
+                          if (e.key === 'Enter') {
+                            const parsedIso = parseDisplayDate(applicantDraftValue);
+                            handleInlineSaveApplicantField('immigration_expiration_date', parsedIso);
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={applicantFieldSaving}
+                        onClick={() => {
+                          const parsedIso = parseDisplayDate(applicantDraftValue);
+                          handleInlineSaveApplicantField('immigration_expiration_date', parsedIso);
+                        }}
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        title="Save"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingApplicantField(null)}
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      onClick={() => {
+                        setEditingApplicantField('immigration_expiration_date');
+                        setApplicantDraftValue(primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '');
+                      }}
+                      className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      title="Click to edit Expiration Date"
+                    >
+                      {formatDateForDisplay(primaryApplicant?.immigrationExpirationDate)}
+                    </span>
+                  )}
                 </div>
               </>
             )}
 
             {/* CONDITIONAL IMMIGRATION FIELDS: Resident */}
-            {primaryApplicant?.immigrationStatus === 'Resident' && (
+            {(primaryApplicant?.immigrationStatus === 'Resident' || primaryApplicant?.immigrationStatus === 'Permanent Resident') && (
               <>
-                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                  <span className="text-slate-500 font-medium">Alien Number</span>
-                  <span className="text-slate-900 font-semibold font-mono">
-                    {primaryApplicant?.hasAlienNumber ? '••••••••' : '—'}
-                  </span>
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words">Alien Number</span>
+                  {editingApplicantField === 'alien_number' ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={applicantDraftValue}
+                        onChange={e => setApplicantDraftValue(e.target.value)}
+                        placeholder="Alien Number..."
+                        className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold font-mono outline-none"
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') setEditingApplicantField(null);
+                          if (e.key === 'Enter') handleInlineSaveApplicantField('alien_number', applicantDraftValue);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={applicantFieldSaving}
+                        onClick={() => handleInlineSaveApplicantField('alien_number', applicantDraftValue)}
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        title="Save"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingApplicantField(null)}
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      onClick={() => {
+                        setEditingApplicantField('alien_number');
+                        setApplicantDraftValue(primaryApplicant?.alienNumber || '');
+                      }}
+                      className="text-slate-900 font-semibold font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      title="Click to edit Alien Number"
+                    >
+                      {primaryApplicant?.alienNumber || '—'}
+                    </span>
+                  )}
                 </div>
-                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                  <span className="text-slate-500 font-medium">Card Number</span>
-                  <span className="text-slate-900 font-semibold font-mono">
-                    {primaryApplicant?.hasCardNumber ? '••••••••' : '—'}
-                  </span>
+
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words">Card Number</span>
+                  {editingApplicantField === 'card_number' ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={applicantDraftValue}
+                        onChange={e => setApplicantDraftValue(e.target.value)}
+                        placeholder="Card Number..."
+                        className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold font-mono outline-none"
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') setEditingApplicantField(null);
+                          if (e.key === 'Enter') handleInlineSaveApplicantField('card_number', applicantDraftValue);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={applicantFieldSaving}
+                        onClick={() => handleInlineSaveApplicantField('card_number', applicantDraftValue)}
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        title="Save"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingApplicantField(null)}
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      onClick={() => {
+                        setEditingApplicantField('card_number');
+                        setApplicantDraftValue(primaryApplicant?.cardNumber || '');
+                      }}
+                      className="text-slate-900 font-semibold font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      title="Click to edit Card Number"
+                    >
+                      {primaryApplicant?.cardNumber || '—'}
+                    </span>
+                  )}
                 </div>
-                <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                  <span className="text-slate-500 font-medium">Expiration Date</span>
-                  <span className="text-slate-900 font-semibold">
-                    {formatDateForDisplay(primaryApplicant?.immigrationExpirationDate)}
-                  </span>
+
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words">Expiration Date</span>
+                  {editingApplicantField === 'immigration_expiration_date' ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={applicantDraftValue}
+                        onChange={e => setApplicantDraftValue(formatAsDateInput(e.target.value))}
+                        placeholder="MM/DD/YYYY"
+                        className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+                        autoFocus
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') setEditingApplicantField(null);
+                          if (e.key === 'Enter') {
+                            const parsedIso = parseDisplayDate(applicantDraftValue);
+                            handleInlineSaveApplicantField('immigration_expiration_date', parsedIso);
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={applicantFieldSaving}
+                        onClick={() => {
+                          const parsedIso = parseDisplayDate(applicantDraftValue);
+                          handleInlineSaveApplicantField('immigration_expiration_date', parsedIso);
+                        }}
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        title="Save"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingApplicantField(null)}
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <span
+                      onClick={() => {
+                        setEditingApplicantField('immigration_expiration_date');
+                        setApplicantDraftValue(primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '');
+                      }}
+                      className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      title="Click to edit Expiration Date"
+                    >
+                      {formatDateForDisplay(primaryApplicant?.immigrationExpirationDate)}
+                    </span>
+                  )}
                 </div>
               </>
             )}
@@ -2308,12 +3084,12 @@ export default function HealthPolicyForm({
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-xs">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-sm font-sans">
                       {/* LEFT COLUMN */}
                       <div className="space-y-0 divide-y divide-slate-100/70">
                         {/* 1. Coverage */}
-                        <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                          <span className="text-slate-500 font-medium">Coverage</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words">Coverage</span>
                           {editingTaxMemberField === `m_${memberNumber}_coverage` ? (
                             <div className="flex items-center gap-2">
                               <select
@@ -2368,8 +3144,8 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 2. Full Name */}
-                        <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                          <span className="text-slate-500 font-medium">Full Name</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words">Full Name</span>
                           {editingTaxMemberField === `m_${memberNumber}_fullName` ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -2423,8 +3199,8 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 3. DOB */}
-                        <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                          <span className="text-slate-500 font-medium">DOB</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words">DOB</span>
                           {editingTaxMemberField === `m_${memberNumber}_dob` ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -2489,15 +3265,15 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 4. Age (Calculated read-only) */}
-                        <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                          <span className="text-slate-500 font-medium">Age</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words">Age</span>
                           <span className="text-slate-900 font-semibold select-none">
                             {calculateAgeFromDob(member.date_of_birth) !== null ? calculateAgeFromDob(member.date_of_birth) : '—'}
                           </span>
                         </div>
 
                         {/* 5. SSN (Sensitive Field) */}
-                        <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
                           <TaxMemberSensitiveField
                             label="SSN"
                             healthPolicyId={initialPolicy?.id}
@@ -2515,8 +3291,8 @@ export default function HealthPolicyForm({
                       {/* RIGHT COLUMN */}
                       <div className="space-y-0 divide-y divide-slate-100/70">
                         {/* 1. Relationship to Applicant */}
-                        <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                          <span className="text-slate-500 font-medium">Relationship to Applicant</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words">Relationship to Applicant</span>
                           {editingTaxMemberField === `m_${memberNumber}_relationship` ? (
                             <div className="flex items-center gap-2">
                               <select
@@ -2571,65 +3347,9 @@ export default function HealthPolicyForm({
                           )}
                         </div>
 
-                        {/* 2. Born in USA? */}
-                        <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                          <span className="text-slate-500 font-medium">Born in USA?</span>
-                          {editingTaxMemberField === `m_${memberNumber}_bornInUsa` ? (
-                            <div className="flex items-center gap-2">
-                              <select
-                                value={taxMemberDraftValue ? 'Yes' : 'No'}
-                                onChange={e => setTaxMemberDraftValue(e.target.value === 'Yes')}
-                                className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
-                                autoFocus
-                                onKeyDown={e => {
-                                  if (e.key === 'Escape') setEditingTaxMemberField(null);
-                                  if (e.key === 'Enter') {
-                                    updateMember({ us_citizen: taxMemberDraftValue });
-                                    setEditingTaxMemberField(null);
-                                  }
-                                }}
-                              >
-                                <option value="Yes">Yes</option>
-                                <option value="No">No</option>
-                              </select>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  updateMember({ us_citizen: taxMemberDraftValue });
-                                  setEditingTaxMemberField(null);
-                                }}
-                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
-                                title="Save"
-                              >
-                                ✓
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingTaxMemberField(null)}
-                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
-                                title="Cancel"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          ) : (
-                            <span
-                              onClick={() => {
-                                setEditingTaxMemberField(`m_${memberNumber}_bornInUsa`);
-                                setTaxMemberDraftValue(member.us_citizen !== false);
-                                setTaxMemberFieldError(null);
-                              }}
-                              className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                              title="Click to edit Born in USA"
-                            >
-                              {member.us_citizen !== false ? 'Yes' : 'No'}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* 3. U.S. Citizen */}
-                        <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                          <span className="text-slate-500 font-medium">U.S. Citizen</span>
+                        {/* 2. U.S. Citizen */}
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words">U.S. Citizen</span>
                           {editingTaxMemberField === `m_${memberNumber}_usCitizen` ? (
                             <div className="flex items-center gap-2">
                               <select
@@ -2683,9 +3403,9 @@ export default function HealthPolicyForm({
                           )}
                         </div>
 
-                        {/* 4. Immigration Status */}
-                        <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
-                          <span className="text-slate-500 font-medium">Immigration Status</span>
+                        {/* 3. Immigration Status */}
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words">Immigration Status</span>
                           {editingTaxMemberField === `m_${memberNumber}_immigrationStatus` ? (
                             <div className="flex items-center gap-2">
                               <select
@@ -2990,119 +3710,285 @@ export default function HealthPolicyForm({
           </div>
         )}
 
-      {/* SECTION 3 — Medical Section */}
-      <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
-        <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider border-b border-slate-50 pb-2">
-          Medical Section
-        </h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Primary Doctor</label>
-            <input
-              type="text"
-              value={primaryDoctor}
-              disabled={!isEditing}
-              onChange={e => setPrimaryDoctor(e.target.value)}
-              placeholder="Doctor name..."
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Primary Doctor Address</label>
-            <input
-              type="text"
-              value={primaryDoctorAddress}
-              disabled={!isEditing}
-              onChange={e => setPrimaryDoctorAddress(e.target.value)}
-              placeholder="Address..."
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Primary Doctor Phone</label>
-            <input
-              type="text"
-              value={primaryDoctorPhone}
-              disabled={!isEditing}
-              onChange={e => setPrimaryDoctorPhone(e.target.value)}
-              placeholder="Phone..."
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-            />
-          </div>
+      {/* SECTION 5 — Residence Information */}
+      <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4 font-sans">
+        <div className="border-b border-slate-50 pb-3">
+          <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
+            Residence Information
+          </h4>
+          <p className="text-xs text-slate-400 font-medium mt-0.5">
+            Primary applicant residence address (Click value to edit)
+          </p>
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans font-sans divide-y divide-slate-100/70">
+          {/* 1. Street Address */}
+          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[32px]">
+            <span className="text-slate-500 font-medium leading-snug break-words">Street Address</span>
+            {editingResidenceField === 'address' ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={residenceDraftValue}
+                  onChange={e => setResidenceDraftValue(e.target.value)}
+                  placeholder="Street address..."
+                  className="w-48 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') setEditingResidenceField(null);
+                    if (e.key === 'Enter') handleInlineSaveResidenceField('address', residenceDraftValue);
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={residenceFieldSaving}
+                  onClick={() => handleInlineSaveResidenceField('address', residenceDraftValue)}
+                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                  title="Save"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingResidenceField(null)}
+                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                  title="Cancel"
+                >
+                  ✕
+                </button>
+                {residenceFieldError && <span className="text-rose-500 text-[10px] pl-1">{residenceFieldError}</span>}
+              </div>
+            ) : (
+              <span
+                onClick={() => {
+                  setEditingResidenceField('address');
+                  setResidenceDraftValue(clientResidence?.address || '');
+                  setResidenceFieldError(null);
+                }}
+                className="font-semibold text-slate-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                title="Click to edit Street Address"
+              >
+                {clientResidence?.address || '—'}
+              </span>
+            )}
+          </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Hospital</label>
-            <input
-              type="text"
-              value={hospital}
-              disabled={!isEditing}
-              onChange={e => setHospital(e.target.value)}
-              placeholder="Hospital..."
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-            />
+          {/* 2. City */}
+          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[32px]">
+            <span className="text-slate-500 font-medium leading-snug break-words">City</span>
+            {editingResidenceField === 'city' ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={residenceDraftValue}
+                  onChange={e => setResidenceDraftValue(e.target.value)}
+                  placeholder="City..."
+                  className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') setEditingResidenceField(null);
+                    if (e.key === 'Enter') handleInlineSaveResidenceField('city', residenceDraftValue);
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={residenceFieldSaving}
+                  onClick={() => handleInlineSaveResidenceField('city', residenceDraftValue)}
+                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                  title="Save"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingResidenceField(null)}
+                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                  title="Cancel"
+                >
+                  ✕
+                </button>
+                {residenceFieldError && <span className="text-rose-500 text-[10px] pl-1">{residenceFieldError}</span>}
+              </div>
+            ) : (
+              <span
+                onClick={() => {
+                  setEditingResidenceField('city');
+                  setResidenceDraftValue(clientResidence?.city || '');
+                  setResidenceFieldError(null);
+                }}
+                className="font-semibold text-slate-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                title="Click to edit City"
+              >
+                {clientResidence?.city || '—'}
+              </span>
+            )}
           </div>
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Urgent Care</label>
-            <input
-              type="text"
-              value={urgentCare}
-              disabled={!isEditing}
-              onChange={e => setUrgentCare(e.target.value)}
-              placeholder="Urgent Care..."
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Pharmacy</label>
-            <input
-              type="text"
-              value={pharmacy}
-              disabled={!isEditing}
-              onChange={e => setPharmacy(e.target.value)}
-              placeholder="Pharmacy..."
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-            />
-          </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Conditions</label>
-            <input
-              type="text"
-              value={conditions}
-              disabled={!isEditing}
-              onChange={e => setConditions(e.target.value)}
-              placeholder="Conditions..."
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-            />
+          {/* 3. State */}
+          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[32px]">
+            <span className="text-slate-500 font-medium leading-snug break-words">State</span>
+            {editingResidenceField === 'state' ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={residenceDraftValue}
+                  onChange={e => setResidenceDraftValue(e.target.value)}
+                  placeholder="State (e.g. FL)..."
+                  className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') setEditingResidenceField(null);
+                    if (e.key === 'Enter') handleInlineSaveResidenceField('state', residenceDraftValue);
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={residenceFieldSaving}
+                  onClick={() => handleInlineSaveResidenceField('state', residenceDraftValue)}
+                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                  title="Save"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingResidenceField(null)}
+                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                  title="Cancel"
+                >
+                  ✕
+                </button>
+                {residenceFieldError && <span className="text-rose-500 text-[10px] pl-1">{residenceFieldError}</span>}
+              </div>
+            ) : (
+              <span
+                onClick={() => {
+                  setEditingResidenceField('state');
+                  setResidenceDraftValue(clientResidence?.state || '');
+                  setResidenceFieldError(null);
+                }}
+                className="font-semibold text-slate-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                title="Click to edit State"
+              >
+                {clientResidence?.state || '—'}
+              </span>
+            )}
           </div>
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Medicines</label>
-            <input
-              type="text"
-              value={medicines}
-              disabled={!isEditing}
-              onChange={e => setMedicines(e.target.value)}
-              placeholder="Medicines..."
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-            />
+
+          {/* 4. Zip Code */}
+          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[32px]">
+            <span className="text-slate-500 font-medium leading-snug break-words">Zip Code</span>
+            {editingResidenceField === 'zip_code' ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={residenceDraftValue}
+                  onChange={e => setResidenceDraftValue(e.target.value)}
+                  placeholder="Zip code..."
+                  className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') setEditingResidenceField(null);
+                    if (e.key === 'Enter') handleInlineSaveResidenceField('zip_code', residenceDraftValue);
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={residenceFieldSaving}
+                  onClick={() => handleInlineSaveResidenceField('zip_code', residenceDraftValue)}
+                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                  title="Save"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingResidenceField(null)}
+                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                  title="Cancel"
+                >
+                  ✕
+                </button>
+                {residenceFieldError && <span className="text-rose-500 text-[10px] pl-1">{residenceFieldError}</span>}
+              </div>
+            ) : (
+              <span
+                onClick={() => {
+                  setEditingResidenceField('zip_code');
+                  setResidenceDraftValue(clientResidence?.zipCode || '');
+                  setResidenceFieldError(null);
+                }}
+                className="font-semibold text-slate-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                title="Click to edit Zip Code"
+              >
+                {clientResidence?.zipCode || '—'}
+              </span>
+            )}
           </div>
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Specialist</label>
-            <input
-              type="text"
-              value={specialist}
-              disabled={!isEditing}
-              onChange={e => setSpecialist(e.target.value)}
-              placeholder="Specialist..."
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 text-sm outline-none transition-all"
-            />
+
+          {/* 5. County */}
+          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[32px]">
+            <span className="text-slate-500 font-medium leading-snug break-words">County</span>
+            {editingResidenceField === 'county' ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={residenceDraftValue}
+                  onChange={e => setResidenceDraftValue(e.target.value)}
+                  placeholder="County..."
+                  className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') setEditingResidenceField(null);
+                    if (e.key === 'Enter') handleInlineSaveResidenceField('county', residenceDraftValue);
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={residenceFieldSaving}
+                  onClick={() => handleInlineSaveResidenceField('county', residenceDraftValue)}
+                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                  title="Save"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingResidenceField(null)}
+                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                  title="Cancel"
+                >
+                  ✕
+                </button>
+                {residenceFieldError && <span className="text-rose-500 text-[10px] pl-1">{residenceFieldError}</span>}
+              </div>
+            ) : (
+              <span
+                onClick={() => {
+                  setEditingResidenceField('county');
+                  setResidenceDraftValue(clientResidence?.county || '');
+                  setResidenceFieldError(null);
+                }}
+                className="font-semibold text-slate-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                title="Click to edit County"
+              >
+                {clientResidence?.county || '—'}
+              </span>
+            )}
           </div>
         </div>
       </div>
+
+      {/* SECTION 6 — Income Information */}
+      <ClientIncomeInformationSection clientId={clientId} />
+
+      {/* SECTION 7 — Medical Section (LAST SECTION) */}
+      {initialPolicy?.id && (
+        <HealthMedicalSection
+          healthPolicyId={initialPolicy.id}
+          clientId={clientId}
+          addToast={addToast}
+        />
+      )}
 
       {/* Editing Form controls */}
       {isEditing && (
@@ -3130,54 +4016,6 @@ export default function HealthPolicyForm({
           </button>
         </div>
       )}
-        </div>
-
-        {/* RIGHT COLUMN: Marketplace Plan Lookup & Approved Plan Benefits */}
-        <div className="lg:col-span-5">
-          {(() => {
-            const activeCoverageYear = yearRenovation ? Number(yearRenovation) : (initialPolicy?.year_renovation || 2026);
-            const activeZip = clientResidence?.zipCode || null;
-            const activeState = clientResidence?.state || null;
-            const activeIncome = totalHouseholdIncome !== null && totalHouseholdIncome !== undefined && totalHouseholdIncome > 0
-              ? totalHouseholdIncome
-              : null;
-
-            const peopleResult = transformHouseholdToMarketplacePeople(
-              primaryApplicant,
-              applicantCoverage,
-              taxMembers,
-              taxMemberCount,
-              activeCoverageYear,
-              activeZip,
-              activeState,
-              activeIncome
-            );
-
-            const marketplaceContext: MarketplaceClientContext = {
-              coverageYear: activeCoverageYear,
-              zipCode: activeZip,
-              state: activeState,
-              countyName: clientResidence?.county || null,
-              countyFips: null,
-              householdIncome: activeIncome,
-              householdSize: peopleResult.householdSize,
-              coveredApplicants: peopleResult.coveredApplicants,
-              people: peopleResult.people,
-              validationErrors: peopleResult.validationErrors
-            };
-
-            return (
-              <MarketplacePlanLookupPanel
-                initialPlanId={planId}
-                context={marketplaceContext}
-                isEditing={isEditing}
-                onApplyPlan={handleApplyMarketplacePlan}
-                appliedPlan={appliedMarketplacePlan}
-                addToast={addToast}
-              />
-            );
-          })()}
-        </div>
       </div>
 
       {/* CONFIRMATION MODAL FOR TAX MEMBER COUNT REDUCTION */}

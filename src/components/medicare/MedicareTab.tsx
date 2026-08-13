@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import ScopeOfAppointmentForm from './ScopeOfAppointmentForm';
+import HealthClientHeader from '@/components/health/HealthClientHeader';
+import MedicareLeftRail from './MedicareLeftRail';
 import MedicareDetailsForm from './MedicareDetailsForm';
 import MedicalSection from './MedicalSection';
 import MedicalEntryModal from './MedicalEntryModal';
@@ -24,8 +25,14 @@ import {
 
 interface Props {
   clientId: string;
+  clientName?: string;
+  photoUrl?: string | null;
+  lastUpdated?: string | null;
+  onSendEmail?: () => void;
+  onConsent?: () => void;
+  onDeleteProfile?: () => void;
   isCompanyClient?: boolean;
-  initialSubtab?: 'summary' | 'documents' | 'notes' | 'timeline';
+  initialSubtab?: 'summary' | 'documents' | 'notes' | 'timeline' | 'links';
   currentUserId?: string | null;
   onPolicyDeleted?: () => void;
 }
@@ -50,20 +57,41 @@ const DEFAULT_MEDICARE_INFO: MedicareInformationData = {
 
 export default function MedicareTab({
   clientId,
+  clientName = 'Client Profile',
+  photoUrl = null,
+  lastUpdated = null,
+  onSendEmail,
+  onConsent,
+  onDeleteProfile,
   isCompanyClient = false,
   initialSubtab = 'summary',
   currentUserId = null,
   onPolicyDeleted,
 }: Props) {
-  // Internal Floating Profile Navigation State: SUMMARY | DOCUMENTS | NOTES | TIMELINE
-  const [activeSubtab, setActiveSubtab] = useState<'summary' | 'documents' | 'notes' | 'timeline'>(
-    initialSubtab || 'summary'
+  // Navigation State: SUMMARY | DOCUMENTS | NOTES | TIMELINE | LINKS
+  const [activeSubtab, setActiveSubtab] = useState<'summary' | 'documents' | 'notes' | 'timeline' | 'links'>(
+    (initialSubtab as any) || 'summary'
   );
 
   const [loading, setLoading] = useState(true);
   const [savingInfo, setSavingInfo] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Toast notification state
+  const [toast, setToast] = useState<{ title: string; description: string; type: 'success' | 'error' | 'warning' } | null>(null);
+
+  const addToast = useCallback((t: { title: string; description: string; type: 'success' | 'error' | 'warning' }) => {
+    setToast(t);
+  }, []);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Medicare Master Info State
   const [medicareInfo, setMedicareInfo] = useState<MedicareInformationData>({
@@ -156,7 +184,6 @@ export default function MedicareTab({
   const handleSaveInfo = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setSavingInfo(true);
-    setSaveSuccess(false);
     setError(null);
 
     try {
@@ -175,12 +202,21 @@ export default function MedicareTab({
       if (upsertErr) throw upsertErr;
       if (data) setMedicareInfo(data);
 
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      addToast({
+        title: 'Medicare Saved',
+        description: 'Medicare information and Scope of Appointment details saved successfully.',
+        type: 'success',
+      });
+
       if (onPolicyDeleted) onPolicyDeleted();
     } catch (err: any) {
       console.error('Error saving Medicare information:', err);
       setError(err?.message || 'Failed to save Medicare details.');
+      addToast({
+        title: 'Save Failed',
+        description: err?.message || 'Failed to save Medicare details.',
+        type: 'error',
+      });
     } finally {
       setSavingInfo(false);
     }
@@ -281,171 +317,149 @@ export default function MedicareTab({
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-20 bg-white border border-[#E8ECF2] rounded-2xl shadow-sm">
-        <svg className="animate-spin h-8 w-8 text-[#2563EB]" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-        </svg>
+      <div className="flex justify-center items-center py-16 font-sans">
+        <div className="flex items-center gap-3 text-slate-500 text-xs font-bold">
+          <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          Loading Medicare Workspace...
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 font-sans">
-      {/* Header & Internal Floating Profile Tabs */}
-      <div className="crm-card p-4 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-extrabold tracking-tight text-[#172033]">Medicare Profile</h2>
-            <p className="text-xs text-[#7C8799] mt-0.5">
-              Scope of appointment, Medicare details, and relational provider information.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {saveSuccess && (
-              <span className="text-xs font-bold text-emerald-600 flex items-center gap-1 animate-in fade-in">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-                </svg>
-                Saved successfully!
-              </span>
-            )}
-
-            <button
-              type="button"
-              onClick={handleSaveInfo}
-              disabled={savingInfo}
-              className="inline-flex items-center justify-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-[0.98] text-white text-xs font-semibold px-5 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 disabled:opacity-50"
-            >
-              {savingInfo ? 'Saving...' : 'Save Medicare Details'}
-            </button>
-          </div>
+    <div className="space-y-4 font-sans">
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-4 right-4 z-50 p-4 rounded-xl border shadow-xl flex flex-col gap-1 animate-fade-in font-sans min-w-[280px] max-w-sm ${
+          toast.type === 'success'
+            ? 'bg-emerald-50 border-emerald-100 text-emerald-800'
+            : toast.type === 'error'
+            ? 'bg-rose-50 border-rose-100 text-rose-800'
+            : 'bg-amber-50 border-amber-100 text-amber-800'
+        }`}>
+          <h5 className="font-extrabold text-[10px] uppercase tracking-wider">{toast.title}</h5>
+          <p className="text-xs font-semibold mt-0.5">{toast.description}</p>
         </div>
+      )}
 
-        {/* INTERNAL FLOATING NAVIGATION: SUMMARY | DOCUMENTS | NOTES | TIMELINE */}
-        <div className="flex items-center gap-1 border-b border-[#E8ECF2] pt-2 overflow-x-auto">
-          <button
-            type="button"
-            onClick={() => setActiveSubtab('summary')}
-            className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px whitespace-nowrap ${
-              activeSubtab === 'summary'
-                ? 'border-[#2563EB] text-[#2563EB]'
-                : 'border-transparent text-[#556176] hover:text-[#172033]'
-            }`}
-          >
-            SUMMARY
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveSubtab('documents')}
-            className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px whitespace-nowrap ${
-              activeSubtab === 'documents'
-                ? 'border-[#2563EB] text-[#2563EB]'
-                : 'border-transparent text-[#556176] hover:text-[#172033]'
-            }`}
-          >
-            DOCUMENTS
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveSubtab('notes')}
-            className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px whitespace-nowrap ${
-              activeSubtab === 'notes'
-                ? 'border-[#2563EB] text-[#2563EB]'
-                : 'border-transparent text-[#556176] hover:text-[#172033]'
-            }`}
-          >
-            NOTES
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveSubtab('timeline')}
-            className={`px-4 py-2 text-xs font-bold transition-all border-b-2 -mb-px whitespace-nowrap ${
-              activeSubtab === 'timeline'
-                ? 'border-[#2563EB] text-[#2563EB]'
-                : 'border-transparent text-[#556176] hover:text-[#172033]'
-            }`}
-          >
-            TIMELINE
-          </button>
+      {/* 1. Compact Client Header directly below top global nav */}
+      <HealthClientHeader
+        clientId={clientId}
+        clientName={clientName}
+        photoUrl={photoUrl}
+        lastUpdated={null}
+        onSendEmail={onSendEmail}
+        onConsent={onConsent}
+        onDeleteProfile={onDeleteProfile}
+        isCompanyClient={isCompanyClient}
+        activeSection="medicare"
+      />
+
+      {/* 2. Main Workspace Layout */}
+      <div className="px-4 py-6 md:px-8 md:py-8 flex flex-col lg:flex-row items-start gap-6">
+        {/* Left Context Rail */}
+        <MedicareLeftRail
+          clientId={clientId}
+          activeSubTab={activeSubtab}
+          setActiveSubTab={setActiveSubtab}
+          medicareInfo={medicareInfo}
+          onInfoChange={handleInfoChange}
+          saving={savingInfo}
+        />
+
+        {/* Right Main Content Workspace (Full Width) */}
+        <div className="flex-1 w-full min-w-0 space-y-4">
+          {error && (
+            <div className="p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-800 text-xs font-medium">
+              {error}
+            </div>
+          )}
+
+          {/* SUBTAB 1: SUMMARY */}
+          {activeSubtab === 'summary' && (
+            <div className="space-y-6 animate-in fade-in duration-150">
+              {/* Medicare Details Form (Starts directly with Medicare Info 2026; SOA is in left rail) */}
+              <MedicareDetailsForm
+                data={medicareInfo}
+                onChange={handleInfoChange}
+                onSave={handleSaveInfo}
+                saving={savingInfo}
+              />
+
+              {/* Medical & Provider Relational Section */}
+              <MedicalSection
+                doctors={doctors}
+                hospitals={hospitals}
+                urgentCares={urgentCares}
+                pharmacies={pharmacies}
+                conditions={conditions}
+                specialists={specialists}
+                medications={medications}
+                onOpenAdd={handleOpenAdd}
+                onOpenEdit={handleOpenEdit}
+                onOpenDelete={handleOpenDelete}
+              />
+            </div>
+          )}
+
+          {/* SUBTAB 2: DOCUMENTS */}
+          {activeSubtab === 'documents' && (
+            <div className="animate-in fade-in duration-150">
+              <ModuleDocumentsManager
+                clientId={clientId}
+                moduleType="medicare"
+                moduleLabel="Medicare"
+              />
+            </div>
+          )}
+
+          {/* SUBTAB 3: NOTES */}
+          {activeSubtab === 'notes' && (
+            <div className="animate-in fade-in duration-150">
+              <UnifiedNotesManager
+                clientId={clientId}
+                inferredCategory="medicare"
+                currentUserId={currentUserId}
+              />
+            </div>
+          )}
+
+          {/* SUBTAB 4: TIMELINE */}
+          {activeSubtab === 'timeline' && (
+            <div className="bg-white border border-slate-200/70 rounded-xl p-6 shadow-2xs space-y-4 animate-in fade-in duration-150 font-sans">
+              <div className="border-b border-slate-100 pb-3">
+                <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">Medicare Activity Timeline</h3>
+                <p className="text-xs text-slate-500 mt-0.5 font-medium">Chronological record of Medicare registrations and updates.</p>
+              </div>
+              <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center justify-between font-bold">
+                  <span className="text-slate-900">Medicare Profile Activity</span>
+                  <span className="text-slate-500 font-medium">{new Date(medicareInfo.updated_at || Date.now()).toLocaleDateString()}</span>
+                </div>
+                <p className="text-slate-600 font-medium">
+                  MBI: <strong>{medicareInfo.mbi || 'Not specified'}</strong> | Carrier: <strong>{medicareInfo.company || 'Not specified'}</strong> | Status: <strong>{medicareInfo.renewal_status || 'Active'}</strong>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* SUBTAB 5: LINKS */}
+          {activeSubtab === 'links' && (
+            <div className="bg-white border border-slate-200/70 rounded-xl p-6 shadow-2xs space-y-4 animate-in fade-in duration-150 font-sans">
+              <div className="border-b border-slate-100 pb-3">
+                <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">Saved Client Links</h3>
+                <p className="text-xs text-slate-500 mt-0.5 font-medium">Quick reference links for Medicare portals and carrier tools.</p>
+              </div>
+              <p className="text-xs text-slate-600">
+                Saved links are also available for quick access in the left workspace rail.
+              </p>
+            </div>
+          )}
         </div>
       </div>
-
-      {error && (
-        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-100 text-rose-600 text-xs font-medium">
-          {error}
-        </div>
-      )}
-
-      {/* SUBTAB 1: SUMMARY */}
-      {activeSubtab === 'summary' && (
-        <div className="space-y-6 animate-in fade-in duration-150">
-          <ScopeOfAppointmentForm
-            data={medicareInfo}
-            onChange={handleInfoChange}
-            saving={savingInfo}
-          />
-          <MedicareDetailsForm
-            data={medicareInfo}
-            onChange={handleInfoChange}
-            saving={savingInfo}
-          />
-          <MedicalSection
-            doctors={doctors}
-            hospitals={hospitals}
-            urgentCares={urgentCares}
-            pharmacies={pharmacies}
-            conditions={conditions}
-            specialists={specialists}
-            medications={medications}
-            onOpenAdd={handleOpenAdd}
-            onOpenEdit={handleOpenEdit}
-            onOpenDelete={handleOpenDelete}
-          />
-        </div>
-      )}
-
-      {/* SUBTAB 2: DOCUMENTS */}
-      {activeSubtab === 'documents' && (
-        <div className="animate-in fade-in duration-150">
-          <ModuleDocumentsManager
-            clientId={clientId}
-            moduleType="medicare"
-            moduleLabel="Medicare"
-          />
-        </div>
-      )}
-
-      {/* SUBTAB 3: NOTES */}
-      {activeSubtab === 'notes' && (
-        <div className="animate-in fade-in duration-150">
-          <UnifiedNotesManager
-            clientId={clientId}
-            inferredCategory="medicare"
-            currentUserId={currentUserId}
-          />
-        </div>
-      )}
-
-      {/* SUBTAB 4: TIMELINE */}
-      {activeSubtab === 'timeline' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4 animate-in fade-in duration-150">
-          <div className="border-b border-slate-100 pb-3">
-            <h3 className="text-base font-extrabold text-slate-800">Medicare Activity Timeline</h3>
-            <p className="text-xs text-slate-500 mt-0.5">Chronological record of Medicare registrations and updates.</p>
-          </div>
-          <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-extrabold text-slate-900">Medicare Profile Activity</span>
-              <span className="text-slate-400 font-medium">{new Date(medicareInfo.updated_at || Date.now()).toLocaleDateString()}</span>
-            </div>
-            <p className="text-xs text-slate-600">
-              MBI: <strong>{medicareInfo.mbi || 'Not specified'}</strong> | Carrier: <strong>{medicareInfo.company || 'Not specified'}</strong> | Status: <strong>{medicareInfo.renewal_status || 'Active'}</strong>
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* Modals */}
       <MedicalEntryModal

@@ -32,10 +32,61 @@ export default function MarketplacePlanLookupPanel({
   const [isBenefitsCollapsed, setIsBenefitsCollapsed] = useState(true);
   const [lastFingerprint, setLastFingerprint] = useState<string | null>(null);
 
+  const [isMembersExpanded, setIsMembersExpanded] = useState(false);
+  const [resolvedCountyName, setResolvedCountyName] = useState<string | null>(null);
+  const [isResolvingCounty, setIsResolvingCounty] = useState<boolean>(false);
+
   // Sync initial plan ID if passed
   useEffect(() => {
     if (initialPlanId && !planIdInput) setPlanIdInput(initialPlanId);
   }, [initialPlanId]);
+
+  // Deterministic County Resolution (Priority 1: Existing saved county, Priority 2: Resolve via ZIP, Priority 3: Unavailable fallback)
+  useEffect(() => {
+    let isCancelled = false;
+
+    const savedCounty = (context.countyName || '').trim();
+    if (savedCounty && savedCounty !== 'Resolving...') {
+      setResolvedCountyName(savedCounty);
+      setIsResolvingCounty(false);
+      return;
+    }
+
+    const cleanZip = (context.zipCode || '').trim();
+    if (!cleanZip || !/^\d{5}$/.test(cleanZip)) {
+      setResolvedCountyName(null);
+      setIsResolvingCounty(false);
+      return;
+    }
+
+    setIsResolvingCounty(true);
+    const apiKey = 'd687412e7b53146b2631dc01974ad0a4';
+    fetch(`https://marketplace.api.healthcare.gov/api/v1/counties/by/zip/${cleanZip}?apikey=${apiKey}`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (!isCancelled) {
+          if (data && Array.isArray(data.counties) && data.counties.length > 0) {
+            setResolvedCountyName(data.counties[0].name || 'County');
+          } else {
+            setResolvedCountyName(null);
+          }
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setResolvedCountyName(null);
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsResolvingCounty(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [context.countyName, context.zipCode]);
 
   // Stale data prevention: clear search results when Plan ID or Context changes
   useEffect(() => {
@@ -119,29 +170,6 @@ export default function MarketplacePlanLookupPanel({
         setResolvedSearchArea(data.searchArea);
       }
 
-      // Development Audit Log
-      const auditObject = {
-        enteredPlanId: cleanPlanId,
-        year: context.coverageYear,
-        zip: context.zipCode,
-        state: context.state,
-        countyName: data?.searchArea?.countyName || context.countyName || 'Broward County',
-        countyFips: data?.searchArea?.countyFips || context.countyFips || '12011',
-        householdIncome: context.householdIncome,
-        householdSize: context.householdSize,
-        coveredCount: context.coveredApplicants,
-        people: context.people.map(p => ({
-          age: p.age,
-          relationship: p.relationship,
-          coverage: p.applying_for_coverage,
-          genderPresent: !!p.gender,
-          tobaccoPresent: p.uses_tobacco !== undefined
-        }))
-      };
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[MARKETPLACE_BROWSER_REQUEST_AUDIT]', auditObject);
-      }
-
       if (!res.ok || !data.found) {
         setErrorMsg(data.message || 'Plan not found for this year and service area.');
         if (data.relatedVariants) {
@@ -209,22 +237,19 @@ export default function MarketplacePlanLookupPanel({
   const activePlanToDisplay = foundPlan || appliedPlan;
   const isAppliedView = !foundPlan && !!appliedPlan;
 
+  const displayCounty = resolvedSearchArea?.countyName || resolvedCountyName || (context.countyName && context.countyName !== 'Resolving...' ? context.countyName : null) || (isResolvingCounty ? 'Resolving...' : (context.zipCode ? 'County unavailable' : '—'));
+
   return (
-    <div className="space-y-4 font-sans text-xs">
-      {/* SEARCH CARD */}
-      <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4">
+    <div className="space-y-3.5 font-sans text-xs">
+      {/* SEARCH CARD (COMPACT LEFT RAIL) */}
+      <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-sm space-y-3.5">
         {/* Header */}
-        <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
-              Marketplace Plan Lookup
-            </h3>
-            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-              Automated carrier lookup using current client & health policy data.
-            </p>
-          </div>
+        <div className="border-b border-slate-100 pb-2.5 flex items-center justify-between">
+          <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+            Marketplace Lookup
+          </h3>
           {activePlanToDisplay && (
-            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
               foundPlan ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
             }`}>
               {foundPlan ? 'Preview Ready' : 'Plan Applied'}
@@ -233,27 +258,27 @@ export default function MarketplacePlanLookupPanel({
         </div>
 
         {/* COMPACT READ-ONLY CLIENT DATA SUMMARY */}
-        <div className="bg-slate-50 border border-slate-200/70 rounded-xl p-3 space-y-2 text-xs">
+        <div className="bg-slate-50 border border-slate-200/70 rounded-xl p-3 space-y-2.5 text-xs">
           <div className="flex items-center justify-between font-bold text-slate-700 text-[10px] uppercase tracking-wider border-b border-slate-200/60 pb-1.5">
-            <span>Using Client Data</span>
+            <span>Client Context</span>
             <span className="text-[10px] text-blue-700 font-semibold lowercase bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-              {context.householdSize} member{context.householdSize > 1 ? 's' : ''} ({context.coveredApplicants} covered)
+              {context.householdSize} member{context.householdSize > 1 ? 's' : ''} · {context.coveredApplicants} covered
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-600 font-medium">
+          <div className="grid grid-cols-2 gap-2 text-slate-600 font-medium">
             <div>
               <span className="block text-[10px] text-slate-400 uppercase">Coverage Year</span>
-              <span className="text-slate-900 font-bold">{context.coverageYear || '—'}</span>
+              <span className="text-slate-900 font-bold">{context.coverageYear || '2026'}</span>
             </div>
             <div>
               <span className="block text-[10px] text-slate-400 uppercase">ZIP / State</span>
-              <span className="text-slate-900 font-bold">{context.zipCode ? `${context.zipCode}, ${context.state || ''}` : '—'}</span>
+              <span className="text-slate-900 font-bold">{context.zipCode ? `${context.zipCode}${context.state ? `, ${context.state}` : ''}` : '—'}</span>
             </div>
             <div>
               <span className="block text-[10px] text-slate-400 uppercase">County</span>
-              <span className="text-slate-900 font-bold font-sans">
-                {resolvedSearchArea?.countyName || context.countyName || (context.countyFips ? `FIPS ${context.countyFips}` : 'Resolving...')}
+              <span className="text-slate-900 font-bold font-sans truncate block" title={displayCounty}>
+                {displayCounty}
               </span>
             </div>
             <div>
@@ -266,54 +291,64 @@ export default function MarketplacePlanLookupPanel({
             </div>
           </div>
 
-          {/* COMPACT PEOPLE SUMMARY LIST */}
-          <div className="space-y-1 pt-1.5 border-t border-slate-200/60">
-            <span className="block text-[10px] font-bold text-slate-400 uppercase">Tax Household Members</span>
-            <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
-              {context.people.map(p => (
-                <div key={p.member_number} className="flex items-center justify-between bg-white px-2.5 py-1 rounded border border-slate-100 text-[11px]">
-                  <span className="font-semibold text-slate-800">
-                    {p.member_number === 1 ? 'Applicant' : `Member ${p.member_number}`} — <span className="text-slate-600">{p.relationship}</span>
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-500 font-medium">Age {p.age}</span>
-                    <span className={`px-1.5 py-0.2 text-[10px] font-bold rounded ${p.applying_for_coverage ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                      Coverage {p.applying_for_coverage ? 'Yes' : 'No'}
-                    </span>
+          {/* COMPACT HOUSEHOLD MEMBERS ACCORDION */}
+          <div className="pt-1.5 border-t border-slate-200/60">
+            <button
+              type="button"
+              onClick={() => setIsMembersExpanded(!isMembersExpanded)}
+              className="w-full flex items-center justify-between text-[10px] font-extrabold text-slate-600 uppercase tracking-wider py-1 hover:text-slate-900 transition-colors"
+            >
+              <span>Household Members ({context.householdSize})</span>
+              <span>{isMembersExpanded ? '▲' : '▼'}</span>
+            </button>
+
+            {isMembersExpanded && (
+              <div className="space-y-1.5 pt-1 max-h-36 overflow-y-auto pr-0.5 animate-fadeIn">
+                {context.people.map(p => (
+                  <div key={p.member_number} className="bg-white p-2 rounded-lg border border-slate-200/60 text-[11px] space-y-0.5">
+                    <div className="flex items-center justify-between font-bold text-slate-800">
+                      <span>{p.member_number === 1 ? 'Applicant' : `Member ${p.member_number}`} — {p.relationship}</span>
+                      <span className={`px-1.5 py-0.2 text-[9px] font-bold rounded ${p.applying_for_coverage ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                        {p.applying_for_coverage ? 'Coverage Yes' : 'Coverage No'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 font-medium">
+                      Age {p.age} {p.gender ? `· ${p.gender}` : ''}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* INPUT CONTROLS: ONLY PLAN ID (NOT A NESTED FORM TO PREVENT OUTER FORM SUBMISSION) */}
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Plan ID *
-            </label>
+        {/* INPUT CONTROLS: PLAN ID SEARCH */}
+        <div className="space-y-2">
+          <label className="block text-[10px] font-extrabold text-slate-700 uppercase tracking-wider">
+            Plan ID *
+          </label>
+          <div className="space-y-2">
+            <input
+              type="text"
+              value={planIdInput}
+              onChange={e => setPlanIdInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSearch(e);
+                }
+              }}
+              placeholder="e.g. 30252FL0070065"
+              disabled={loading}
+              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-900 font-mono text-xs font-semibold uppercase outline-none transition-all"
+            />
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={planIdInput}
-                onChange={e => setPlanIdInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleSearch(e);
-                  }
-                }}
-                placeholder="e.g. 30252FL0070065"
-                disabled={loading}
-                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-900 font-mono text-xs font-semibold uppercase outline-none transition-all"
-              />
               <button
                 type="button"
                 onClick={handleSearch}
                 disabled={loading}
-                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md transition-all whitespace-nowrap flex items-center gap-1.5"
+                className="flex-1 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
               >
                 {loading ? (
                   <>

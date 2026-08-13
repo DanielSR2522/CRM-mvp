@@ -293,7 +293,7 @@ export default function GlobalCrmSearch() {
     results.companies.length;
 
   return (
-    <div ref={searchContainerRef} className="w-80 relative">
+    <div ref={searchContainerRef} className="w-full relative font-sans">
       <div className="relative">
         <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#7C8799]">
           {loading ? (

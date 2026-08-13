@@ -285,6 +285,7 @@ export async function createClientNote(payload: CreateNotePayload): Promise<Unif
       client_id: payload.clientId,
       category: payload.category,
       policy_id: payload.policyId || null,
+      title: payload.title || null,
       content: payload.content.trim(),
       created_by: payload.createdBy || null
     })

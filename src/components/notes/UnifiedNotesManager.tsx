@@ -48,9 +48,11 @@ export default function UnifiedNotesManager({
     inferredCategory || ''
   );
   const [selectedPolicyId, setSelectedPolicyId] = useState<string>(policyId || '');
+  const [noteTitle, setNoteTitle] = useState('');
   const [newNoteContent, setNewNoteContent] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [postingNote, setPostingNote] = useState(false);
+  const [deletingNoteTarget, setDeletingNoteTarget] = useState<string | null>(null);
 
   // Edit note state
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -200,6 +202,7 @@ export default function UnifiedNotesManager({
         clientId,
         category: finalCategory,
         policyId: selectedPolicyId || null,
+        title: noteTitle.trim() || null,
         content: newNoteContent,
         createdBy: currentUserId
       });
@@ -211,6 +214,7 @@ export default function UnifiedNotesManager({
         setPendingAttachments([]);
       }
 
+      setNoteTitle('');
       setNewNoteContent('');
       if (!inferredCategory) setSelectedCategory('');
       if (!policyId) setSelectedPolicyId('');
@@ -396,6 +400,20 @@ export default function UnifiedNotesManager({
           )}
         </div>
 
+        {/* Optional Note Title */}
+        <div>
+          <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
+            Note Title <span className="text-slate-400 font-normal">(Optional)</span>
+          </label>
+          <input
+            type="text"
+            value={noteTitle}
+            onChange={e => setNoteTitle(e.target.value)}
+            placeholder="e.g. Marketplace Follow-up"
+            className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none mb-3"
+          />
+        </div>
+
         {/* Textarea Composer */}
         <div>
           <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
@@ -571,27 +589,55 @@ export default function UnifiedNotesManager({
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-800 font-normal leading-relaxed whitespace-pre-wrap">{note.content}</p>
+                  <div className="space-y-1">
+                    {note.title && (
+                      <h4 className="text-sm font-extrabold text-slate-900 tracking-tight">{note.title}</h4>
+                    )}
+                    <p className="text-sm text-slate-800 font-normal leading-relaxed whitespace-pre-wrap">{note.content}</p>
+                  </div>
                 )}
 
                 {/* Attachments Section */}
                 {noteAtts.length > 0 && (
-                  <div className="pt-2 border-t border-slate-100">
-                    <div className="text-xs font-extrabold text-slate-500 uppercase tracking-wider mb-2">Attachments</div>
+                  <div className="pt-2 border-t border-slate-100 space-y-2">
+                    <div className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Attachments</div>
                     <div className="flex flex-wrap gap-3">
                       {noteAtts.map(att => (
-                        <div key={att.id} className="border border-slate-200 rounded-lg p-2 bg-slate-50 hover:bg-slate-100 transition max-w-xs flex items-center gap-2">
-                          {att.mime_type.startsWith('image/') && att.signedUrl ? (
-                            <a href={att.signedUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2">
-                              <img src={att.signedUrl} alt={att.display_name} className="w-10 h-10 object-cover rounded border border-slate-200" />
-                              <span className="text-xs font-bold text-blue-600 hover:underline truncate">{att.display_name}</span>
-                            </a>
-                          ) : (
-                            <a href={att.signedUrl || '#'} target="_blank" rel="noreferrer" className="flex items-center gap-2">
-                              <div className="w-8 h-8 bg-slate-200 rounded flex items-center justify-center text-slate-600 text-xs font-black">📄</div>
-                              <span className="text-xs font-bold text-blue-600 hover:underline truncate">{att.display_name}</span>
-                            </a>
-                          )}
+                        <div key={att.id} className="border border-slate-200 rounded-xl p-2.5 bg-slate-50/90 hover:bg-slate-100/90 transition max-w-xs flex items-center justify-between gap-3 text-xs">
+                          <div className="flex items-center gap-2 overflow-hidden">
+                            {att.mime_type.startsWith('image/') && att.signedUrl ? (
+                              <img src={att.signedUrl} alt={att.display_name} className="w-9 h-9 object-cover rounded-lg border border-slate-200 shrink-0" />
+                            ) : (
+                              <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold shrink-0">📄</div>
+                            )}
+                            <span className="font-bold text-slate-800 truncate text-[11px]" title={att.display_name}>{att.display_name}</span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {att.signedUrl && (
+                              <>
+                                <a
+                                  href={att.signedUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="p-1 text-slate-500 hover:text-blue-600 rounded hover:bg-white transition-colors"
+                                  title="View Attachment"
+                                >
+                                  👁️
+                                </a>
+                                <a
+                                  href={att.signedUrl}
+                                  download={att.display_name}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="p-1 text-slate-500 hover:text-emerald-600 rounded hover:bg-white transition-colors"
+                                  title="Download Attachment"
+                                >
+                                  📥
+                                </a>
+                              </>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>

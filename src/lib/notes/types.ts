@@ -33,6 +33,7 @@ export interface UnifiedNote {
   client_id: string;
   category: NoteCategory;
   policy_id: string | null;
+  title?: string | null;
   content: string;
   created_by: string | null;
   created_at: string;
@@ -52,6 +53,7 @@ export interface CreateNotePayload {
   clientId: string;
   category: NoteCategory;
   policyId?: string | null;
+  title?: string | null;
   content: string;
   createdBy?: string | null;
 }
