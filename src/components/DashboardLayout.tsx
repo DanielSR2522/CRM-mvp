@@ -218,6 +218,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
   const searchParams = useSearchParams();
   const activeSectionInUrl = searchParams.get('section') || searchParams.get('tab');
   const isModernClientWorkspace = pathname.startsWith('/clients/') && (
+    pathname.includes('/policies/') ||
     activeSectionInUrl === 'overview' ||
     activeSectionInUrl === 'personal-information' ||
     activeSectionInUrl === 'personal-info' ||

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import CrmPageContainer from '@/components/layout/CrmPageContainer';
+import HealthClientHeader from '@/components/health/HealthClientHeader';
+import CollapsibleSidebar from '@/components/common/CollapsibleSidebar';
 import UnifiedNotesManager from '@/components/notes/UnifiedNotesManager';
 import { NoteCategory } from '@/lib/notes/types';
 import { supabase } from '@/lib/supabaseClient';
@@ -2112,19 +2114,24 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
 
   return (
     <DashboardLayout>
-      <CrmPageContainer>
-        
-        {/* Navigation Breadcrumb */}
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Link href="/clients" className="hover:text-blue-600 transition-colors">Clients</Link>
-          <span>/</span>
-          <Link href={`/clients/${id}?section=policies`} className="hover:text-blue-600 transition-colors font-medium">
-            {resolvedSidebarName || 'Client Profile'}
-          </Link>
-          <span>/</span>
-          <span className="text-slate-800 font-semibold">{lob || 'Policy details'}</span>
-        </div>
+      {/* 1. CANONICAL CLIENT HEADER (Flush with top global navigation, 0 top gap) */}
+      <HealthClientHeader
+        clientId={id}
+        clientName={resolvedSidebarName || 'Client Profile'}
+        photoUrl={(client as any)?.photo_url || null}
+        lastUpdated={client?.updated_at ? formatDateMMDDYYYY(client.updated_at) : null}
+        activeSection="policies"
+        onSendEmail={() => {
+          const email = resolvedSidebarEmail !== '-' ? resolvedSidebarEmail : client?.email;
+          if (email) window.location.href = `mailto:${email}`;
+          else alert('No email address registered for this client.');
+        }}
+        onConsent={() => router.push(`/clients/${id}?section=consents`)}
+        onDeleteProfile={() => router.push(`/clients/${id}?section=overview`)}
+      />
 
+      {/* 2. MAIN WORKSPACE CONTAINER */}
+      <CrmPageContainer className="p-4 md:p-6 lg:p-8 font-sans">
         {loading ? (
           <div className="flex justify-center items-center py-20 bg-white border border-slate-100 rounded-2xl shadow-sm">
             <svg className="animate-spin h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24">
@@ -2133,242 +2140,270 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
             </svg>
           </div>
         ) : (
-          <div className="flex flex-col lg:flex-row gap-6 items-start animate-fade-in">
-            {/* Left Sidebar Summary */}
-            <aside className="w-full lg:w-80 bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 flex-shrink-0">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Client Profile</span>
-                <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">
-                  {loadingClient ? 'Loading...' : resolvedSidebarName}
-                </h2>
-              </div>
-
-              {clientError && (
-                <div className="p-3 text-xs bg-rose-50 border border-rose-100 text-rose-600 rounded-xl">
-                  {clientError}
-                </div>
-              )}
-
-              <div className="border-t border-slate-100 pt-5 space-y-4">
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Assigned Agent</span>
-                  <span className="text-sm font-semibold text-slate-800 block mt-1">
-                    {loadingClient ? 'Loading...' : getAgentDisplayName()}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email Address</span>
-                  {loadingClient ? (
-                    <span className="text-sm font-semibold text-slate-500 block mt-1">Loading...</span>
-                  ) : (
-                    <a href={`mailto:${resolvedSidebarEmail}`} className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline block mt-1 truncate">
-                      {resolvedSidebarEmail}
-                    </a>
-                  )}
-                </div>
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Phone Number</span>
-                  {loadingClient ? (
-                    <span className="text-sm font-semibold text-slate-500 block mt-1">Loading...</span>
-                  ) : (
-                    <a href={`tel:${resolvedSidebarPhone}`} className="text-sm font-semibold text-slate-800 hover:text-blue-600 block mt-1">
-                      {resolvedSidebarPhone}
-                    </a>
-                  )}
-                </div>
-                <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Address</span>
-                  <span className="text-sm font-medium text-slate-700 block mt-1 leading-relaxed">
-                    {loadingClient ? 'Loading...' : resolvedSidebarAddress}
-                  </span>
-                </div>
-              </div>
-            </aside>
-
-            {/* Right: Policy Content */}
-            <div className="flex-1 w-full space-y-6">
-            
-            {/* AREA 0: LINKED PERSONAL CLIENT (if linked) */}
-            {linkedPersonalClient && linkedPersonalClient.client && (
-              <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
-                <div className="space-y-1">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-rose-700 block">Linked Personal Client</span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h4 className="text-base font-extrabold text-slate-900">{linkedPersonalClient.client.full_name}</h4>
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white text-rose-700 border border-rose-200 shadow-2xs">
-                      {linkedPersonalClient.linked_person_role === 'co_applicant' ? 'Co-Applicant' : 'Main Applicant'}
-                    </span>
+          <div className="flex flex-col lg:flex-row items-start gap-6">
+            {/* LEFT RAIL: COLLAPSIBLE SIDEBAR */}
+            <CollapsibleSidebar title="P&C Policy">
+              {/* Client Profile Context Card */}
+              <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-2xs space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-extrabold text-sm border border-blue-200 flex-shrink-0">
+                    {(resolvedSidebarName || 'C')[0].toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">Client Profile</span>
+                    <h3 className="text-base font-extrabold text-slate-900 truncate">
+                      {loadingClient ? 'Loading...' : resolvedSidebarName}
+                    </h3>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUnlinkError(null);
-                      setIsConfirmUnlinkOpen(true);
-                    }}
-                    className="inline-flex items-center justify-center gap-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-200 text-xs font-bold px-3.5 py-2 rounded-xl transition-all"
-                  >
-                    Unlink Client
-                  </button>
-                  <Link
-                    href={`/clients/${linkedPersonalClient.personal_client_id}`}
-                    className="inline-flex items-center justify-center gap-1.5 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-md shadow-rose-500/10"
-                  >
-                    View Client Profile
-                  </Link>
+
+                <div className="border-t border-slate-100 pt-3 space-y-2.5 text-xs">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Assigned Agent</span>
+                    <span className="font-semibold text-slate-800">{getAgentDisplayName()}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Email</span>
+                    <a href={`mailto:${resolvedSidebarEmail}`} className="font-semibold text-blue-600 hover:underline truncate block">
+                      {resolvedSidebarEmail}
+                    </a>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Phone</span>
+                    <a href={`tel:${resolvedSidebarPhone}`} className="font-semibold text-slate-800 hover:text-blue-600 block">
+                      {resolvedSidebarPhone}
+                    </a>
+                  </div>
                 </div>
               </div>
-            )}
 
-            {/* AREA 1: TOP POLICY SUMMARY (Non-sticky) */}
-            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
-              {/* Row 1 */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Policy Number</span>
-                  <h1 className="text-xl font-bold text-slate-900">{policyNumber || 'Not provided'}</h1>
+              {/* Policy Selector & Navigation Back */}
+              <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-2xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Selected Policy</span>
+                  <Link
+                    href={`/clients/${id}?section=policies`}
+                    className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
+                  >
+                    <span>← All P&C Policies</span>
+                  </Link>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2.5">
-                  {/* Renewal Warning / Link if renewal exists */}
-                  {existingRenewalId ? (
-                    <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-1 rounded-xl text-xs font-semibold text-amber-800">
-                      <span>A renewal has been created for this policy</span>
-                      <Link
-                        href={`/clients/${id}/policies/${existingRenewalId}`}
-                        className="bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1 rounded-lg text-xs font-bold transition-colors shadow-2xs"
-                      >
-                        View Renewal
-                      </Link>
-                    </div>
-                  ) : (
-                    <>
-                      {/* Renew Policy Button (Active or Expired) */}
-                      {(policyStatus === 'Active' || policyStatus === 'Expired') && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRenewEffectiveDate('');
-                            setRenewExpirationDate('');
-                            setRenewPremium('');
-                            setRenewError(null);
-                            setIsRenewModalOpen(true);
-                          }}
-                          className="px-3 py-1.5 rounded-xl text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all shadow-2xs flex items-center gap-1.5"
-                        >
-                          <span>↻</span>
-                          <span>Renew Policy</span>
-                        </button>
-                      )}
-                    </>
-                  )}
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <span className="text-xs font-bold text-slate-900 block truncate">{lob || 'Property & Casualty'}</span>
+                  <span className="text-[11px] font-medium text-slate-500 block truncate">#{policyNumber || 'Draft'}</span>
+                </div>
+              </div>
 
-                  {/* Cancel Policy Button (Active or Pending) */}
-                  {(policyStatus === 'Active' || policyStatus === 'Pending') && (
+              {/* Subtab Navigation Rail */}
+              <div className="bg-white border border-slate-200/80 rounded-2xl p-2 shadow-2xs space-y-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveMenuTab('summary')}
+                  className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
+                    activeMenuTab === 'summary'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  <span>Summary</span>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveMenuTab('documents')}
+                  className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
+                    activeMenuTab === 'documents'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  <span>Documents</span>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveMenuTab('notes')}
+                  className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
+                    activeMenuTab === 'notes'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  <span>Notes</span>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveMenuTab('chronology')}
+                  className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
+                    activeMenuTab === 'chronology'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  <span>Timeline</span>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            </CollapsibleSidebar>
+
+            {/* RIGHT WORKSPACE */}
+            <main className="flex-1 w-full min-w-0 space-y-6">
+              {/* AREA 0: LINKED PERSONAL CLIENT (if linked) */}
+              {linkedPersonalClient && linkedPersonalClient.client && (
+                <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-rose-700 block">Linked Personal Client</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-base font-extrabold text-slate-900">{linkedPersonalClient.client.full_name}</h4>
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white text-rose-700 border border-rose-200 shadow-2xs">
+                        {linkedPersonalClient.linked_person_role === 'co_applicant' ? 'Co-Applicant' : 'Main Applicant'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => {
-                        setCancellationReason('Client Requested');
-                        setCancellationNotes('');
-                        setCancelError(null);
-                        setIsCancelModalOpen(true);
+                        setUnlinkError(null);
+                        setIsConfirmUnlinkOpen(true);
                       }}
+                      className="inline-flex items-center justify-center gap-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-200 text-xs font-bold px-3.5 py-2 rounded-xl transition-all"
+                    >
+                      Unlink Client
+                    </button>
+                    <Link
+                      href={`/clients/${linkedPersonalClient.personal_client_id}`}
+                      className="inline-flex items-center justify-center gap-1.5 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-md shadow-rose-500/10"
+                    >
+                      View Client Profile
+                    </Link>
+                  </div>
+                </div>
+              )}
+
+              {/* AREA 1: COMPACT POLICY RECORD HEADER CARD */}
+              <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-2xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">P&C Policy</span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                        {lob || 'Property & Casualty'}
+                      </span>
+                    </div>
+                    <h1 className="text-xl font-bold text-slate-900">#{policyNumber || 'Not assigned'}</h1>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    {/* Renewal Warning / Link */}
+                    {existingRenewalId ? (
+                      <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3 py-1 rounded-xl text-xs font-semibold text-amber-800">
+                        <span>A renewal has been created</span>
+                        <Link
+                          href={`/clients/${id}/policies/${existingRenewalId}`}
+                          className="bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1 rounded-lg text-xs font-bold transition-colors shadow-2xs"
+                        >
+                          View Renewal
+                        </Link>
+                      </div>
+                    ) : (
+                      <>
+                        {(policyStatus === 'Active' || policyStatus === 'Expired') && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRenewEffectiveDate('');
+                              setRenewExpirationDate('');
+                              setRenewPremium('');
+                              setRenewError(null);
+                              setIsRenewModalOpen(true);
+                            }}
+                            className="px-3 py-1.5 rounded-xl text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all shadow-2xs flex items-center gap-1.5"
+                          >
+                            <span>↻</span>
+                            <span>Renew Policy</span>
+                          </button>
+                        )}
+                      </>
+                    )}
+
+                    {(policyStatus === 'Active' || policyStatus === 'Pending') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCancellationReason('Client Requested');
+                          setCancellationNotes('');
+                          setCancelError(null);
+                          setIsCancelModalOpen(true);
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-all shadow-2xs flex items-center gap-1.5"
+                      >
+                        <span>✕</span>
+                        <span>Cancel Policy</span>
+                      </button>
+                    )}
+
+                    {/* Delete Policy Button */}
+                    <button
+                      type="button"
+                      onClick={handleDeletePolicy}
+                      disabled={saving}
                       className="px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition-all shadow-2xs flex items-center gap-1.5"
                     >
-                      <span>✕</span>
-                      <span>Cancel Policy</span>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      <span>Delete Policy</span>
                     </button>
-                  )}
 
-                  {/* Policy Status Badge */}
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                    policyStatus === 'Active'
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                      : policyStatus === 'Pending'
-                      ? 'bg-amber-50 text-amber-700 border-amber-100'
-                      : policyStatus === 'Cancelled'
-                      ? 'bg-rose-50 text-rose-700 border-rose-100'
-                      : 'bg-slate-50 text-slate-650 border-slate-200'
-                  }`}>
-                    {policyStatus}
-                  </span>
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                      policyStatus === 'Active'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                        : policyStatus === 'Pending'
+                        ? 'bg-amber-50 text-amber-700 border-amber-100'
+                        : policyStatus === 'Cancelled'
+                        ? 'bg-rose-50 text-rose-700 border-rose-100'
+                        : 'bg-slate-50 text-slate-650 border-slate-200'
+                    }`}>
+                      {policyStatus}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 border-t border-slate-100 pt-4 text-xs">
+                  <div>
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Writing Carrier</span>
+                    <span className="font-semibold text-slate-800 mt-0.5 block truncate">{writingCompany || '-'}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Term</span>
+                    <span className="font-semibold text-slate-800 mt-0.5 block">
+                      {calculateTermDuration(effectiveDate, expirationDate)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ownership</span>
+                    <span className="font-semibold text-slate-800 mt-0.5 block">{policyOwnershipType === 'company' ? 'Company' : 'Personal'}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Full Premium</span>
+                    <span className="font-bold text-emerald-700 mt-0.5 block">{formatCurrency(totalPremium)}</span>
+                  </div>
                 </div>
               </div>
-
-              {/* Row 2 */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 border-t border-slate-50 pt-4 text-sm">
-                <div>
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Line of Business</span>
-                  <span className="font-semibold text-slate-800 mt-1 block">{lob || '-'}</span>
-                </div>
-                <div>
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Term</span>
-                  <span className="font-semibold text-slate-800 mt-1 block">
-                    {calculateTermDuration(effectiveDate, expirationDate)}
-                  </span>
-                </div>
-                <div>
-<span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ownership Type</span>
-<span className="font-semibold text-slate-800 mt-1 block">{policyOwnershipType === 'company' ? 'Company' : 'Personal'}</span>
-</div>
-<div>
-<span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Company</span>
-                  <span className="font-semibold text-slate-800 mt-1 block">{writingCompany || '-'}</span>
-                </div>
-                <div>
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Full Premium</span>
-                  <span className="font-bold text-emerald-700 mt-1 block">{formatCurrency(totalPremium)}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* AREA 2: STICKY INTERNAL POLICY MENU */}
-            {/* Sticky offsets: 69px on mobile header, 0px on desktop header */}
-            <div className="sticky top-[69px] md:top-0 z-10 bg-white border border-slate-100 rounded-xl p-2 shadow-sm flex items-center gap-1">
-              <button
-                onClick={() => setActiveMenuTab('summary')}
-                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-                  activeMenuTab === 'summary'
-                    ? 'bg-blue-50 text-blue-600'
-                    : 'text-slate-550 hover:bg-slate-50 hover:text-slate-800'
-                }`}
-              >
-                Summary
-              </button>
-              <button
-                onClick={() => setActiveMenuTab('documents')}
-                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-                  activeMenuTab === 'documents'
-                    ? 'bg-blue-50 text-blue-600'
-                    : 'text-slate-550 hover:bg-slate-50 hover:text-slate-800'
-                }`}
-              >
-                Documents
-              </button>
-              <button
-                onClick={() => setActiveMenuTab('notes')}
-                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-                  activeMenuTab === 'notes'
-                    ? 'bg-blue-50 text-blue-600'
-                    : 'text-slate-550 hover:bg-slate-50 hover:text-slate-800'
-                }`}
-              >
-                Notes
-              </button>
-              <button
-                onClick={() => setActiveMenuTab('chronology')}
-                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-                  activeMenuTab === 'chronology'
-                    ? 'bg-blue-50 text-blue-600'
-                    : 'text-slate-550 hover:bg-slate-50 hover:text-slate-800'
-                }`}
-              >
-                Chronology
-              </button>
-            </div>
-
             {/* TAB CONTENT DETAILS */}
             {/* TAB CONTENT DETAILS */}
             {activeMenuTab === 'documents' && (
@@ -2821,32 +2856,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
               /* AREA 3: SUMMARY FORM (2-column desktop layout) */
               <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6">
                 <div className="flex items-center justify-between border-b border-slate-50 pb-4">
-                  <h3 className="text-lg font-bold text-slate-900">Summary Details</h3>
-                  <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={handleDeletePolicy}
-                        disabled={saving}
-                        className="text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
-                      >
-                        Delete Policy
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCancel}
-                      className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg transition-all"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      onClick={handleSubmit}
-                      disabled={saving}
-                      className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-all shadow-md disabled:opacity-50"
-                    >
-                      {saving ? 'Saving...' : 'Save Summary'}
-                    </button>
-                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 font-sans">Summary Details</h3>
                 </div>
 
                 {errorMsg && (
@@ -3085,13 +3095,37 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                         className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
                       />
                     </div>
+
+                    {/* Summary Form Action Bar */}
+                    <div className="col-span-1 lg:col-span-2 border-t border-slate-100 pt-4 mt-2 flex items-center justify-end gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          fetchData();
+                          setSuccessMsg(null);
+                          setErrorMsg(null);
+                        }}
+                        disabled={saving}
+                        className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all"
+                      >
+                        Cancel Changes
+                      </button>
+
+                      <button
+                        type="submit"
+                        disabled={saving}
+                        className="crm-btn-primary text-xs px-5 py-2 flex items-center gap-1.5 shadow-sm font-bold"
+                      >
+                        {saving ? 'Saving...' : 'Save Changes'}
+                      </button>
+                    </div>
                   </div>
                 </form>
               </div>
             )}
+            </main>
           </div>
-        </div>
-      )}
+        )}
       </CrmPageContainer>
       {/* Unlink Personal Client Confirmation Modal */}
       {isConfirmUnlinkOpen && linkedPersonalClient && linkedPersonalClient.client && (

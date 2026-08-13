@@ -521,22 +521,34 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
         healthPromise
       ]);
 
-      // Process General
+      // Process General & Module client_documents
       if (genRes.status === 'fulfilled' && genRes.value.data) {
         genRes.value.data.forEach((d: any) => {
+          const modType = (d.module_type || 'general').toLowerCase();
+          const sourceLabelMap: Record<string, string> = {
+            supplemental: 'Supplemental',
+            medicare: 'Medicare',
+            health: 'Health',
+            life: 'Life',
+            property_casualty: 'Property & Casualty',
+            general: 'General',
+          };
+          const resolvedLabel = sourceLabelMap[modType] || 'General';
+
           unifiedDocs.push({
             id: d.id,
-            source: 'general',
-            sourceLabel: 'General',
+            source: modType as any,
+            sourceLabel: resolvedLabel,
             clientId: d.client_id,
+            policyId: d.policy_id || undefined,
             displayName: d.display_name || d.original_filename,
             originalFilename: d.original_filename,
             storagePath: d.storage_path,
             createdAt: d.created_at,
-            documentType: d.document_type || 'General Document',
+            documentType: d.document_type || `${resolvedLabel} Document`,
             sizeBytes: d.size_bytes,
             mimeType: d.mime_type,
-            bucket: 'policy-documents',
+            bucket: d.bucket || 'client-documents',
             canDelete: true,
           });
         });
@@ -3669,11 +3681,23 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                             setLobFilter('');
                             setCompanyFilter('');
                           }}
-                          className="text-[10px] font-bold text-rose-600 hover:text-rose-800 transition-colors"
+                          className="text-[10px] font-bold text-rose-600 hover:text-rose-800 transition-colors mr-2"
                         >
                           Clear Filters
                         </button>
                       )}
+
+                      {/* Add Policy Button */}
+                      <button
+                        type="button"
+                        onClick={handleOpenAddPolicy}
+                        className="crm-btn-primary text-xs px-4 py-2 flex items-center gap-1.5 shadow-sm font-bold flex-shrink-0"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+                        </svg>
+                        <span>+ Add Policy</span>
+                      </button>
                     </div>
                   </div>
 
@@ -5257,18 +5281,31 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 );
               })()}
 
-              {activeTab === 'life' && client && (
-                client.agent_id !== currentUserId ? (
-                  <div className="bg-rose-50 border border-rose-100 rounded-2xl p-8 text-center space-y-3 font-sans">
-                    <h4 className="text-lg font-bold text-rose-800">Private Owner Module</h4>
-                    <p className="text-sm text-rose-600 font-medium">The <strong>Life</strong> module is private to the primary client owner.</p>
-                  </div>
-                ) : !isLineEnabled('life') ? (
-                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
-                    <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
-                    <p className="text-sm text-slate-300">The <strong>Life</strong> module is disabled for your agent profile.</p>
-                  </div>
-                ) : (
+              {activeTab === 'life' && client && (() => {
+                const isLifeOwner =
+                  Boolean(client.agent_id) &&
+                  Boolean(currentUserId) &&
+                  (client.agent_id === currentUserId || client.agent_id === (agentProfile as any)?.id);
+
+                if (!isLifeOwner) {
+                  return (
+                    <div className="bg-rose-50 border border-rose-100 rounded-2xl p-8 text-center space-y-3 font-sans">
+                      <h4 className="text-lg font-bold text-rose-800">Private Owner Module</h4>
+                      <p className="text-sm text-rose-600 font-medium">The <strong>Life</strong> module is private to the primary client owner.</p>
+                    </div>
+                  );
+                }
+
+                if (!isLineEnabled('life')) {
+                  return (
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-8 text-center space-y-3 font-sans">
+                      <h4 className="text-lg font-bold text-white">Module Access Restricted</h4>
+                      <p className="text-sm text-slate-300">The <strong>Life</strong> module is disabled for your agent profile.</p>
+                    </div>
+                  );
+                }
+
+                return (
                   <LifePolicyTab
                     clientId={clientId}
                     clientName={personalForm.full_name || client.full_name || 'Client Profile'}
@@ -5287,8 +5324,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                     initialSubtab={(searchParams.get('subtab') as any) || 'summary'}
                     onPoliciesChanged={() => { fetchPersonalInformation(); fetchOverviewPolicies(); }}
                   />
-                )
-              )}
+                );
+              })()}
 
               {activeTab === 'health' && client && (
                 <HealthPolicyTab

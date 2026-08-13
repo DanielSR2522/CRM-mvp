@@ -404,15 +404,35 @@ export default function DashboardPage() {
           }
         }
 
-        // 5. Days Left Filter
+        // 5. Days / Time Filter
         if (daysFilter !== 'ALL') {
           const days = p.daysRemaining;
-          if (daysFilter === '0-7' && (days < 0 || days > 7)) return false;
-          if (daysFilter === '8-15' && (days < 8 || days > 15)) return false;
-          if (daysFilter === '16-30' && (days < 16 || days > 30)) return false;
-          if (daysFilter === '31-60' && (days < 31 || days > 60)) return false;
-          if (daysFilter === '61-90' && (days < 61 || days > 90)) return false;
-          if (daysFilter === '90+' && days <= 90) return false;
+          const expDateStr = p.expiration_date; // YYYY-MM-DD
+          const todayDate = new Date(todayIso + 'T00:00:00');
+          const currentYear = todayDate.getFullYear();
+          const currentMonth = todayDate.getMonth(); // 0-indexed
+
+          if (daysFilter === '7') {
+            if (days < 0 || days > 7) return false;
+          } else if (daysFilter === '15') {
+            if (days < 0 || days > 15) return false;
+          } else if (daysFilter === '30') {
+            if (days < 0 || days > 30) return false;
+          } else if (daysFilter === '34') {
+            if (days < 0 || days > 34) return false;
+          } else if (daysFilter === '60') {
+            if (days < 0 || days > 60) return false;
+          } else if (daysFilter === 'THIS_MONTH') {
+            if (!expDateStr) return false;
+            const expD = new Date(expDateStr + 'T00:00:00');
+            if (expD.getFullYear() !== currentYear || expD.getMonth() !== currentMonth) return false;
+          } else if (daysFilter === 'NEXT_MONTH') {
+            if (!expDateStr) return false;
+            const expD = new Date(expDateStr + 'T00:00:00');
+            const targetNextMonth = (currentMonth + 1) % 12;
+            const targetYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+            if (expD.getFullYear() !== targetYear || expD.getMonth() !== targetNextMonth) return false;
+          }
         }
 
         // 6. Status Filter
@@ -698,20 +718,21 @@ export default function DashboardPage() {
               </select>
             </div>
 
-            {/* Days Left Filter Dropdown */}
+            {/* Days / Expiration Time Filter Dropdown */}
             <div className="flex-shrink-0">
               <select
                 value={daysFilter}
                 onChange={(e) => setDaysFilter(e.target.value)}
                 className="bg-white border border-[#DCE2EA] rounded-md px-2.5 py-1.5 text-xs text-[#172033] font-medium focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
               >
-                <option value="ALL">All Days Left</option>
-                <option value="0-7">0–7 days</option>
-                <option value="8-15">8–15 days</option>
-                <option value="16-30">16–30 days</option>
-                <option value="31-60">31–60 days</option>
-                <option value="61-90">61–90 days</option>
-                <option value="90+">90+ days</option>
+                <option value="ALL">All Upcoming</option>
+                <option value="7">Next 7 Days</option>
+                <option value="15">Next 15 Days</option>
+                <option value="30">Next 30 Days</option>
+                <option value="34">Next 34 Days</option>
+                <option value="60">Next 60 Days</option>
+                <option value="THIS_MONTH">This Month</option>
+                <option value="NEXT_MONTH">Next Month</option>
               </select>
             </div>
 

@@ -62,7 +62,7 @@ export default function CollapsibleSidebar({
 
   return (
     <aside className={`w-full lg:w-80 flex-shrink-0 bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 lg:sticky lg:top-6 relative transition-all ${className}`}>
-      <div className="absolute top-4 right-4 z-10">
+      <div className="absolute top-[34px] right-[34px] z-10">
         <button
           type="button"
           onClick={toggleCollapse}
