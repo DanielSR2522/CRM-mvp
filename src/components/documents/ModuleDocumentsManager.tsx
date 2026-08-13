@@ -68,17 +68,36 @@ export default function ModuleDocumentsManager({
     setUploading(true);
     setError(null);
 
+    let storagePath: string | null = null;
+
     try {
       const { data: userData } = await supabase.auth.getUser();
-      const currentUserId = userData?.user?.id;
-      if (!currentUserId) throw new Error('Not authenticated.');
+      let currentUserId = userData?.user?.id;
+
+      if (!currentUserId) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        currentUserId = sessionData?.session?.user?.id;
+      }
+
+      if (!currentUserId && clientId) {
+        const { data: clientData } = await supabase
+          .from('clients')
+          .select('agent_id')
+          .eq('id', clientId)
+          .single();
+        currentUserId = clientData?.agent_id || null;
+      }
+
+      if (!currentUserId) {
+        throw new Error('Authenticated agent profile is required to upload documents.');
+      }
 
       const fileExt = selectedFile.name.split('.').pop() || 'bin';
-      const storagePath = `${clientId}/${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
+      storagePath = `${clientId}/${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
 
-      // Upload file to Supabase storage bucket 'client-documents'
+      // Upload file to canonical Supabase storage bucket 'crm-documents'
       const { error: storageErr } = await supabase.storage
-        .from('client-documents')
+        .from('crm-documents')
         .upload(storagePath, selectedFile);
 
       if (storageErr) throw storageErr;
@@ -103,7 +122,13 @@ export default function ModuleDocumentsManager({
         .from('client_documents')
         .insert(docPayload);
 
-      if (dbErr) throw dbErr;
+      if (dbErr) {
+        // Rollback storage file on DB error to prevent orphaned objects
+        if (storagePath) {
+          await supabase.storage.from('crm-documents').remove([storagePath]);
+        }
+        throw dbErr;
+      }
 
       setDisplayName('');
       setSelectedFile(null);
@@ -120,8 +145,8 @@ export default function ModuleDocumentsManager({
     if (!confirm(`Are you sure you want to delete "${doc.display_name}"?`)) return;
     setDeletingId(doc.id);
     try {
-      // Remove from storage
-      await supabase.storage.from('client-documents').remove([doc.storage_path]);
+      // Remove from storage bucket 'crm-documents'
+      await supabase.storage.from('crm-documents').remove([doc.storage_path]);
       // Delete record
       const { error: delErr } = await supabase.from('client_documents').delete().eq('id', doc.id);
       if (delErr) throw delErr;
@@ -137,7 +162,7 @@ export default function ModuleDocumentsManager({
   const handleDownload = async (doc: any) => {
     try {
       const { data, error: urlErr } = await supabase.storage
-        .from('client-documents')
+        .from('crm-documents')
         .createSignedUrl(doc.storage_path, 60);
 
       if (urlErr) throw urlErr;
