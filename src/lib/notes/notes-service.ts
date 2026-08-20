@@ -39,42 +39,48 @@ async function resolveNoteProfiles(creatorIds: string[]): Promise<Record<string,
 }
 
 /**
- * Helper to resolve policies for a batch of policy_id UUIDs
+ * Helper to resolve policies for a batch of policy_id and health_policy_id UUIDs
  */
-async function resolveNotePolicies(policyIds: string[]): Promise<Record<string, { id: string; policy_number: string | null; policy_type: string | null; writing_company: string | null; company_name: string | null }>> {
-  if (policyIds.length === 0) return {};
-
+async function resolveNotePolicies(
+  policyIds: string[],
+  healthPolicyIds: string[] = []
+): Promise<Record<string, { id: string; policy_number: string | null; policy_type: string | null; writing_company: string | null; company_name: string | null; isHealth?: boolean }>> {
   const policyMap: Record<string, any> = {};
 
   try {
-    // 1. Check P&C / Life policies table
-    const { data: pcPolicies } = await supabase
-      .from('policies')
-      .select('id, policy_number, policy_type, writing_company, company_name')
-      .in('id', policyIds);
+    // 1. Check P&C / Life / Supplemental policies table
+    if (policyIds.length > 0) {
+      const { data: pcPolicies } = await supabase
+        .from('policies')
+        .select('id, policy_number, policy_type, writing_company, company_name')
+        .in('id', policyIds);
 
-    if (pcPolicies) {
-      pcPolicies.forEach((p: any) => {
-        policyMap[p.id] = p;
-      });
+      if (pcPolicies) {
+        pcPolicies.forEach((p: any) => {
+          policyMap[p.id] = {
+            ...p,
+            isHealth: false
+          };
+        });
+      }
     }
 
-    // 2. Check remaining IDs in health_policies
-    const missingIds = policyIds.filter(id => !policyMap[id]);
-    if (missingIds.length > 0) {
+    // 2. Check health_policies table
+    if (healthPolicyIds.length > 0) {
       const { data: healthPolicies } = await supabase
         .from('health_policies')
-        .select('id, plan_id, plan_name, company_2026')
-        .in('id', missingIds);
+        .select('id, plan_id, plan_name, company_2026, application_number')
+        .in('id', healthPolicyIds);
 
       if (healthPolicies) {
         healthPolicies.forEach((hp: any) => {
           policyMap[hp.id] = {
             id: hp.id,
-            policy_number: hp.plan_id || null,
+            policy_number: hp.plan_id || hp.application_number || null,
             policy_type: hp.plan_name || 'Health Plan',
-            writing_company: hp.company_2026 || null,
-            company_name: hp.company_2026 || null
+            writing_company: hp.company_2026 || 'Marketplace Health',
+            company_name: hp.company_2026 || 'Marketplace Health',
+            isHealth: true
           };
         });
       }
@@ -87,12 +93,13 @@ async function resolveNotePolicies(policyIds: string[]): Promise<Record<string, 
 }
 
 /**
- * Fetch all client notes for a given client, optionally filtered by category or policyId.
+ * Fetch all client notes for a given client, optionally filtered by category, policyId, or healthPolicyId.
  */
 export async function fetchClientNotes(
   clientId: string,
   categoryFilter?: NoteCategory | 'all' | null,
-  policyIdFilter?: string | null
+  policyIdFilter?: string | null,
+  healthPolicyIdFilter?: string | null
 ): Promise<UnifiedNote[]> {
   try {
     let query = supabase
@@ -105,7 +112,9 @@ export async function fetchClientNotes(
       query = query.eq('category', categoryFilter);
     }
 
-    if (policyIdFilter) {
+    if (healthPolicyIdFilter) {
+      query = query.eq('health_policy_id', healthPolicyIdFilter);
+    } else if (policyIdFilter) {
       query = query.eq('policy_id', policyIdFilter);
     }
 
@@ -113,7 +122,6 @@ export async function fetchClientNotes(
 
     if (error) {
       console.error('Error fetching client_notes:', error);
-      // Fallback query if client_notes table doesn't exist yet
       return fetchFallbackPolicyNotes(clientId, categoryFilter, policyIdFilter);
     }
 
@@ -135,17 +143,21 @@ export async function fetchClientNotes(
 
     const creatorIds = Array.from(new Set(accessibleNotes.map(n => n.created_by).filter(Boolean)));
     const policyIds = Array.from(new Set(accessibleNotes.map(n => n.policy_id).filter(Boolean)));
+    const healthPolicyIds = Array.from(new Set(accessibleNotes.map(n => n.health_policy_id).filter(Boolean)));
 
     const [profileMap, policyMap] = await Promise.all([
       resolveNoteProfiles(creatorIds),
-      resolveNotePolicies(policyIds)
+      resolveNotePolicies(policyIds, healthPolicyIds)
     ]);
 
-    return accessibleNotes.map(note => ({
-      ...note,
-      profiles: note.created_by ? profileMap[note.created_by] || null : null,
-      policies: note.policy_id ? policyMap[note.policy_id] || null : null
-    }));
+    return accessibleNotes.map(note => {
+      const activePolicyId = note.health_policy_id || note.policy_id;
+      return {
+        ...note,
+        profiles: note.created_by ? profileMap[note.created_by] || null : null,
+        policies: activePolicyId ? policyMap[activePolicyId] || null : null
+      };
+    });
   } catch (err) {
     console.error('Unexpected error in fetchClientNotes:', err);
     return fetchFallbackPolicyNotes(clientId, categoryFilter, policyIdFilter);
@@ -178,7 +190,7 @@ async function fetchFallbackPolicyNotes(
 
     const [profileMap, policyMap] = await Promise.all([
       resolveNoteProfiles(authorIds),
-      resolveNotePolicies(policyIds)
+      resolveNotePolicies(policyIds, [])
     ]);
 
     return data
@@ -194,6 +206,7 @@ async function fetchFallbackPolicyNotes(
           client_id: clientId,
           category: cat,
           policy_id: item.policy_id,
+          health_policy_id: null,
           content: item.content,
           created_by: item.author_id,
           created_at: item.created_at,
@@ -276,19 +289,48 @@ export async function getAttachmentSignedUrl(storagePath: string): Promise<strin
 }
 
 /**
- * Create a new unified note record.
+ * Create a new unified note record with client ownership security check.
  */
 export async function createClientNote(payload: CreateNotePayload): Promise<UnifiedNote> {
+  // Security ownership validation
+  if (payload.policyId) {
+    const { data: pCheck, error: pErr } = await supabase
+      .from('policies')
+      .select('client_id')
+      .eq('id', payload.policyId)
+      .single();
+
+    if (pErr || !pCheck || pCheck.client_id !== payload.clientId) {
+      throw new Error('Security error: Selected policy does not belong to this client.');
+    }
+  }
+
+  if (payload.healthPolicyId) {
+    const { data: hCheck, error: hErr } = await supabase
+      .from('health_policies')
+      .select('client_id')
+      .eq('id', payload.healthPolicyId)
+      .single();
+
+    if (hErr || !hCheck || hCheck.client_id !== payload.clientId) {
+      throw new Error('Security error: Selected Health policy does not belong to this client.');
+    }
+  }
+
+  // Enforce exclusivity: policy_id OR health_policy_id, never both
+  const insertPayload = {
+    client_id: payload.clientId,
+    category: payload.category,
+    policy_id: payload.policyId ? payload.policyId : null,
+    health_policy_id: payload.healthPolicyId ? payload.healthPolicyId : null,
+    title: payload.title || null,
+    content: payload.content.trim(),
+    created_by: payload.createdBy || null
+  };
+
   const { data, error } = await supabase
     .from('client_notes')
-    .insert({
-      client_id: payload.clientId,
-      category: payload.category,
-      policy_id: payload.policyId || null,
-      title: payload.title || null,
-      content: payload.content.trim(),
-      created_by: payload.createdBy || null
-    })
+    .insert(insertPayload)
     .select('*')
     .single();
 
@@ -298,31 +340,32 @@ export async function createClientNote(payload: CreateNotePayload): Promise<Unif
 
   const rawNote = data as any;
 
-  const creatorIds = rawNote.created_by ? [rawNote.created_by] : [];
-  const policyIds = rawNote.policy_id ? [rawNote.policy_id] : [];
+  // Resolve author profile & policy info
+  const creatorId = rawNote.created_by ? [rawNote.created_by] : [];
+  const policyId = rawNote.policy_id ? [rawNote.policy_id] : [];
+  const healthPolicyId = rawNote.health_policy_id ? [rawNote.health_policy_id] : [];
 
   const [profileMap, policyMap] = await Promise.all([
-    resolveNoteProfiles(creatorIds),
-    resolveNotePolicies(policyIds)
+    resolveNoteProfiles(creatorId),
+    resolveNotePolicies(policyId, healthPolicyId)
   ]);
+
+  const activePolicyId = rawNote.health_policy_id || rawNote.policy_id;
 
   return {
     ...rawNote,
     profiles: rawNote.created_by ? profileMap[rawNote.created_by] || null : null,
-    policies: rawNote.policy_id ? policyMap[rawNote.policy_id] || null : null
-  } as UnifiedNote;
+    policies: activePolicyId ? policyMap[activePolicyId] || null : null
+  };
 }
 
 /**
- * Update an existing note record.
+ * Update an existing note content.
  */
 export async function updateClientNote(noteId: string, content: string): Promise<void> {
   const { error } = await supabase
     .from('client_notes')
-    .update({
-      content: content.trim(),
-      updated_at: new Date().toISOString()
-    })
+    .update({ content: content.trim(), updated_at: new Date().toISOString() })
     .eq('id', noteId);
 
   if (error) {
@@ -331,20 +374,9 @@ export async function updateClientNote(noteId: string, content: string): Promise
 }
 
 /**
- * Delete a note record and cascade its attachments.
+ * Delete a note and its attached files.
  */
 export async function deleteClientNote(noteId: string): Promise<void> {
-  // Fetch attachments to remove files from storage
-  const { data: attachments } = await supabase
-    .from('client_note_attachments')
-    .select('storage_path')
-    .eq('note_id', noteId);
-
-  if (attachments && attachments.length > 0) {
-    const paths = attachments.map(a => a.storage_path);
-    await supabase.storage.from('policy-documents').remove(paths);
-  }
-
   const { error } = await supabase
     .from('client_notes')
     .delete()
@@ -356,56 +388,54 @@ export async function deleteClientNote(noteId: string): Promise<void> {
 }
 
 /**
- * Upload pending attachments for a note to Storage and insert database records.
+ * Upload attachments for a created note.
  */
 export async function uploadNoteAttachments(
   noteId: string,
   clientId: string,
-  userId: string | null,
-  attachments: PendingAttachment[]
+  uploadedBy: string | null,
+  pendingList: PendingAttachment[]
 ): Promise<NoteAttachment[]> {
-  const createdAttachments: NoteAttachment[] = [];
+  const uploaded: NoteAttachment[] = [];
 
-  for (const att of attachments) {
-    const attachmentId = crypto.randomUUID();
-    const storagePath = `${userId || 'anonymous'}/${clientId}/notes/${noteId}/${attachmentId}/${att.file.name}`;
+  for (const pending of pendingList) {
+    const file = pending.file;
+    const fileExt = file.name.split('.').pop();
+    const cleanFileName = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+    const storagePath = `${clientId}/notes/${noteId}/${cleanFileName}`;
 
-    // 1. Upload to Supabase Storage
-    const { error: uploadErr } = await supabase.storage
+    // Upload to policy-documents storage bucket
+    const { error: uploadError } = await supabase.storage
       .from('policy-documents')
-      .upload(storagePath, att.file, { contentType: att.file.type, upsert: false });
+      .upload(storagePath, file, { contentType: file.type, upsert: true });
 
-    if (uploadErr) {
-      console.error(`Failed to upload ${att.displayName}:`, uploadErr);
+    if (uploadError) {
+      console.error('Failed to upload note attachment file:', uploadError);
       continue;
     }
 
-    // 2. Insert metadata
-    const { data: dbData, error: metaErr } = await supabase
+    // Insert database attachment metadata record
+    const { data: dbAtt, error: dbErr } = await supabase
       .from('client_note_attachments')
       .insert({
-        id: attachmentId,
         note_id: noteId,
         client_id: clientId,
-        uploaded_by: userId,
-        display_name: att.displayName,
-        original_filename: att.file.name,
+        uploaded_by: uploadedBy,
+        display_name: pending.displayName || file.name,
+        original_filename: file.name,
         storage_path: storagePath,
-        mime_type: att.file.type,
-        size_bytes: att.file.size
+        mime_type: file.type,
+        size_bytes: file.size
       })
       .select('*')
       .single();
 
-    if (metaErr) {
-      console.error('Metadata insert failed, rolling back storage object:', metaErr);
-      await supabase.storage.from('policy-documents').remove([storagePath]);
-      continue;
+    if (dbErr) {
+      console.error('Failed to save client_note_attachment DB record:', dbErr);
+    } else if (dbAtt) {
+      uploaded.push(dbAtt as NoteAttachment);
     }
-
-    createdAttachments.push(dbData as NoteAttachment);
   }
 
-  return createdAttachments;
+  return uploaded;
 }
-

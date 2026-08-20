@@ -18,7 +18,7 @@ export default function HealthNotes({
     <UnifiedNotesManager
       clientId={clientId}
       inferredCategory="health"
-      policyId={healthPolicyId}
+      healthPolicyId={healthPolicyId}
       currentUserId={currentUserId}
       addToast={addToast}
     />

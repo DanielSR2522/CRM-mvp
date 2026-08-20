@@ -13,6 +13,7 @@ import MedicareTab from '@/components/medicare/MedicareTab';
 import SupplementalTab from '@/components/supplemental/SupplementalTab';
 import LifePolicyTab from '@/components/life/LifePolicyTab';
 import UnifiedNotesManager from '@/components/notes/UnifiedNotesManager';
+import ModuleDocumentsManager from '@/components/documents/ModuleDocumentsManager';
 import { getAssignedAgentDisplay } from '@/lib/auth/agentDisplay';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
@@ -1025,7 +1026,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     // 2. Health policies (only if direct client owner)
     if (!client || client.agent_id === currentUserId) {
       (healthPoliciesOverview || []).forEach((h: any) => {
-        if (h.active === true) {
+        if (h.active === true && h.policy_status === 'Active') {
           const effectiveAddress = resolvePolicyAddress(
             null,
             residenceInfo,
@@ -4657,366 +4658,54 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
               )}
 
+              {/* UNIFIED CRM DOCUMENTS CENTER */}
               {activeTab === 'documents' && (
-                <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 font-sans">
-                  <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-4 gap-3">
-                    <div>
-                      <h3 className="text-lg font-extrabold text-slate-900 font-sans">Unified Document Center</h3>
-                      <p className="text-xs text-slate-500 mt-1 font-sans">View and manage all general, policy, life, and health documents for this client.</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setClientDocDisplayName('');
-                        setClientDocDescription('');
-                        setClientDocType('Identification');
-                        setClientDocFile(null);
-                        setClientDocError(null);
-                        setIsClientDocModalOpen(true);
-                      }}
-                      className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 font-sans"
-                    >
-                      <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                      </svg>
-                      Upload General Document
-                    </button>
-                  </div>
-
-                  {/* Category Filter Chips */}
-                  <div className="flex flex-wrap items-center gap-2 pt-1 font-sans">
-                    <button
-                      type="button"
-                      onClick={() => setDocFilterCategory('all')}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                        docFilterCategory === 'all'
-                          ? 'bg-slate-900 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      All ({clientDocsList.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDocFilterCategory('general')}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                        docFilterCategory === 'general'
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      General ({clientDocsList.filter((d) => d.source === 'general').length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDocFilterCategory('property_casualty')}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                        docFilterCategory === 'property_casualty'
-                          ? 'bg-amber-600 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      Property & Casualty ({clientDocsList.filter((d) => d.source === 'property_casualty').length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDocFilterCategory('life')}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                        docFilterCategory === 'life'
-                          ? 'bg-indigo-600 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      Life ({clientDocsList.filter((d) => d.source === 'life').length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDocFilterCategory('health')}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                        docFilterCategory === 'health'
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      Health ({clientDocsList.filter((d) => d.source === 'health').length})
-                    </button>
-                  </div>
-
-                  {/* Client Documents List */}
-                  {clientDocsLoading ? (
-                    <div className="text-center py-12 text-xs text-slate-400 font-sans">Loading unified documents...</div>
-                  ) : clientDocsList.length === 0 ? (
-                    <div className="text-center py-12 px-6 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3">
-                      <svg className="w-10 h-10 text-slate-300 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 13h6m-3-3v6m-9 1V4a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-                      </svg>
-                      <p className="text-xs font-bold text-slate-600 font-sans">No documents uploaded for this client yet.</p>
-                      <button
-                        onClick={() => {
-                          setClientDocDisplayName('');
-                          setClientDocDescription('');
-                          setClientDocType('Identification');
-                          setClientDocFile(null);
-                          setClientDocError(null);
-                          setIsClientDocModalOpen(true);
-                        }}
-                        className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-sm font-sans"
-                      >
-                        Upload General Document
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-100">
-                      {clientDocsList
-                        .filter((doc) => docFilterCategory === 'all' || doc.source === docFilterCategory)
-                        .map((doc) => (
-                          <div key={`${doc.source}-${doc.id}`} className="py-3.5 flex items-center justify-between gap-4">
-                            <div className="min-w-0 flex-1 flex items-start gap-3">
-                              <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 text-slate-500 mt-0.5 flex-shrink-0">
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                </svg>
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <h5 className="font-bold text-slate-900 text-sm font-sans truncate">{doc.displayName}</h5>
-                                  <span
-                                    className={`px-2 py-0.5 text-[10px] font-extrabold rounded-full tracking-wide uppercase font-sans ${
-                                      doc.source === 'general'
-                                        ? 'bg-slate-100 text-slate-700 border border-slate-200'
-                                        : doc.source === 'property_casualty'
-                                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                        : doc.source === 'life'
-                                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                    }`}
-                                  >
-                                    {doc.sourceLabel}
-                                  </span>
-                                </div>
-                                <p className="text-xs text-slate-400 mt-0.5 font-sans">
-                                  {doc.originalFilename} • {isoDateToMMDDYYYY(doc.createdAt)}
-                                  {doc.sizeBytes ? ` • ${(doc.sizeBytes / 1024).toFixed(1)} KB` : ''}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handlePreviewUnifiedDoc(doc)}
-                                className="text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors font-sans"
-                              >
-                                Preview
-                              </button>
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  try {
-                                    const { data } = await supabase.storage.from(doc.bucket).createSignedUrl(doc.storagePath, 3600);
-                                    if (data?.signedUrl) window.open(data.signedUrl, '_blank');
-                                  } catch (err: any) {
-                                    alert(`Failed to download document: ${err.message || err}`);
-                                  }
-                                }}
-                                className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors font-sans"
-                              >
-                                Download
-                              </button>
-                              {doc.canDelete && (
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    if (!confirm(`Are you sure you want to delete "${doc.displayName}"?`)) return;
-                                    try {
-                                      const { error: storageErr } = await supabase.storage.from(doc.bucket).remove([doc.storagePath]);
-                                      if (storageErr) console.warn('Storage deletion warning:', storageErr);
-
-                                      if (doc.source === 'general') {
-                                        await supabase.from('client_documents').delete().eq('id', doc.id);
-                                      } else if (doc.source === 'property_casualty') {
-                                        await supabase.from('policy_documents').delete().eq('id', doc.id);
-                                      } else if (doc.source === 'life') {
-                                        await supabase.from('life_policy_documents').delete().eq('id', doc.id);
-                                      } else if (doc.source === 'health') {
-                                        await supabase.from('health_policy_documents').delete().eq('id', doc.id);
-                                      }
-
-                                      loadClientDocuments();
-                                    } catch (err: any) {
-                                      alert(`Failed to delete document: ${err.message || err}`);
-                                    }
-                                  }}
-                                  className="text-xs font-bold text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-colors font-sans"
-                                >
-                                  Delete
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  )}
-
-                  {/* Upload Modal Dialog */}
-                  {isClientDocModalOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fadeIn">
-                      <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                          <h3 className="text-base font-extrabold text-slate-900 font-sans">Upload New Client Document</h3>
-                          <button
-                            type="button"
-                            onClick={() => setIsClientDocModalOpen(false)}
-                            disabled={clientDocUploading}
-                            className="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition-colors"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-
-                        {clientDocError && (
-                          <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-600 font-medium font-sans">
-                            {clientDocError}
-                          </div>
-                        )}
-
-                        <form
-                          onSubmit={async (e) => {
-                            e.preventDefault();
-                            if (!clientDocFile) return;
-                            try {
-                              setClientDocUploading(true);
-                              setClientDocError(null);
-                              const { data: { user } } = await supabase.auth.getUser();
-                              if (!user) throw new Error('Not authenticated');
-
-                              const cleanName = clientDocFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-                              const storagePath = `${user.id}/clients/${clientId}/${Date.now()}-${cleanName}`;
-
-                              const { error: uploadErr } = await supabase.storage
-                                .from('policy-documents')
-                                .upload(storagePath, clientDocFile, { upsert: false });
-
-                              if (uploadErr) throw uploadErr;
-
-                              const docTitle = clientDocDisplayName.trim() || clientDocFile.name;
-                              await supabase
-                                .from('client_documents')
-                                .insert({
-                                  client_id: clientId,
-                                  agent_id: user.id,
-                                  display_name: docTitle,
-                                  document_type: clientDocType,
-                                  description: clientDocDescription.trim() || null,
-                                  original_filename: clientDocFile.name,
-                                  storage_path: storagePath,
-                                  mime_type: clientDocFile.type || null,
-                                  size_bytes: clientDocFile.size,
-                                });
-
-                              setClientDocDisplayName('');
-                              setClientDocDescription('');
-                              setClientDocFile(null);
-                              setIsClientDocModalOpen(false);
-                              loadClientDocuments();
-                            } catch (err: any) {
-                              console.error('Upload error:', err);
-                              setClientDocError(err?.message || 'Failed to upload document.');
-                            } finally {
-                              setClientDocUploading(false);
-                            }
-                          }}
-                          className="space-y-4"
-                        >
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-sans">
-                            <div>
-                              <label className="block font-bold text-slate-700 mb-1">Display Name</label>
-                              <input
-                                type="text"
-                                value={clientDocDisplayName}
-                                onChange={(e) => setClientDocDisplayName(e.target.value)}
-                                placeholder="e.g. Drivers License"
-                                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 font-sans"
-                              />
-                            </div>
-                            <div>
-                              <label className="block font-bold text-slate-700 mb-1">Document Type</label>
-                              <select
-                                value={clientDocType}
-                                onChange={(e) => setClientDocType(e.target.value)}
-                                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 font-sans"
-                              >
-                                <option value="Identification">Identification</option>
-                                <option value="Application">Application</option>
-                                <option value="Proof of Income">Proof of Income</option>
-                                <option value="Correspondence">Correspondence</option>
-                                <option value="Other">Other</option>
-                              </select>
-                            </div>
-                          </div>
-
-                          <div className="font-sans">
-                            <label className="block text-xs font-bold text-slate-700 mb-1">Description (Optional)</label>
-                            <textarea
-                              rows={2}
-                              value={clientDocDescription}
-                              onChange={(e) => setClientDocDescription(e.target.value)}
-                              placeholder="Add context or notes..."
-                              className="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-800 outline-none focus:border-blue-500 font-sans"
-                            />
-                          </div>
-
-                          <div>
-                            <FileDropzone
-                              label="Drag files here or click to select"
-                              multiple={false}
-                              maxSizeBytes={20 * 1024 * 1024}
-                              disabled={clientDocUploading}
-                              selectedFiles={clientDocFile ? [clientDocFile] : []}
-                              onFilesSelected={(files) => {
-                                if (files.length > 0) {
-                                  setClientDocFile(files[0]);
-                                  if (!clientDocDisplayName) {
-                                    setClientDocDisplayName(files[0].name.replace(/\.[^/.]+$/, ''));
-                                  }
-                                }
-                              }}
-                              onRemoveFile={() => setClientDocFile(null)}
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 font-sans">
-                            <button
-                              type="button"
-                              disabled={clientDocUploading}
-                              onClick={() => {
-                                setIsClientDocModalOpen(false);
-                                setClientDocFile(null);
-                              }}
-                              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="submit"
-                              disabled={clientDocUploading || !clientDocFile}
-                              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow transition-all disabled:opacity-50"
-                            >
-                              {clientDocUploading ? 'Uploading...' : 'Upload Document'}
-                            </button>
-                          </div>
-                        </form>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <ModuleDocumentsManager
+                  clientId={clientId}
+                  moduleType="all"
+                  policiesList={[
+                    ...(policies || []).map((p: any) => ({
+                      id: p.id,
+                      isHealth: false,
+                      policy_type: p.policy_type || 'P&C Policy',
+                      policy_number: p.policy_number || null,
+                      writing_company: p.writing_company || p.company_name || null,
+                      company_name: p.writing_company || p.company_name || null
+                    })),
+                    ...(healthPoliciesOverview || []).map((h: any) => ({
+                      id: h.id,
+                      isHealth: true,
+                      policy_type: h.plan_name || 'Health Plan',
+                      policy_number: h.plan_id || h.application_number || null,
+                      writing_company: h.company_2026 || 'Marketplace Health',
+                      company_name: h.company_2026 || 'Marketplace Health'
+                    }))
+                  ]}
+                />
               )}
 
               {/* UNIFIED CRM NOTES CENTER */}
               {activeTab === 'notes' && (
                 <UnifiedNotesManager
                   clientId={clientId}
-                  policiesList={policies}
+                  policiesList={[
+                    ...(policies || []).map((p: any) => ({
+                      id: p.id,
+                      isHealth: false,
+                      policy_type: p.policy_type || 'P&C Policy',
+                      policy_number: p.policy_number || null,
+                      writing_company: p.writing_company || p.company_name || null,
+                      company_name: p.writing_company || p.company_name || null
+                    })),
+                    ...(healthPoliciesOverview || []).map((h: any) => ({
+                      id: h.id,
+                      isHealth: true,
+                      policy_type: h.plan_name || 'Health Plan',
+                      policy_number: h.plan_id || h.application_number || null,
+                      writing_company: h.company_2026 || 'Marketplace Health',
+                      company_name: h.company_2026 || 'Marketplace Health'
+                    }))
+                  ]}
                   currentUserId={currentUserId}
                 />
               )}

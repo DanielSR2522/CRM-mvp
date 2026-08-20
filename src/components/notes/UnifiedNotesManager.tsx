@@ -21,7 +21,8 @@ import {
 interface UnifiedNotesManagerProps {
   clientId: string;
   inferredCategory?: NoteCategory | null; // If null, central Client > Notes mode with filters & mandatory category selector
-  policyId?: string | null; // If provided, locks creation to specific policy
+  policyId?: string | null; // If provided, locks creation to specific P&C/Life/Supp policy
+  healthPolicyId?: string | null; // If provided, locks creation to specific Health policy
   policiesList?: AssociatedPolicy[]; // Available policies for client dropdown
   currentUserId?: string | null;
   addToast?: (toast: { title: string; description: string; type: 'success' | 'error' | 'warning' }) => void;
@@ -31,6 +32,7 @@ export default function UnifiedNotesManager({
   clientId,
   inferredCategory = null,
   policyId = null,
+  healthPolicyId = null,
   policiesList = [],
   currentUserId = null,
   addToast
@@ -47,7 +49,7 @@ export default function UnifiedNotesManager({
   const [selectedCategory, setSelectedCategory] = useState<NoteCategory | ''>(
     inferredCategory || ''
   );
-  const [selectedPolicyId, setSelectedPolicyId] = useState<string>(policyId || '');
+  const [selectedPolicyId, setSelectedPolicyId] = useState<string>(policyId || healthPolicyId || '');
   const [noteTitle, setNoteTitle] = useState('');
   const [newNoteContent, setNewNoteContent] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -73,8 +75,25 @@ export default function UnifiedNotesManager({
   useEffect(() => {
     if (policyId) {
       setSelectedPolicyId(policyId);
+    } else if (healthPolicyId) {
+      setSelectedPolicyId(healthPolicyId);
     }
-  }, [policyId]);
+  }, [policyId, healthPolicyId]);
+
+  // Filter policies dropdown based on selected category if in Client Notes mode
+  const filteredPoliciesForDropdown = React.useMemo(() => {
+    if (!selectedCategory) return policiesList;
+    return policiesList.filter(p => {
+      if (selectedCategory === 'health') return p.isHealth === true;
+      if (p.isHealth === true) return false;
+      if (!p.policy_type) return true;
+      const typeLower = p.policy_type.toLowerCase();
+      if (selectedCategory === 'life') return typeLower.includes('life');
+      if (selectedCategory === 'supplemental') return typeLower.includes('supplemental') || typeLower.includes('accident') || typeLower.includes('critical');
+      if (selectedCategory === 'medicare') return typeLower.includes('medicare') || typeLower.includes('part d') || typeLower.includes('advantage') || typeLower.includes('medigap') || typeLower.includes('part c');
+      return true;
+    });
+  }, [selectedCategory, policiesList]);
 
   // Load Notes & Attachments
   const loadNotes = useCallback(async () => {
@@ -83,7 +102,7 @@ export default function UnifiedNotesManager({
       setError(null);
 
       const targetFilter = inferredCategory || (activeCategoryFilter === 'all' ? null : activeCategoryFilter);
-      const fetchedNotes = await fetchClientNotes(clientId, targetFilter, policyId);
+      const fetchedNotes = await fetchClientNotes(clientId, targetFilter, policyId, healthPolicyId);
       setNotes(fetchedNotes);
 
       // Fetch attachments
@@ -98,84 +117,69 @@ export default function UnifiedNotesManager({
           const atts = updatedAttMap[nid];
           for (let i = 0; i < atts.length; i++) {
             if (atts[i].mime_type.startsWith('image/')) {
-              const signed = await getAttachmentSignedUrl(atts[i].storage_path);
-              if (signed) atts[i].signedUrl = signed;
+              const url = await getAttachmentSignedUrl(atts[i].storage_path);
+              if (url) atts[i].signedUrl = url;
             }
           }
         }
         setAttachmentsMap(updatedAttMap);
-      } else {
-        setAttachmentsMap({});
       }
     } catch (err: any) {
-      console.error('Error loading unified notes:', err);
-      setError(err?.message || 'Failed to load notes.');
+      console.error('Error loading notes:', err);
+      setError(err?.message || 'Failed to load client notes.');
     } finally {
       setLoading(false);
     }
-  }, [clientId, inferredCategory, activeCategoryFilter, policyId]);
+  }, [clientId, inferredCategory, activeCategoryFilter, policyId, healthPolicyId]);
 
   useEffect(() => {
     loadNotes();
   }, [loadNotes]);
 
-  // Intercept paste event for Ctrl+V image attachments
+  // Handle Clipboard Paste (Ctrl+V) for screenshots
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
 
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/webp'];
-    const maxSize = 10 * 1024 * 1024; // 10 MB
-
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      if (item.kind === 'file' && allowedTypes.includes(item.type)) {
-        e.preventDefault();
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
         const file = item.getAsFile();
-        if (!file) continue;
+        if (file) {
+          e.preventDefault();
+          const previewUrl = URL.createObjectURL(file);
+          const ext = file.type.split('/')[1] || 'png';
+          const displayName = `Pasted_Screenshot_${Date.now()}.${ext}`;
 
-        if (file.size > maxSize) {
-          alert(`Image "${file.name}" exceeds 10 MB limit.`);
-          continue;
+          setPendingAttachments(prev => [
+            ...prev,
+            { file, previewUrl, displayName }
+          ]);
         }
-
-        const previewUrl = URL.createObjectURL(file);
-        const ext = file.type.split('/')[1] || 'png';
-        const displayName = `screenshot_${Date.now()}.${ext}`;
-
-        setPendingAttachments(prev => [...prev, { file, previewUrl, displayName }]);
       }
     }
   }, []);
 
-  // File browser attachment select
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
+  // Handle File Input Select
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const filesArray = Array.from(e.target.files);
 
-    const maxSize = 15 * 1024 * 1024; // 15 MB
-    const newPending: PendingAttachment[] = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (file.size > maxSize) {
-        alert(`File "${file.name}" exceeds 15 MB limit.`);
-        continue;
-      }
-      const previewUrl = URL.createObjectURL(file);
-      newPending.push({ file, previewUrl, displayName: file.name });
-    }
+    const newPending: PendingAttachment[] = filesArray.map(file => ({
+      file,
+      previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
+      displayName: file.name
+    }));
 
     setPendingAttachments(prev => [...prev, ...newPending]);
-    e.target.value = '';
-  }, []);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   const removePendingAttachment = (index: number) => {
     setPendingAttachments(prev => {
-      const updated = [...prev];
-      URL.revokeObjectURL(updated[index].previewUrl);
-      updated.splice(index, 1);
-      return updated;
+      const target = prev[index];
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((_, i) => i !== index);
     });
   };
 
@@ -185,7 +189,7 @@ export default function UnifiedNotesManager({
     const finalCategory = inferredCategory || selectedCategory;
 
     if (!finalCategory) {
-      alert('Please select a category (Health, Life, or Property & Casualty).');
+      alert('Please select a category (Health, Life, Medicare, Supplemental, or Property & Casualty).');
       return;
     }
 
@@ -197,11 +201,27 @@ export default function UnifiedNotesManager({
     try {
       setPostingNote(true);
 
+      // Determine policy IDs
+      let targetPolicyId: string | null = policyId || null;
+      let targetHealthPolicyId: string | null = healthPolicyId || null;
+
+      if (!policyId && !healthPolicyId && selectedPolicyId) {
+        const selectedPolicyObj = policiesList.find(p => p.id === selectedPolicyId);
+        if (selectedPolicyObj?.isHealth) {
+          targetHealthPolicyId = selectedPolicyObj.id;
+          targetPolicyId = null;
+        } else {
+          targetPolicyId = selectedPolicyId;
+          targetHealthPolicyId = null;
+        }
+      }
+
       // 1. Create client note
       const newNote = await createClientNote({
         clientId,
         category: finalCategory,
-        policyId: selectedPolicyId || null,
+        policyId: targetPolicyId,
+        healthPolicyId: targetHealthPolicyId,
         title: noteTitle.trim() || null,
         content: newNoteContent,
         createdBy: currentUserId
@@ -217,7 +237,7 @@ export default function UnifiedNotesManager({
       setNoteTitle('');
       setNewNoteContent('');
       if (!inferredCategory) setSelectedCategory('');
-      if (!policyId) setSelectedPolicyId('');
+      if (!policyId && !healthPolicyId) setSelectedPolicyId('');
 
       if (addToast) {
         addToast({ title: 'Success', description: 'Note created successfully.', type: 'success' });
@@ -259,7 +279,7 @@ export default function UnifiedNotesManager({
     try {
       await deleteClientNote(noteId);
       if (addToast) {
-        addToast({ title: 'Success', description: 'Note deleted.', type: 'success' });
+        addToast({ title: 'Success', description: 'Note deleted successfully.', type: 'success' });
       }
       await loadNotes();
     } catch (err: any) {
@@ -268,51 +288,54 @@ export default function UnifiedNotesManager({
     }
   };
 
-  // Format category badge styling
+  // Helper badge formatters
   const renderCategoryBadge = (cat: NoteCategory) => {
     switch (cat) {
       case 'health':
-        return <span className="px-2.5 py-1 text-xs font-extrabold rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase tracking-wide">Health</span>;
+        return <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md">Health</span>;
       case 'life':
-        return <span className="px-2.5 py-1 text-xs font-extrabold rounded-md bg-blue-100 text-blue-800 border border-blue-200 uppercase tracking-wide">Life</span>;
+        return <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200 rounded-md">Life</span>;
+      case 'medicare':
+        return <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-cyan-50 text-cyan-700 border border-cyan-200 rounded-md">Medicare</span>;
+      case 'supplemental':
+        return <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md">Supplemental</span>;
       case 'property_casualty':
-        return <span className="px-2.5 py-1 text-xs font-extrabold rounded-md bg-purple-100 text-purple-800 border border-purple-200 uppercase tracking-wide">Property & Casualty</span>;
       default:
-        return <span className="px-2.5 py-1 text-xs font-extrabold rounded-md bg-slate-100 text-slate-700 uppercase tracking-wide">{cat}</span>;
+        return <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-purple-50 text-purple-700 border border-purple-200 rounded-md">Property & Casualty</span>;
     }
   };
 
-  // Format date helper
-  const formatDate = (isoString: string) => {
-    const d = new Date(isoString);
-    return d.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
+  const formatDate = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return iso;
+    }
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
-      {/* Header & Filter Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-slate-100 gap-4">
+    <div className="space-y-6 font-sans">
+      {/* Header Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h2 className="text-xl font-black text-slate-900 font-sans tracking-tight">Client Notes Center</h2>
-          <p className="text-xs text-slate-500 font-medium">Unified single-record note feed across all policies and categories.</p>
+          <h2 className="text-lg font-extrabold text-slate-900">
+            {inferredCategory ? `${inferredCategory.toUpperCase().replace('_', ' & ')} NOTES` : 'CLIENT NOTES MANAGER'}
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {inferredCategory ? 'View and add notes for this module.' : 'Central workspace notes repository for all client modules.'}
+          </p>
         </div>
 
-        {/* Category Filter Tabs (visible when in central Client > Notes mode) */}
+        {/* Category Filters (Central View Mode) */}
         {!inferredCategory && (
-          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200/80 gap-1 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap bg-slate-100 p-1 rounded-xl border border-slate-200/80">
             <button
               type="button"
               onClick={() => setActiveCategoryFilter('all')}
               className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
                 activeCategoryFilter === 'all'
-                  ? 'bg-white text-blue-600 shadow-sm'
+                  ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -362,24 +385,29 @@ export default function UnifiedNotesManager({
           {!inferredCategory && (
             <div className="w-full sm:w-1/2">
               <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
-                Category <span className="text-rose-500">*</span>
+                Category / Module <span className="text-rose-500">*</span>
               </label>
               <select
                 value={selectedCategory}
-                onChange={e => setSelectedCategory(e.target.value as NoteCategory)}
+                onChange={e => {
+                  setSelectedCategory(e.target.value as NoteCategory);
+                  setSelectedPolicyId('');
+                }}
                 className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 required
               >
-                <option value="">-- Select Category --</option>
+                <option value="">-- Select Module --</option>
                 <option value="health">Health</option>
                 <option value="life">Life</option>
+                <option value="medicare">Medicare</option>
+                <option value="supplemental">Supplemental</option>
                 <option value="property_casualty">Property & Casualty</option>
               </select>
             </div>
           )}
 
-          {/* Optional Policy Association Dropdown */}
-          {!policyId && policiesList.length > 0 && (
+          {/* Policy Association Dropdown */}
+          {!policyId && !healthPolicyId && (
             <div className={`w-full ${!inferredCategory ? 'sm:w-1/2' : 'sm:w-full'}`}>
               <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                 Link to Policy (Optional)
@@ -390,9 +418,9 @@ export default function UnifiedNotesManager({
                 className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
               >
                 <option value="">-- Client General Note --</option>
-                {policiesList.map(p => (
+                {filteredPoliciesForDropdown.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.policy_type || 'Policy'} {p.policy_number ? `(#${p.policy_number})` : ''} {p.writing_company || p.company_name ? `- ${p.writing_company || p.company_name}` : ''}
+                    {p.isHealth ? '[Health] ' : ''}{p.policy_type || 'Policy'} {p.policy_number ? `(#${p.policy_number})` : ''} {p.writing_company || p.company_name ? `- ${p.writing_company || p.company_name}` : ''}
                   </option>
                 ))}
               </select>
@@ -409,7 +437,7 @@ export default function UnifiedNotesManager({
             type="text"
             value={noteTitle}
             onChange={e => setNoteTitle(e.target.value)}
-            placeholder="e.g. Marketplace Follow-up"
+            placeholder="e.g. Policy Review Note"
             className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none mb-3"
           />
         </div>
@@ -423,29 +451,29 @@ export default function UnifiedNotesManager({
             value={newNoteContent}
             onChange={e => setNewNoteContent(e.target.value)}
             onPaste={handlePaste}
-            placeholder="Type note details here... You can paste screenshots directly with Ctrl+V"
             rows={3}
-            className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-inner"
+            placeholder="Write your note here... You can paste screenshots directly with Ctrl+V."
+            className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs font-medium text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all resize-y"
           />
         </div>
 
-        {/* Pending Attachment Preview Queue */}
+        {/* Pending Image Previews */}
         {pendingAttachments.length > 0 && (
           <div className="flex flex-wrap gap-3 pt-2">
             {pendingAttachments.map((att, idx) => (
-              <div key={idx} className="relative group border border-slate-300 rounded-lg overflow-hidden bg-white shadow-sm w-24 h-24 flex flex-col justify-between p-1">
-                {att.file.type.startsWith('image/') ? (
-                  <img src={att.previewUrl} alt={att.displayName} className="w-full h-16 object-cover rounded" />
+              <div key={idx} className="relative group bg-white border border-slate-200 rounded-xl p-2 flex items-center gap-2 shadow-xs">
+                {att.previewUrl ? (
+                  <img src={att.previewUrl} alt="Preview" className="w-10 h-10 object-cover rounded-lg" />
                 ) : (
-                  <div className="w-full h-16 flex items-center justify-center bg-slate-100 text-slate-500 text-xs font-bold">
+                  <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 text-xs font-bold">
                     FILE
                   </div>
                 )}
-                <div className="truncate text-[10px] text-slate-600 px-1 font-semibold">{att.displayName}</div>
+                <span className="text-xs font-medium text-slate-700 max-w-[120px] truncate">{att.displayName}</span>
                 <button
                   type="button"
                   onClick={() => removePendingAttachment(idx)}
-                  className="absolute top-1 right-1 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-black shadow hover:bg-rose-700"
+                  className="text-rose-500 hover:text-rose-700 font-bold ml-1"
                 >
                   ✕
                 </button>
@@ -454,15 +482,15 @@ export default function UnifiedNotesManager({
           </div>
         )}
 
-        {/* Bottom Actions Bar */}
-        <div className="flex items-center justify-between pt-2">
+        {/* Form Actions */}
+        <div className="flex items-center justify-between pt-2 border-t border-slate-200">
           <input
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
             multiple
+            accept="image/*,application/pdf"
             className="hidden"
-            accept="image/*,.pdf,.doc,.docx"
           />
           <button
             type="button"
@@ -473,7 +501,8 @@ export default function UnifiedNotesManager({
           </button>
 
           <button
-            type="submit"
+            type="button"
+            onClick={handleCreateNote}
             disabled={postingNote}
             className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs px-5 py-2.5 rounded-xl transition shadow-md disabled:opacity-50"
           >
@@ -517,9 +546,18 @@ export default function UnifiedNotesManager({
                     <span className="text-xs font-semibold text-slate-400">•</span>
                     <span className="text-xs font-medium text-slate-500">{formatDate(note.created_at)}</span>
                     {renderCategoryBadge(note.category)}
-                    {note.policies && (
-                      <span className="px-2 py-0.5 text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-md">
-                        {note.policies.policy_type || 'Policy'} {note.policies.policy_number ? `(#${note.policies.policy_number})` : ''}
+                    {note.policies ? (
+                      <span className="px-2 py-0.5 text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-md flex items-center gap-1">
+                        <span className="text-[10px] text-blue-600 uppercase font-extrabold font-mono">
+                          {note.policies.isHealth ? 'Health Policy' : 'Policy'}
+                        </span>
+                        <span>
+                          {note.policies.policy_type || 'Policy'} {note.policies.policy_number ? `(#${note.policies.policy_number})` : ''} {note.policies.company_name || note.policies.writing_company ? `- ${note.policies.company_name || note.policies.writing_company}` : ''}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 border border-slate-200 rounded-md">
+                        General Note
                       </span>
                     )}
                   </div>
@@ -561,20 +599,25 @@ export default function UnifiedNotesManager({
                   </div>
                 </div>
 
-                {/* Note Content / Edit Box */}
+                {/* Optional Note Title */}
+                {note.title && (
+                  <h4 className="text-sm font-extrabold text-slate-900">{note.title}</h4>
+                )}
+
+                {/* Content / Inline Edit Mode */}
                 {editingNoteId === note.id ? (
-                  <div className="space-y-3 pt-2">
+                  <div className="space-y-3">
                     <textarea
                       value={editingContent}
                       onChange={e => setEditingContent(e.target.value)}
                       rows={3}
-                      className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      className="w-full bg-slate-50 border border-blue-500 rounded-xl p-3 text-xs font-medium text-slate-800 outline-none"
                     />
-                    <div className="flex justify-end gap-2">
+                    <div className="flex items-center gap-2 justify-end">
                       <button
                         type="button"
                         onClick={() => setEditingNoteId(null)}
-                        className="px-3 py-1.5 text-xs font-bold text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-100"
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg"
                       >
                         Cancel
                       </button>
@@ -582,65 +625,49 @@ export default function UnifiedNotesManager({
                         type="button"
                         onClick={() => handleUpdateNoteSubmit(note.id)}
                         disabled={updatingNote}
-                        className="px-4 py-1.5 text-xs font-extrabold text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow"
+                        className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm"
                       >
-                        Save
+                        {updatingNote ? 'Saving...' : 'Save'}
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-1">
-                    {note.title && (
-                      <h4 className="text-sm font-extrabold text-slate-900 tracking-tight">{note.title}</h4>
-                    )}
-                    <p className="text-sm text-slate-800 font-normal leading-relaxed whitespace-pre-wrap">{note.content}</p>
-                  </div>
+                  <p className="text-xs font-medium text-slate-800 leading-relaxed whitespace-pre-wrap">
+                    {note.content}
+                  </p>
                 )}
 
-                {/* Attachments Section */}
+                {/* Attachments Display */}
                 {noteAtts.length > 0 && (
-                  <div className="pt-2 border-t border-slate-100 space-y-2">
-                    <div className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">Attachments</div>
-                    <div className="flex flex-wrap gap-3">
-                      {noteAtts.map(att => (
-                        <div key={att.id} className="border border-slate-200 rounded-xl p-2.5 bg-slate-50/90 hover:bg-slate-100/90 transition max-w-xs flex items-center justify-between gap-3 text-xs">
-                          <div className="flex items-center gap-2 overflow-hidden">
-                            {att.mime_type.startsWith('image/') && att.signedUrl ? (
-                              <img src={att.signedUrl} alt={att.display_name} className="w-9 h-9 object-cover rounded-lg border border-slate-200 shrink-0" />
-                            ) : (
-                              <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold shrink-0">📄</div>
-                            )}
-                            <span className="font-bold text-slate-800 truncate text-[11px]" title={att.display_name}>{att.display_name}</span>
+                  <div className="pt-2 flex flex-wrap gap-3">
+                    {noteAtts.map(att => (
+                      <div key={att.id} className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center gap-3 shadow-xs">
+                        {att.mime_type.startsWith('image/') && att.signedUrl ? (
+                          <a href={att.signedUrl} target="_blank" rel="noopener noreferrer">
+                            <img src={att.signedUrl} alt={att.display_name} className="w-12 h-12 object-cover rounded-lg hover:opacity-90" />
+                          </a>
+                        ) : (
+                          <div className="w-10 h-10 bg-slate-200 text-slate-600 rounded-lg flex items-center justify-center font-bold text-xs">
+                            📄
                           </div>
-
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {att.signedUrl && (
-                              <>
-                                <a
-                                  href={att.signedUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="p-1 text-slate-500 hover:text-blue-600 rounded hover:bg-white transition-colors"
-                                  title="View Attachment"
-                                >
-                                  👁️
-                                </a>
-                                <a
-                                  href={att.signedUrl}
-                                  download={att.display_name}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="p-1 text-slate-500 hover:text-emerald-600 rounded hover:bg-white transition-colors"
-                                  title="Download Attachment"
-                                >
-                                  📥
-                                </a>
-                              </>
-                            )}
-                          </div>
+                        )}
+                        <div>
+                          <span className="block text-xs font-bold text-slate-800 max-w-[160px] truncate" title={att.display_name}>
+                            {att.display_name}
+                          </span>
+                          {att.signedUrl && (
+                            <a
+                              href={att.signedUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] font-bold text-blue-600 hover:underline mt-0.5 inline-block"
+                            >
+                              View / Download
+                            </a>
+                          )}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

@@ -22,6 +22,7 @@ export interface AuthorProfile {
 
 export interface AssociatedPolicy {
   id: string;
+  isHealth?: boolean;
   policy_number?: string | null;
   policy_type?: string | null;
   writing_company?: string | null;
@@ -33,6 +34,7 @@ export interface UnifiedNote {
   client_id: string;
   category: NoteCategory;
   policy_id: string | null;
+  health_policy_id?: string | null;
   title?: string | null;
   content: string;
   created_by: string | null;
@@ -53,6 +55,7 @@ export interface CreateNotePayload {
   clientId: string;
   category: NoteCategory;
   policyId?: string | null;
+  healthPolicyId?: string | null;
   title?: string | null;
   content: string;
   createdBy?: string | null;

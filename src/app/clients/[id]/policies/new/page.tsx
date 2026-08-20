@@ -41,6 +41,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
   const [billingType, setBillingType] = useState<'Direct Bill' | 'Agency Bill'>('Direct Bill');
   const [brokerName, setBrokerName] = useState('');
   const [writingCompany, setWritingCompany] = useState('');
+  const [cargo, setCargo] = useState('');
   const [totalPremium, setTotalPremium] = useState<number | ''>('');
   const [annualPremium, setAnnualPremium] = useState<number | ''>('');
   const [policyStatus, setPolicyStatus] = useState<'Active' | 'Cancelled' | 'Expired' | 'Pending'>('Active');
@@ -188,6 +189,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
           expiration_date: expIso,
           billing_type: billingType,
           broker_name: brokerName.trim() || null,
+          cargo: cargo.trim() || null,
           writing_company: writingCompany.trim() || null,
           company_name: writingCompany.trim() || null, // Keep synced with legacy column
           total_premium: premiumNum,
@@ -309,6 +311,18 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                       <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>
+                </div>
+
+                {/* Cargo */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Cargo</label>
+                  <input
+                    type="text"
+                    value={cargo}
+                    onChange={e => setCargo(e.target.value)}
+                    placeholder="e.g. Dry Van, Refrigerated, Auto Hauler"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                  />
                 </div>
 
                 {/* 2. Company */}

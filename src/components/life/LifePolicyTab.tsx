@@ -41,6 +41,7 @@ export default function LifePolicyTab({
   );
 
   const [policies, setPolicies] = useState<LifePolicy[]>([]);
+  const [selectedLifePolicyId, setSelectedLifePolicyId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isAdding, setIsAdding] = useState<boolean>(false);
 
@@ -218,10 +219,27 @@ export default function LifePolicyTab({
 
           {/* SUBTAB 3: NOTES */}
           {activeSubtab === 'notes' && (
-            <div className="animate-in fade-in duration-150">
+            <div className="space-y-4 animate-in fade-in duration-150">
+              {policies.length > 1 && (
+                <div className="bg-white border border-slate-200/80 rounded-xl p-3 flex items-center justify-between gap-3 shadow-2xs font-sans">
+                  <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">Target Life Policy:</span>
+                  <select
+                    value={selectedLifePolicyId || ''}
+                    onChange={(e) => setSelectedLifePolicyId(e.target.value || null)}
+                    className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none"
+                  >
+                    {policies.map((p, idx) => (
+                      <option key={p.id} value={p.id}>
+                        Life Policy #{idx + 1} {p.policy_number ? `(#${p.policy_number})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <UnifiedNotesManager
                 clientId={clientId}
                 inferredCategory="life"
+                policyId={selectedLifePolicyId || (policies[0]?.id || null)}
                 currentUserId={currentUserId}
               />
             </div>

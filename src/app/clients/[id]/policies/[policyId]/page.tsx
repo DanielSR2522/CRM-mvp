@@ -227,6 +227,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
   const [billingType, setBillingType] = useState<'Direct Bill' | 'Agency Bill'>('Direct Bill');
   const [brokerName, setBrokerName] = useState('');
   const [writingCompany, setWritingCompany] = useState('');
+  const [cargo, setCargo] = useState('');
   const [policyOwnershipType, setPolicyOwnershipType] = useState<'personal' | 'company'>('personal');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
@@ -363,6 +364,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
       setBillingType(policyData.billing_type === 'Agency Bill' ? 'Agency Bill' : 'Direct Bill');
       setBrokerName(policyData.broker_name || '');
       setWritingCompany(policyData.writing_company || policyData.company_name || '');
+      setCargo(policyData.cargo || '');
         setPolicyOwnershipType(policyData.policy_ownership_type || 'personal');
         setAddress(policyData.address || '');
         setCity(policyData.city || '');
@@ -1720,6 +1722,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
           policy_type: lob,
           policy_ownership_type: (client?.client_type === 'company' || policyOwnershipType === 'company') ? 'company' : 'personal',
           writing_company: writingCompany.trim() || null,
+          cargo: cargo.trim() || null,
           company_name: writingCompany.trim() || null,
           policy_number: policyNumber.trim() || null,
           policy_payment_frequency: paymentFrequency,
@@ -1945,6 +1948,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
           expiration_date: expIso,
           billing_type: billingType,
           broker_name: brokerName.trim() || null,
+          cargo: cargo.trim() || null,
           writing_company: writingCompany.trim() || null,
           policy_ownership_type: (client?.client_type === 'company' || policyOwnershipType === 'company') ? 'company' : 'personal',
           address: address.trim() || null,
@@ -2889,6 +2893,18 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                           <option key={opt} value={opt}>{opt}</option>
                         ))}
                       </select>
+                    </div>
+
+                    {/* Cargo */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Cargo</label>
+                      <input
+                        type="text"
+                        value={cargo}
+                        onChange={e => setCargo(e.target.value)}
+                        placeholder="e.g. Dry Van, Refrigerated, Auto Hauler"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                      />
                     </div>
 
                     {/* 2. Company */}
