@@ -1737,7 +1737,8 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
           total_premium: premiumNum,
           premium: premiumNum,
           annual_premium: premiumNum,
-          status: 'Pending',
+          transaction_type: 'Renewal',
+          status: 'Active',
           renewed_from_policy_id: policyId,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -1746,6 +1747,20 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
         .single();
 
       if (createError) throw createError;
+
+      // Update source policy status to Expired
+      const { error: sourceUpdateError } = await supabase
+        .from('policies')
+        .update({
+          status: 'Expired',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', policyId)
+        .eq('client_id', id);
+
+      if (sourceUpdateError) {
+        console.error('Error updating source policy status to Expired:', sourceUpdateError);
+      }
 
       // Log activity event (non-blocking)
       try {

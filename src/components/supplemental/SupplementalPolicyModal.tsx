@@ -20,6 +20,7 @@ const PRODUCT_TYPE_OPTIONS: SupplementalProductType[] = [
   'Cancer',
   'Short-Term Disability',
   'Long-Term Disability',
+  'Private Health',
   'Other',
 ];
 

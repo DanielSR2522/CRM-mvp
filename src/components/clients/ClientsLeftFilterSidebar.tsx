@@ -162,8 +162,9 @@ export default function ClientsLeftFilterSidebar({
   if (!isOpen) return null;
 
   return (
-    <aside className="w-72 md:w-80 shrink-0 bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4 font-sans text-xs flex flex-col max-h-[calc(100vh-140px)] overflow-y-auto sticky top-4 animate-fadeIn">
-      {/* 1. SIDEBAR HEADER */}
+    <aside className="w-72 md:w-80 shrink-0 bg-slate-50/60 border border-slate-200/70 rounded-2xl p-2.5 shadow-2xs font-sans text-xs flex flex-col max-h-[calc(100vh-140px)] sticky top-4 animate-fadeIn">
+      <div className="bg-white border border-slate-200/90 rounded-xl p-4 shadow-xs space-y-4 flex flex-col flex-1 overflow-y-auto">
+        {/* 1. SIDEBAR HEADER */}
       <div className="flex items-center justify-between border-b border-slate-100 pb-3">
         <h3 className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
           <span>🔍</span> FILTER CLIENTS
@@ -482,6 +483,7 @@ export default function ClientsLeftFilterSidebar({
         >
           Apply Filters
         </button>
+      </div>
       </div>
     </aside>
   );

@@ -222,6 +222,7 @@ export default function LifePolicyCard({
                   </div>
                   <LifePolicyBeneficiaries
                     lifePolicyId={policy.id}
+                    clientId={policy.client_id}
                     onBeneficiariesChange={() => {
                       loadSummaryStats();
                       onPolicyUpdated();

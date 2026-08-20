@@ -44,8 +44,9 @@ export default function ConsentVariablesSidebar({ onInsertVariable }: ConsentVar
   }).filter((g) => g.variables.length > 0);
 
   return (
-    <aside className="w-80 border-l border-slate-200 bg-slate-50/50 flex flex-col h-full font-sans select-none overflow-hidden">
-      {/* Header & Search */}
+    <aside className="w-80 border-l border-slate-200 bg-slate-50/60 p-2.5 flex flex-col h-full font-sans select-none overflow-hidden">
+      <div className="bg-white border border-slate-200/90 rounded-xl shadow-xs flex flex-col h-full overflow-hidden">
+        {/* Header & Search */}
       <div className="p-4 border-b border-slate-200 bg-white space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-2">
@@ -138,6 +139,7 @@ export default function ConsentVariablesSidebar({ onInsertVariable }: ConsentVar
             );
           })
         )}
+      </div>
       </div>
     </aside>
   );

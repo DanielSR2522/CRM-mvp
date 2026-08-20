@@ -7,6 +7,7 @@ export type SupplementalProductType =
   | 'Cancer'
   | 'Short-Term Disability'
   | 'Long-Term Disability'
+  | 'Private Health'
   | 'Other';
 
 export type SupplementalCoverageType =

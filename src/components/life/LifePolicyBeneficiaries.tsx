@@ -20,16 +20,30 @@ export interface LifePolicyBeneficiary {
 
 interface LifePolicyBeneficiariesProps {
   lifePolicyId: string;
+  clientId?: string;
   onBeneficiariesChange?: () => void;
 }
 
-export default function LifePolicyBeneficiaries({ lifePolicyId, onBeneficiariesChange }: LifePolicyBeneficiariesProps) {
+interface PriorPolicyOption {
+  id: string;
+  policy_number: string | null;
+  status: string | null;
+  beneficiaries: LifePolicyBeneficiary[];
+}
+
+export default function LifePolicyBeneficiaries({ lifePolicyId, clientId, onBeneficiariesChange }: LifePolicyBeneficiariesProps) {
   const [beneficiaries, setBeneficiaries] = useState<LifePolicyBeneficiary[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingBeneficiary, setEditingBeneficiary] = useState<LifePolicyBeneficiary | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Beneficiary Reuse state
+  const [priorPolicies, setPriorPolicies] = useState<PriorPolicyOption[]>([]);
+  const [selectedPriorPolicyId, setSelectedPriorPolicyId] = useState<string>('');
+  const [dismissedReuse, setDismissedReuse] = useState<boolean>(false);
+  const [copyingReuse, setCopyingReuse] = useState<boolean>(false);
 
   // Form fields
   const [name, setName] = useState<string>('');
@@ -61,6 +75,110 @@ export default function LifePolicyBeneficiaries({ lifePolicyId, onBeneficiariesC
   useEffect(() => {
     loadBeneficiaries();
   }, [loadBeneficiaries]);
+
+  // Check for prior Life policies belonging to the same client
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        let targetClientId = clientId;
+        if (!targetClientId) {
+          const { data: currPol } = await supabase
+            .from('life_policies')
+            .select('client_id')
+            .eq('id', lifePolicyId)
+            .maybeSingle();
+
+          targetClientId = currPol?.client_id;
+        }
+
+        if (!targetClientId || cancelled) return;
+
+        const { data: otherPols } = await supabase
+          .from('life_policies')
+          .select('id, policy_number, status')
+          .eq('client_id', targetClientId)
+          .neq('id', lifePolicyId);
+
+        if (!otherPols || otherPols.length === 0 || cancelled) return;
+
+        const otherIds = otherPols.map((p) => p.id);
+        const { data: priorBens } = await supabase
+          .from('life_policy_beneficiaries')
+          .select('*')
+          .in('life_policy_id', otherIds)
+          .order('created_at', { ascending: true });
+
+        if (!priorBens || priorBens.length === 0 || cancelled) return;
+
+        const options: PriorPolicyOption[] = [];
+        otherPols.forEach((pol, idx) => {
+          const bens = priorBens.filter((b) => b.life_policy_id === pol.id);
+          if (bens.length > 0) {
+            options.push({
+              id: pol.id,
+              policy_number: pol.policy_number || `Life Policy #${idx + 1}`,
+              status: pol.status || 'Active',
+              beneficiaries: bens,
+            });
+          }
+        });
+
+        if (cancelled) return;
+        setPriorPolicies(options);
+        if (options.length > 0) {
+          setSelectedPriorPolicyId(options[0].id);
+        }
+      } catch (err) {
+        console.error('Error loading prior Life beneficiaries:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lifePolicyId, clientId]);
+
+  const handleCopyPriorBeneficiaries = async () => {
+    const chosenPolicy = priorPolicies.find((p) => p.id === selectedPriorPolicyId) || priorPolicies[0];
+    if (!chosenPolicy || chosenPolicy.beneficiaries.length === 0) return;
+
+    if (beneficiaries.length > 0) {
+      const confirmReplace = confirm(
+        `Replace current ${beneficiaries.length} beneficiary entries with ${chosenPolicy.beneficiaries.length} beneficiaries from ${chosenPolicy.policy_number || 'prior Life Policy'}?`
+      );
+      if (!confirmReplace) return;
+
+      await supabase.from('life_policy_beneficiaries').delete().eq('life_policy_id', lifePolicyId);
+    }
+
+    setCopyingReuse(true);
+    try {
+      const newInserts = chosenPolicy.beneficiaries.map((b) => ({
+        life_policy_id: lifePolicyId,
+        name: b.name,
+        dob: b.dob,
+        relationship_grade: b.relationship_grade,
+        is_client: b.is_client,
+        phone: b.phone,
+        email: b.email,
+        benefit_percentage: b.benefit_percentage,
+      }));
+
+      const { error } = await supabase.from('life_policy_beneficiaries').insert(newInserts);
+      if (error) throw error;
+
+      setDismissedReuse(true);
+      await loadBeneficiaries();
+      if (onBeneficiariesChange) onBeneficiariesChange();
+    } catch (err: any) {
+      console.error('Failed to copy beneficiaries:', err);
+      alert('Failed to copy beneficiaries: ' + err.message);
+    } finally {
+      setCopyingReuse(false);
+    }
+  };
 
   const totalPercentage = beneficiaries.reduce((sum, b) => sum + (Number(b.benefit_percentage) || 0), 0);
   const is100Percent = Math.abs(totalPercentage - 100) < 0.01;
@@ -195,6 +313,64 @@ export default function LifePolicyBeneficiaries({ lifePolicyId, onBeneficiariesC
           + Add Beneficiary
         </button>
       </div>
+
+      {/* PRIOR LIFE BENEFICIARY REUSE SUGGESTION BANNER */}
+      {priorPolicies.length > 0 && !dismissedReuse && beneficiaries.length === 0 && (
+        <div className="bg-indigo-50/80 border border-indigo-100 rounded-xl p-3.5 space-y-3 font-sans">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h5 className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5">
+                <span>💡</span> Use beneficiaries from an existing Life policy?
+              </h5>
+              <p className="text-[11px] text-indigo-800 mt-0.5">
+                This client has beneficiary records on another Life policy. You can copy them here as editable, independent records.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDismissedReuse(true)}
+              className="text-indigo-400 hover:text-indigo-700 text-xs font-bold p-1"
+              title="Dismiss suggestion"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+            {priorPolicies.length > 1 && (
+              <select
+                value={selectedPriorPolicyId}
+                onChange={(e) => setSelectedPriorPolicyId(e.target.value)}
+                className="text-xs font-semibold text-slate-800 bg-white border border-indigo-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {priorPolicies.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.policy_number} ({p.beneficiaries.length} beneficiaries)
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCopyPriorBeneficiaries}
+                disabled={copyingReuse}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-xs transition-all flex items-center gap-1.5"
+              >
+                {copyingReuse ? 'Copying...' : 'Use Previous Beneficiaries'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDismissedReuse(true)}
+                className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200 rounded-lg transition-all"
+              >
+                Start Fresh
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Percentage Total Status Bar */}
       <div
