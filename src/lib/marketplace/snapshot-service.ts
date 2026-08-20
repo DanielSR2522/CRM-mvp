@@ -112,3 +112,35 @@ export async function fetchLatestMarketplaceSnapshot(healthPolicyId: string): Pr
     return { snapshot: null, benefits: [] };
   }
 }
+
+export async function unlinkMarketplacePlan(healthPolicyId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error: updateErr } = await supabase
+      .from('health_policies')
+      .update({
+        plan_id: null,
+        plan_name: null,
+        company_2026: null,
+        type_plan: null,
+        plan_cost: 0,
+        tax_credit: 0
+      })
+      .eq('id', healthPolicyId);
+
+    if (updateErr) {
+      console.error('Error unlinking plan from health_policies:', updateErr);
+      return { success: false, error: updateErr.message };
+    }
+
+    await supabase
+      .from('health_marketplace_plan_snapshots')
+      .delete()
+      .eq('health_policy_id', healthPolicyId);
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('unlinkMarketplacePlan error:', err);
+    return { success: false, error: err?.message || 'Failed to unlink plan' };
+  }
+}
+

@@ -279,14 +279,7 @@ export default function HealthMedicalSection({
   }
 
   return (
-    <div className="space-y-6 font-sans mt-6 border-t border-slate-100 pt-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-base font-extrabold text-slate-800">Health Medical Section</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Manage doctors, hospitals, pharmacies, conditions and medications directly.</p>
-        </div>
-      </div>
-
+    <div className="space-y-6 font-sans">
       {/* Grid of Medical Categories */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         

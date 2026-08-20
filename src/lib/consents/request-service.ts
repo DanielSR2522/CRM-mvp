@@ -425,6 +425,21 @@ export async function createConsentDraft(input: CreateDraftInput): Promise<Creat
     throw new RequestServiceError('Internal error: the document hash is malformed.');
   }
 
+  // Validate policyId belongs to clientId across P&C, Health, and Life
+  let validatedPolicyId: string | null = null;
+  if (input.policyId) {
+    const [pcCheck, hpCheck, lpCheck] = await Promise.all([
+      supabase.from('policies').select('id').eq('id', input.policyId).eq('client_id', input.clientId).maybeSingle(),
+      supabase.from('health_policies').select('id').eq('id', input.policyId).eq('client_id', input.clientId).maybeSingle(),
+      supabase.from('life_policies').select('id').eq('id', input.policyId).eq('client_id', input.clientId).maybeSingle(),
+    ]);
+    if (pcCheck.data || hpCheck.data || lpCheck.data) {
+      validatedPolicyId = input.policyId;
+    } else {
+      validatedPolicyId = null; // General consent / foreign policy -> FORCE NULL!
+    }
+  }
+
   // The token is minted before the insert so a failure to generate it never
   // leaves a signer row without a working link.
   const token = await generateSecureToken();
@@ -434,7 +449,7 @@ export async function createConsentDraft(input: CreateDraftInput): Promise<Creat
     .from('signature_requests')
     .insert({
       client_id: input.clientId,
-      policy_id: input.policyId,
+      policy_id: validatedPolicyId,
       template_id: input.template.id,
       template_version_id: input.version.id,
       created_by: userId,

@@ -214,8 +214,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   const isModuleWorkspace = activeTab === 'health' || activeTab === 'medicare' || activeTab === 'supplemental' || activeTab === 'life';
   const isCoreWorkspace = activeTab === 'overview' || activeTab === 'personal-info' || activeTab === 'documents' || activeTab === 'notes' || activeTab === 'timeline' || activeTab === 'policies';
-  const isModernClientWorkspace = isModuleWorkspace || isCoreWorkspace;
-  const isOperationalWorkspace = isModuleWorkspace;
+  const isModernClientWorkspace = isModuleWorkspace || isCoreWorkspace || (activeTab as string) === 'consents';
+  const isOperationalWorkspace = isModuleWorkspace || (activeTab as string) === 'consents';
 
 
 
@@ -2759,7 +2759,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   return (
     <DashboardLayout>
-      {['overview', 'personal-info', 'documents', 'notes', 'timeline', 'policies'].includes(activeTab) && client && (
+      {['overview', 'personal-info', 'documents', 'notes', 'timeline', 'policies', 'health', 'medicare', 'supplemental', 'life'].includes(activeTab) && client && (
         <HealthClientHeader
           clientId={clientId}
           clientName={personalForm.full_name || client.full_name || 'Client Profile'}
@@ -2781,10 +2781,10 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           }
         />
       )}
-      <CrmPageContainer className={isModernClientWorkspace ? "px-4 py-6 md:px-8 md:py-8" : ""}>
+      <CrmPageContainer className="pl-0 pr-4 md:pr-6 py-3 font-sans">
         {/* Navigation Breadcrumb */}
         {!isModernClientWorkspace && (
-          <div className="flex items-center gap-2 text-sm text-slate-500">
+          <div className="flex items-center gap-2 text-sm text-slate-500 pl-4">
             <Link href="/clients" className="hover:text-blue-600 transition-colors">Clients</Link>
             <span>/</span>
             <span className="text-slate-800 font-semibold">{loadingClient ? 'Loading...' : client?.full_name}</span>
@@ -2799,7 +2799,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             </svg>
           </div>
         ) : (
-          <div className="flex flex-col lg:flex-row gap-6 items-start">
+          <div className="flex flex-col lg:flex-row gap-3 items-start w-full">
             
             {/* Left Sidebar Summary */}
             {!isOperationalWorkspace && (
@@ -3898,9 +3898,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         ) : (
                           <div className="space-y-8">
                             {/* Main Applicant Grid */}
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
+                            <div className="grid grid-cols-1 md:grid-cols-2 max-w-4xl gap-x-8 gap-y-3.5">
                               {/* Left Column */}
-                              <div className="space-y-4">
+                              <div className="space-y-3.5">
                                 <InlineEditableText
                                   label="Applicant Name"
                                   value={personalForm.full_name}
@@ -3914,10 +3914,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 />
 
                                 <div>
-                                  <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</span>
-                                  <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
-                                    {calculateAge(personalForm.date_of_birth)}
-                                  </span>
+                                  <span className="block text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Age</span>
+                                  <div className="py-1 px-2 -mx-2">
+                                    <span className="text-[15px] font-bold text-slate-900 block">
+                                      {calculateAge(personalForm.date_of_birth)}
+                                    </span>
+                                  </div>
                                 </div>
 
                                 <InlineEditableSSN

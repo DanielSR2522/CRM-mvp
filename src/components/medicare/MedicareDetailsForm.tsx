@@ -16,10 +16,10 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
     <div className="bg-white border border-slate-200/70 rounded-xl p-5 shadow-2xs space-y-4 font-sans text-sm">
       <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
         <div>
-          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+          <h4 className="text-[16px] font-bold text-slate-950 tracking-tight">
             Medicare Information 2026
           </h4>
-          <p className="text-xs text-slate-500 mt-0.5 font-medium">
+          <p className="text-[12px] text-slate-500 mt-0.5 font-normal">
             Beneficiary identification, plan subtype, Medicaid levels, and coverage dates.
           </p>
         </div>
@@ -41,7 +41,7 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
         <div className="space-y-3">
           {/* MBI */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+            <label className="text-sm font-semibold text-slate-500 leading-snug break-words">
               MBI (Medicare Beneficiary Identifier)
             </label>
             <input
@@ -50,13 +50,13 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
               value={data.mbi || ''}
               onChange={(e) => onChange('mbi', e.target.value || null)}
               placeholder="e.g. 1EG4-TE5-MK72"
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-sm text-slate-900 font-mono font-semibold placeholder-slate-400 outline-none transition-all uppercase"
+              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-[15px] text-slate-950 font-mono font-semibold placeholder-slate-400 outline-none transition-all uppercase"
             />
           </div>
 
           {/* Part A Effective Date */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+            <label className="text-sm font-semibold text-slate-500 leading-snug break-words">
               Hospital (Part A) Effective Date
             </label>
             <DatePicker

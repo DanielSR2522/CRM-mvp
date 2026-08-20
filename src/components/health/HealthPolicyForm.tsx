@@ -997,20 +997,20 @@ export default function HealthPolicyForm({
         {/* SECTION 1 — Agency Information */}
         <div className="bg-white border border-slate-200/70 rounded-xl p-5 shadow-2xs space-y-4 font-sans">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+              <h4 className="text-base font-bold text-slate-900 tracking-tight">
                 Agency Information
               </h4>
-          <span className="text-[11px] font-medium text-slate-400">
+          <span className="text-xs font-medium text-slate-400">
             Click value to edit
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
+        <div className="grid grid-cols-1 md:grid-cols-2 max-w-[850px] gap-x-12 gap-y-1 text-sm font-sans">
           {/* LEFT COLUMN */}
           <div className="space-y-0 divide-y divide-slate-100/70">
             {/* 1. Enrolled */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Enrolled</span>
+            <div className="py-2 grid grid-cols-[170px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-sm font-semibold text-slate-500 leading-snug break-words">Enrolled</span>
               {editingAgencyField === 'active' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -1052,7 +1052,7 @@ export default function HealthPolicyForm({
                     setAgencyDraftValue(isActive);
                     setAgencyFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-semibold text-slate-950 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Enrolled"
                 >
                   {isActive ? 'Yes' : 'No'}
@@ -1061,8 +1061,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 2. Renovation Year 2026 */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Renovation Year 2026</span>
+            <div className="py-2 grid grid-cols-[170px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-sm font-semibold text-slate-500 leading-snug break-words">Renovation Year 2026</span>
               {editingAgencyField === 'yearRenovation' ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -1102,7 +1102,7 @@ export default function HealthPolicyForm({
                     setAgencyDraftValue(yearRenovation || '2026');
                     setAgencyFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-semibold text-slate-950 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Renovation Year"
                 >
                   {yearRenovation || '2026'}
@@ -1111,17 +1111,17 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 3. Notes */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Notes</span>
-              <span className="text-slate-900 font-semibold select-none">
+            <div className="py-2 grid grid-cols-[170px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-sm font-semibold text-slate-500 leading-snug break-words">Notes</span>
+              <span className="text-[15px] font-semibold text-slate-950 select-none">
                 {notesCount}
               </span>
             </div>
 
             {/* 4. Documents */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Documents</span>
-              <span className="text-slate-900 font-semibold select-none">
+            <div className="py-2 grid grid-cols-[170px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+              <span className="text-sm font-semibold text-slate-500 leading-snug break-words">Documents</span>
+              <span className="text-[15px] font-semibold text-slate-950 select-none">
                 {documentsCount}
               </span>
             </div>
@@ -1361,15 +1361,15 @@ export default function HealthPolicyForm({
         {/* SECTION 2 — Health Information 2026 */}
         <div className="bg-white border border-slate-200/70 rounded-xl p-5 shadow-2xs space-y-4 font-sans">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+            <h4 className="text-base font-bold text-slate-900 tracking-tight">
               Health Information 2026
             </h4>
-            <span className="text-[11px] font-medium text-slate-400">
+            <span className="text-xs font-medium text-slate-400">
               Click value to edit
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-sm font-sans">
+          <div className="grid grid-cols-1 md:grid-cols-2 max-w-[850px] gap-x-12 gap-y-1 text-sm font-sans">
             {/* LEFT COLUMN */}
             <div className="space-y-0 divide-y divide-slate-100/70">
               {/* 1. Company 2026 */}
@@ -2019,7 +2019,7 @@ export default function HealthPolicyForm({
       <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 font-sans">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-50 pb-4 gap-2">
           <div>
-            <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
+            <h4 className="text-base font-bold text-slate-900 tracking-tight">
               Applicant Information
             </h4>
             <p className="text-xs text-slate-400 font-medium mt-0.5">
@@ -2031,7 +2031,7 @@ export default function HealthPolicyForm({
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm font-sans">
+        <div className="grid grid-cols-1 md:grid-cols-2 max-w-[850px] gap-x-12 gap-y-1 text-sm font-sans">
           {/* LEFT COLUMN */}
           <div className="space-y-0 divide-y divide-slate-100/70">
             {/* 1. Coverage */}
@@ -3980,15 +3980,6 @@ export default function HealthPolicyForm({
 
       {/* SECTION 6 — Income Information */}
       <ClientIncomeInformationSection clientId={clientId} />
-
-      {/* SECTION 7 — Medical Section (LAST SECTION) */}
-      {initialPolicy?.id && (
-        <HealthMedicalSection
-          healthPolicyId={initialPolicy.id}
-          clientId={clientId}
-          addToast={addToast}
-        />
-      )}
 
       {/* Editing Form controls */}
       {isEditing && (

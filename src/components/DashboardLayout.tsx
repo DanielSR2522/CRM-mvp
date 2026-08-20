@@ -217,28 +217,41 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
 
   const searchParams = useSearchParams();
   const activeSectionInUrl = searchParams.get('section') || searchParams.get('tab');
-  const isModernClientWorkspace = pathname.startsWith('/clients/') && (
-    pathname.includes('/policies/') ||
-    activeSectionInUrl === 'overview' ||
-    activeSectionInUrl === 'personal-information' ||
-    activeSectionInUrl === 'personal-info' ||
-    activeSectionInUrl === 'health' ||
-    activeSectionInUrl === 'medicare' ||
-    activeSectionInUrl === 'supplemental' ||
-    activeSectionInUrl === 'life' ||
-    activeSectionInUrl === 'documents' ||
-    activeSectionInUrl === 'notes' ||
-    activeSectionInUrl === 'timeline' ||
-    activeSectionInUrl === 'policies'
-  );
-  const isHealthWorkspace = isModernClientWorkspace;
+  const isTopNavWorkspace =
+    pathname === '/clients' ||
+    pathname.startsWith('/clients/') ||
+    pathname === '/calendar' ||
+    pathname.startsWith('/calendar/') ||
+    pathname === '/consents' ||
+    pathname.startsWith('/consents/') ||
+    pathname === '/agent-information' ||
+    pathname.startsWith('/agent-information/');
+
+  const isNavItemActive = (item: typeof navItems[0]) => {
+    if (item.href === '/dashboard') {
+      return pathname === '/dashboard';
+    }
+    if (item.href === '/clients') {
+      return pathname === '/clients' || pathname.startsWith('/clients/');
+    }
+    if (item.href === '/consents/templates') {
+      return pathname.startsWith('/consents/templates');
+    }
+    if (item.href === '/consents') {
+      return (
+        pathname === '/consents' ||
+        (pathname.startsWith('/consents/') && !pathname.startsWith('/consents/templates'))
+      );
+    }
+    return pathname === item.href || (!item.exact && pathname.startsWith(item.href + '/'));
+  };
 
   return (
-    <div className={`min-h-screen flex ${isHealthWorkspace ? 'flex-col' : 'flex-col md:flex-row'} bg-[#F6F8FC] text-[#172033] font-sans antialiased`}>
+    <div className={`min-h-screen flex ${isTopNavWorkspace ? 'flex-col' : 'flex-col md:flex-row'} bg-[#F6F8FC] text-[#172033] font-sans antialiased`}>
       <DashboardArrivalGuard />
 
-      {/* Top Global Navigation Bar for Health Workspace */}
-      {isHealthWorkspace && (
+      {/* Top Global Navigation Bar for Top-Nav Workspaces */}
+      {isTopNavWorkspace && (
         <header className="w-full bg-white border-b border-slate-200 px-6 py-2.5 flex items-center justify-between sticky top-0 z-50 shadow-2xs font-sans">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2.5">
@@ -252,7 +265,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
 
             <nav className="hidden md:flex items-center gap-1">
               {navItems.map((item) => {
-                const isActive = item.name === 'Clients' || pathname === item.href || (!item.exact && pathname.startsWith(item.href + '/') && item.href !== '/dashboard');
+                const isActive = isNavItemActive(item);
                 return (
                   <NextLink
                     key={item.name}
@@ -295,7 +308,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
       )}
 
       {/* Mobile Header */}
-      {!isHealthWorkspace && (
+      {!isTopNavWorkspace && (
         <header className="md:hidden flex items-center justify-between px-4 py-3 bg-white border-b border-[#DCE2EA] sticky top-0 z-30 shadow-xs">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-md bg-[#2563EB] flex items-center justify-center font-bold text-white text-xs">
@@ -316,7 +329,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
       )}
 
       {/* Mobile Drawer */}
-      {!isHealthWorkspace && mobileMenuOpen && (
+      {!isTopNavWorkspace && mobileMenuOpen && (
         <div className="md:hidden fixed inset-0 top-[57px] z-20 bg-white flex flex-col justify-between p-4 border-b border-[#DCE2EA]">
           <nav className="space-y-1">
             {navItems.map((item) => {
@@ -365,32 +378,30 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
       )}
 
       {/* Desktop Pure White Sidebar */}
-      {!isHealthWorkspace && (
+      {!isTopNavWorkspace && (
         <aside className={`hidden md:flex flex-col justify-between bg-white text-[#172033] border-r border-[#DCE2EA] sticky top-0 h-screen z-40 transition-all duration-200 ${
           isCollapsed && mounted ? 'w-16 p-2' : 'w-56 p-4'
         }`}>
         <div className="flex flex-col h-full justify-between">
           <div>
             {/* Logo / Header area */}
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-[#E8ECF2]">
-              {!isCollapsed && (
-                <div className="flex items-center gap-2.5 overflow-hidden">
-                  <div className="w-7 h-7 rounded-md bg-[#2563EB] flex items-center justify-center font-bold text-white text-xs flex-shrink-0">
-                    S
-                  </div>
-                  <span className="font-semibold text-sm tracking-tight text-[#172033] truncate">
-                    SmarTrack CRM
-                  </span>
+            <div className="flex items-center justify-between pb-4 border-b border-[#E8ECF2] mb-4">
+              <div className="flex items-center gap-2.5 overflow-hidden">
+                <div className="w-8 h-8 rounded-md bg-[#2563EB] flex items-center justify-center font-bold text-white text-xs flex-shrink-0">
+                  S
                 </div>
-              )}
-
+                {(!isCollapsed || !mounted) && (
+                  <span className="font-semibold text-base text-[#172033] truncate">SmarTrack CRM</span>
+                )}
+              </div>
+              
               <button
                 onClick={handleToggleSidebar}
-                aria-label="Toggle sidebar"
-                className="p-1 rounded-md text-[#7C8799] hover:text-[#172033] hover:bg-[#F2F6FF] transition-colors mx-auto"
+                title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                className="p-1 rounded-md text-[#7C8799] hover:bg-[#F2F6FF] hover:text-[#172033] transition-colors flex-shrink-0"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={isCollapsed ? "M9 5l7 7-7 7" : "M15 19l-7-7 7-7"} />
+                <svg className={`w-4 h-4 transition-transform duration-200 ${isCollapsed ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
                 </svg>
               </button>
             </div>
@@ -403,35 +414,19 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
                   <NextLink
                     key={item.name}
                     href={item.href}
-                    onClick={() => {
-                      if (item.href === '/dashboard') {
-                        setDashboardIntent('sidebar-dashboard-click');
-                      }
-                    }}
-                    title={isCollapsed ? item.name : undefined}
-                    className={`flex items-center px-3 py-2 rounded-md text-xs font-medium transition-colors gap-2.5 relative ${
+                    title={isCollapsed && mounted ? item.name : undefined}
+                    className={`flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                       isActive
                         ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
                         : 'text-[#556176] hover:bg-[#F2F6FF] hover:text-[#172033]'
-                    } ${isCollapsed ? 'justify-center px-0' : ''}`}
+                    } ${isCollapsed && mounted ? 'justify-center px-0' : ''}`}
                   >
-                    <span className={`flex-shrink-0 relative ${isActive ? 'text-[#2563EB]' : 'text-[#556176]'}`}>
-                      {item.icon}
-                      {isCollapsed && item.name === 'Calendar' && todayApptsCount > 0 && (
-                        <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-[#2563EB] text-white font-bold text-[8px] flex items-center justify-center border border-white">
-                          {todayApptsCount}
-                        </span>
-                      )}
-                    </span>
-                    {!isCollapsed && (
-                      <>
-                        <span className="truncate">{item.name}</span>
-                        {item.name === 'Calendar' && todayApptsCount > 0 && (
-                          <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#EEF4FF] text-[#2563EB] border border-[#BFDBFE]">
-                            {todayApptsCount}
-                          </span>
-                        )}
-                      </>
+                    <span className={isActive ? 'text-[#2563EB]' : 'text-[#556176]'}>{item.icon}</span>
+                    {(!isCollapsed || !mounted) && <span className="truncate">{item.name}</span>}
+                    {(!isCollapsed || !mounted) && item.name === 'Calendar' && todayApptsCount > 0 && (
+                      <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-bold bg-[#EEF4FF] text-[#2563EB] border border-[#BFDBFE]">
+                        {todayApptsCount}
+                      </span>
                     )}
                   </NextLink>
                 );
@@ -439,39 +434,47 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
             </nav>
           </div>
 
-          {/* Sidebar Footer Agent Profile & Sign Out */}
-          <div className="border-t border-[#E8ECF2] pt-3 space-y-2">
-            {!isCollapsed ? (
-              <div className="flex items-center justify-between gap-2 px-1">
-                <div className="flex items-center gap-2 overflow-hidden">
+          {/* User profile / Footer area */}
+          <div className="border-t border-[#E8ECF2] pt-4 mt-auto">
+            {(!isCollapsed || !mounted) ? (
+              <div className="flex flex-col space-y-3">
+                <div className="flex items-center gap-2.5 px-1">
                   <div className="w-7 h-7 rounded-full bg-[#EEF4FF] text-[#2563EB] flex items-center justify-center font-bold text-xs border border-[#BFDBFE] flex-shrink-0">
                     {userName ? userName.charAt(0).toUpperCase() : 'A'}
                   </div>
-                  <div className="flex flex-col overflow-hidden">
-                    <span className="text-xs font-semibold text-[#172033] truncate leading-tight">{userName || 'Agent'}</span>
-                    <span className="text-[10px] text-[#7C8799] truncate leading-tight">Agent Profile</span>
+                  <div className="flex flex-col truncate">
+                    <span className="text-xs font-semibold text-[#172033] truncate">{userName || userEmail}</span>
+                    <span className="text-[10px] text-[#7C8799]">Licensed Agent</span>
                   </div>
                 </div>
                 <button
                   onClick={handleLogout}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-1.5 border border-[#DCE2EA] rounded-md font-medium text-xs text-[#556176] hover:bg-[#F8FAFC] transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3">
+                <div 
+                  title={userName || userEmail || 'Agent'} 
+                  className="w-8 h-8 rounded-full bg-[#EEF4FF] text-[#2563EB] flex items-center justify-center font-bold text-xs border border-[#BFDBFE]"
+                >
+                  {userName ? userName.charAt(0).toUpperCase() : 'A'}
+                </div>
+                <button
+                  onClick={handleLogout}
                   title="Sign Out"
-                  className="p-1 text-[#7C8799] hover:text-[#C24141] transition-colors rounded-md"
+                  className="p-2 text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033] rounded-md transition-colors"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                   </svg>
                 </button>
               </div>
-            ) : (
-              <button
-                onClick={handleLogout}
-                title="Sign Out"
-                className="w-full flex items-center justify-center p-2 text-[#7C8799] hover:text-[#C24141] transition-colors rounded-md"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-              </button>
             )}
           </div>
         </div>
@@ -482,7 +485,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
       <div className="flex-1 flex flex-col min-w-0 bg-[#F6F8FC]">
         
         {/* Top White Navigation Bar */}
-        {!isHealthWorkspace && (
+        {!isTopNavWorkspace && (
           <header className="hidden md:flex items-center justify-between px-6 py-2.5 bg-white border-b border-[#DCE2EA] sticky top-0 z-30 shadow-2xs">
             {/* Quick Actions */}
             <div className="flex items-center gap-2.5">
@@ -522,7 +525,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
         )}
 
         {/* Page Content */}
-        <main className={`flex-1 overflow-y-auto ${isHealthWorkspace ? 'p-0' : 'px-4 py-6 md:px-8 md:py-8'}`}>
+        <main className={`flex-1 overflow-y-auto ${isTopNavWorkspace ? 'p-0' : 'px-4 py-6 md:px-8 md:py-8'}`}>
           {children}
         </main>
       </div>

@@ -9,6 +9,8 @@ import HealthNotes from './HealthNotes';
 import HealthTimeline from './HealthTimeline';
 import HealthClientHeader from './HealthClientHeader';
 import HealthLeftRail from './HealthLeftRail';
+import MarketplaceSearchWorkspace from './MarketplaceSearchWorkspace';
+import HealthMedicalWorkspace from './HealthMedicalWorkspace';
 
 interface HealthPolicyTabProps {
   clientId: string;
@@ -40,7 +42,7 @@ export default function HealthPolicyTab({
   const [healthPolicy, setHealthPolicy] = useState<HealthPolicy | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
-  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'documents' | 'notes' | 'timeline' | 'links'>('summary');
+  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links'>('summary');
   const [marketplacePlan, setMarketplacePlan] = useState<any | null>(null);
   const [marketplaceContextInfo, setMarketplaceContextInfo] = useState<any | null>(null);
   
@@ -53,44 +55,35 @@ export default function HealthPolicyTab({
 
   // Clear toast after 4 seconds
   useEffect(() => {
-    if (toast) {
-      const timer = setTimeout(() => {
-        setToast(null);
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
+    if (!toast) return;
+    const timer = setTimeout(() => {
+      setToast(null);
+    }, 4000);
+    return () => clearTimeout(timer);
   }, [toast]);
 
   const loadPolicy = useCallback(async () => {
+    if (!clientId) return;
     try {
       setLoading(true);
-      const policy = await fetchHealthPolicy(clientId);
-      setHealthPolicy(policy);
+      const data = await fetchHealthPolicy(clientId);
+      setHealthPolicy(data);
     } catch (err) {
       console.error('Failed to load health policy:', err);
-      const message = err instanceof Error ? err.message : 'Could not load policy details.';
-      addToast({
-        title: 'Error Loading Health Policy',
-        description: message,
-        type: 'error'
-      });
     } finally {
       setLoading(false);
     }
-  }, [clientId, addToast]);
+  }, [clientId]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadPolicy();
-    }, 0);
-    return () => clearTimeout(timer);
+    loadPolicy();
   }, [loadPolicy]);
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-16 font-sans">
-        <div className="flex items-center gap-3 text-slate-500 text-xs font-bold">
-          <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+      <div className="flex items-center justify-center py-20">
+        <div className="flex items-center gap-3 text-slate-500 text-sm font-semibold">
+          <svg className="animate-spin h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
@@ -102,9 +95,9 @@ export default function HealthPolicyTab({
 
   return (
     <div className="space-y-4 font-sans">
-      {/* Self-contained Toast Notification UI */}
+      {/* Toast Notification Header Banner */}
       {toast && (
-        <div className={`fixed bottom-4 right-4 z-50 p-4 rounded-xl border shadow-xl flex flex-col gap-1 animate-fade-in font-sans min-w-[280px] max-w-sm ${
+        <div className={`p-4 rounded-xl border text-xs font-semibold shadow-xs animate-fadeIn ${
           toast.type === 'success'
             ? 'bg-emerald-50 border-emerald-100 text-emerald-800'
             : toast.type === 'error'
@@ -116,20 +109,8 @@ export default function HealthPolicyTab({
         </div>
       )}
 
-      {/* 1. Compact Client Header directly below top global nav */}
-      <HealthClientHeader
-        clientId={clientId}
-        clientName={clientName}
-        photoUrl={photoUrl}
-        lastUpdated={lastUpdated}
-        onSendEmail={onSendEmail}
-        onConsent={onConsent}
-        onDeleteProfile={onDeleteProfile}
-        isCompanyClient={isCompanyClient}
-      />
-
-      {/* 2. Main Workspace Layout */}
-      <div className="px-4 py-6 md:px-8 md:py-8 flex flex-col lg:flex-row items-start gap-6">
+      {/* Main Workspace Layout */}
+      <div className="flex flex-col lg:flex-row items-start gap-3 w-full">
         {/* Left Context Rail */}
         <HealthLeftRail
           clientId={clientId}
@@ -141,7 +122,52 @@ export default function HealthPolicyTab({
 
         {/* Right Main Content Workspace (Full Width) */}
         <div className="flex-1 w-full min-w-0">
-          {!healthPolicy && !isEditing ? (
+          {activeSubTab === 'marketplace' ? (
+            <MarketplaceSearchWorkspace
+              healthPolicyId={healthPolicy?.id}
+              context={marketplaceContextInfo?.context || {
+                coverageYear: 2026,
+                zipCode: null,
+                state: null,
+                countyName: null,
+                countyFips: null,
+                householdIncome: null,
+                householdSize: 1,
+                coveredApplicants: 1,
+                people: [],
+                validationErrors: [],
+              }}
+              onApplyPlan={async (plan) => {
+                if (marketplaceContextInfo?.onApplyPlan) {
+                  const res = await marketplaceContextInfo.onApplyPlan(plan);
+                  await loadPolicy();
+                  return res;
+                }
+              }}
+              onUnlinkPlan={async () => {
+                if (healthPolicy?.id) {
+                  const { unlinkMarketplacePlan } = await import('@/lib/marketplace/snapshot-service');
+                  const res = await unlinkMarketplacePlan(healthPolicy.id);
+                  if (res.success) {
+                    setMarketplacePlan(null);
+                    await loadPolicy();
+                  }
+                  return res;
+                }
+                return { success: false, error: 'No policy ID' };
+              }}
+              appliedPlan={marketplaceContextInfo?.appliedPlan || null}
+              addToast={addToast}
+              onReturnToSummary={() => setActiveSubTab('summary')}
+            />
+          ) : activeSubTab === 'medical' && healthPolicy ? (
+            <HealthMedicalWorkspace
+              healthPolicyId={healthPolicy.id}
+              clientId={clientId}
+              addToast={addToast}
+              onReturnToSummary={() => setActiveSubTab('summary')}
+            />
+          ) : !healthPolicy && !isEditing ? (
             <div className="bg-white border border-slate-100 rounded-2xl p-12 text-center shadow-sm space-y-6">
               <div className="max-w-md mx-auto space-y-2">
                 <h3 className="text-lg font-extrabold text-slate-800">No Health Policy Registered</h3>

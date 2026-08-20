@@ -115,21 +115,8 @@ export default function LifePolicyTab({
 
   return (
     <div className="space-y-4 font-sans">
-      {/* 1. Canonical Shared Client Header */}
-      <HealthClientHeader
-        clientId={clientId}
-        clientName={clientName}
-        photoUrl={photoUrl}
-        lastUpdated={null}
-        onSendEmail={onSendEmail}
-        onConsent={onConsent}
-        onDeleteProfile={onDeleteProfile}
-        isCompanyClient={isCompanyClient}
-        activeSection="life"
-      />
-
-      {/* 2. Main Workspace Layout */}
-      <div className="px-4 py-6 md:px-8 md:py-8 flex flex-col lg:flex-row items-start gap-6">
+      {/* Main Workspace Layout */}
+      <div className="flex flex-col lg:flex-row items-start gap-3 w-full">
         {/* Left Context Rail (Includes Client Life Profile box placed directly after Links) */}
         <LifeLeftRail
           clientId={clientId}

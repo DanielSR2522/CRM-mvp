@@ -1,0 +1,52 @@
+warning: in the working copy of 'src/app/clients/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/globals.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/common/CollapsibleSidebar.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/common/inline-edit/InlineEditableAddress.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/common/inline-edit/InlineEditableDate.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/common/inline-edit/InlineEditablePhone.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/common/inline-edit/InlineEditableSSN.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/common/inline-edit/InlineEditableSelect.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/common/inline-edit/InlineEditableText.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/consents/ConsentFilters.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/consents/ConsentStats.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/consents/ConsentStatusBadge.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/consents/ConsentTable.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/consents/NewConsentFlow.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/health/HealthClientHeader.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/health/HealthMedicalSection.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/life/LifePolicyTab.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/medicare/MedicareDetailsForm.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/medicare/MedicareTab.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/supplemental/SupplementalPolicyDetails.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/supplemental/SupplementalTab.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/lib/marketplace/snapshot-service.ts', LF will be replaced by CRLF the next time Git touches it
+ src/app/clients/[id]/page.tsx                      |   26 [32m+[m[31m-[m
+ src/app/clients/page.tsx                           | 1481 [32m+++++++++++[m[31m---------[m
+ src/app/consents/page.tsx                          |    8 [32m+[m[31m-[m
+ src/app/globals.css                                |   39 [32m+[m[31m-[m
+ src/components/DashboardLayout.tsx                 |  169 [32m+[m[31m--[m
+ src/components/common/CollapsibleSidebar.tsx       |    4 [32m+[m[31m-[m
+ .../common/inline-edit/InlineEditableAddress.tsx   |    4 [32m+[m[31m-[m
+ .../common/inline-edit/InlineEditableDate.tsx      |    4 [32m+[m[31m-[m
+ .../common/inline-edit/InlineEditablePhone.tsx     |    6 [32m+[m[31m-[m
+ .../common/inline-edit/InlineEditableSSN.tsx       |    6 [32m+[m[31m-[m
+ .../common/inline-edit/InlineEditableSelect.tsx    |    6 [32m+[m[31m-[m
+ .../common/inline-edit/InlineEditableText.tsx      |    6 [32m+[m[31m-[m
+ src/components/consents/ConsentFilters.tsx         |   12 [32m+[m[31m-[m
+ src/components/consents/ConsentStats.tsx           |   38 [32m+[m[31m-[m
+ src/components/consents/ConsentStatusBadge.tsx     |   23 [32m+[m[31m-[m
+ src/components/consents/ConsentTable.tsx           |   64 [32m+[m[31m-[m
+ src/components/consents/NewConsentFlow.tsx         |  569 [32m++++[m[31m----[m
+ src/components/health/HealthClientHeader.tsx       |  180 [32m++[m[31m-[m
+ src/components/health/HealthLeftRail.tsx           |  150 [32m+[m[31m-[m
+ src/components/health/HealthMedicalSection.tsx     |    9 [32m+[m[31m-[m
+ src/components/health/HealthPolicyForm.tsx         |   49 [32m+[m[31m-[m
+ src/components/health/HealthPolicyTab.tsx          |  106 [32m+[m[31m-[m
+ src/components/life/LifePolicyTab.tsx              |   17 [32m+[m[31m-[m
+ src/components/medicare/MedicareDetailsForm.tsx    |   10 [32m+[m[31m-[m
+ src/components/medicare/MedicareTab.tsx            |   17 [32m+[m[31m-[m
+ .../supplemental/SupplementalPolicyDetails.tsx     |   34 [32m+[m[31m-[m
+ src/components/supplemental/SupplementalTab.tsx    |   17 [32m+[m[31m-[m
+ src/lib/consents/request-service.ts                |   17 [32m+[m[31m-[m
+ src/lib/marketplace/snapshot-service.ts            |   32 [32m+[m
+ 29 files changed, 1619 insertions(+), 1484 deletions(-)

@@ -188,11 +188,11 @@ export default function InlineEditableAddress({
           }`}
         >
           <div className="space-y-0.5">
-            <div className="text-xs font-semibold text-slate-900">
+            <div className="text-[15px] font-semibold text-slate-950">
               {data.address || <span className="text-slate-400 font-normal italic">{emptyDisplay}</span>}
             </div>
             {(data.city || data.state || data.zip_code) && (
-              <div className="text-xs text-slate-500 font-medium">
+              <div className="text-[14px] text-slate-600 font-medium">
                 {[data.city, data.state, data.zip_code].filter(Boolean).join(', ')}
               </div>
             )}

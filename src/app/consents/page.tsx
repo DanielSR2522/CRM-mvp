@@ -311,19 +311,19 @@ export default function ConsentsDashboardPage() {
     <DashboardLayout>
       <CrmPageContainer>
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 pb-5">
           <div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
               Consents &amp; Signatures
             </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            <p className="text-xs text-slate-500 mt-1">
               Every consent across your clients.
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Link
               href="/consents/templates"
-              className="px-4 py-2.5 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl transition-all"
+              className="px-4 py-2.5 border border-slate-200 bg-white hover:bg-slate-100:bg-slate-700 text-slate-700 text-xs font-bold rounded-xl transition-all"
             >
               Consent Templates
             </Link>

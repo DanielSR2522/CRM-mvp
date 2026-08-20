@@ -98,17 +98,46 @@ body {
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
 }
 
-.crm-header-title {
+/* GLOBAL CLIENT PROFILE SEMANTIC TYPOGRAPHY SYSTEM */
+.crm-client-name {
   font-size: 24px;
-  font-weight: 600;
-  color: #172033;
-  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: #020617; /* slate-950 */
+}
+
+.crm-major-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #020617; /* slate-950 */
 }
 
 .crm-section-title {
   font-size: 16px;
+  font-weight: 700;
+  color: #020617; /* slate-950 */
+}
+
+.crm-field-label {
+  font-size: 14px;
   font-weight: 600;
-  color: #172033;
+  color: #64748b; /* slate-500 */
+}
+
+.crm-field-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: #020617; /* slate-950 */
+}
+
+.crm-helper-text {
+  font-size: 13px;
+  font-weight: 400;
+  color: #94a3b8; /* slate-400 */
+}
+
+.crm-nav-text {
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .crm-btn-primary {

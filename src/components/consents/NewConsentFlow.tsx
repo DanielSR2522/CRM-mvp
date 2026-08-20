@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { supabase } from '@/lib/supabaseClient';
 import type {
   ClientConsentRow,
   ConsentTemplate,
@@ -16,6 +17,7 @@ import { LANGUAGE_LABELS } from '@/lib/consents/types';
 import { getCurrentVersion, getTemplate, getVersionById } from '@/lib/consents/template-service';
 import {
   createConsentDraft,
+  getConsent,
   getPrimarySigner,
   listActiveTemplates,
   listClientPolicies,
@@ -38,19 +40,9 @@ import {
   expiryFromDays,
   isValidExpiryDays,
 } from '@/lib/consents/token-service';
+import { deliverConsent } from '@/lib/delivery/delivery-service';
 import { formatIsoToUsDate } from '@/utils/dateUtils';
 import ConsentPreview from './ConsentPreview';
-
-/**
- * The New Consent wizard.
- *
- * Three steps, but only two of them ask for anything: pick a template and an
- * optional policy, then check the merged document and confirm the signer. The
- * merge itself runs between them and is where all the interesting failure modes
- * live, which is why its warnings get a whole panel rather than a toast.
- *
- * Nothing here sends. The wizard's only write is a draft.
- */
 
 type PolicyOption = {
   id: string;
@@ -71,22 +63,12 @@ interface MergedDocument {
   hash: string;
 }
 
-/** One field whose value in the client record has moved away from the snapshot. */
 interface VariableDrift {
   token: string;
-  /** What the frozen document says. */
   before: string;
-  /** What the client record says now. */
   after: string;
 }
 
-/**
- * Compares the frozen snapshot against a fresh merge.
- *
- * This is what makes "the data changed" visible instead of silent. Without it,
- * an agent editing a draft would either lose the update or lose the original,
- * and never know which.
- */
 function findDrift(before: MergeValues, after: MergeValues): VariableDrift[] {
   const tokens = new Set([...Object.keys(before), ...Object.keys(after)]);
   const drifted: VariableDrift[] = [];
@@ -107,27 +89,24 @@ function findDrift(before: MergeValues, after: MergeValues): VariableDrift[] {
 interface NewConsentFlowProps {
   clientId: string;
   clientName: string;
+  initialPolicyId?: string | null;
   onCancel: () => void;
   onCreated: (message: string) => void;
-  /** Set to edit an existing draft instead of creating a new consent. */
   editDraft?: DashboardConsentRow | ClientConsentRow;
 }
 
 type Step = 1 | 2;
-
-/** How an edited draft's document should be treated. The agent decides; never us. */
 type DocumentChoice = 'keep' | 'regenerate';
 
 export default function NewConsentFlow({
   clientId,
   clientName,
+  initialPolicyId,
   onCancel,
   onCreated,
   editDraft,
 }: NewConsentFlowProps) {
   const isEditing = Boolean(editDraft);
-  // When editing, step 1 is skipped: the template and version are frozen into the
-  // draft already and changing them would make it a different document.
   const [step, setStep] = useState<Step>(isEditing ? 2 : 1);
 
   // Step 1 inputs
@@ -158,13 +137,16 @@ export default function NewConsentFlow({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
 
-  // ---- Editing an existing draft ---------------------------------------
+  // Delivery Channel Modal State
+  const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
+  const [selectedChannel, setSelectedChannel] = useState<'whatsapp' | 'email' | 'sms'>('whatsapp');
+  const [sendingConsent, setSendingConsent] = useState(false);
+
+  // Editing draft state
   const [editLoading, setEditLoading] = useState(isEditing);
   const [editTemplate, setEditTemplate] = useState<ConsentTemplate | null>(null);
   const [documentChoice, setDocumentChoice] = useState<DocumentChoice>('keep');
-  /** Fields whose stored value no longer matches the client record. */
   const [drift, setDrift] = useState<VariableDrift[]>([]);
-  /** The document as it would look if regenerated now. */
   const [freshMerge, setFreshMerge] = useState<MergedDocument | null>(null);
 
   const template = useMemo(
@@ -172,7 +154,7 @@ export default function NewConsentFlow({
     [isEditing, editTemplate, templates, templateId]
   );
 
-  // ---- Load pickers ------------------------------------------------------
+  // Load active templates & client policies (with strict ownership validation)
   useEffect(() => {
     let cancelled = false;
 
@@ -187,6 +169,19 @@ export default function NewConsentFlow({
         if (cancelled) return;
         setTemplates(activeTemplates);
         setPolicies(clientPolicies as PolicyOption[]);
+
+        // STRICT POLICY OWNERSHIP VALIDATION:
+        // Only set policyId if initialPolicyId actually belongs to this client!
+        if (initialPolicyId) {
+          const matched = clientPolicies.find((p) => p.id === initialPolicyId);
+          if (matched) {
+            setPolicyId(matched.id);
+          } else {
+            setPolicyId('');
+          }
+        } else {
+          setPolicyId('');
+        }
       } catch (err) {
         if (cancelled) return;
         setOptionsError(err instanceof Error ? err.message : 'Could not load templates.');
@@ -198,18 +193,9 @@ export default function NewConsentFlow({
     return () => {
       cancelled = true;
     };
-  }, [clientId]);
+  }, [clientId, initialPolicyId]);
 
-  // ---- Load an existing draft -------------------------------------------
-  /**
-   * Rebuilds the editing state from a stored draft, and re-merges against live
-   * data so the agent can see what has changed since it was created.
-   *
-   * The stored document is loaded as-is and shown by default. The fresh merge is
-   * computed but only applied if the agent asks for it — a draft's document is
-   * already hashed, and replacing it behind their back would silently change what
-   * they thought they were about to send.
-   */
+  // Load existing draft
   useEffect(() => {
     if (!editDraft) return;
     let cancelled = false;
@@ -245,7 +231,6 @@ export default function NewConsentFlow({
           setExpiryDays(isValidExpiryDays(remaining) ? remaining : DEFAULT_EXPIRY_DAYS);
         }
 
-        // The document exactly as frozen.
         const snapshot = editDraft.merge_data_snapshot;
         setMerged({
           content: editDraft.rendered_content,
@@ -255,7 +240,6 @@ export default function NewConsentFlow({
           hash: editDraft.original_document_hash ?? '',
         });
 
-        // And what it would be if rebuilt right now.
         const client = await getClientMergeData(clientId);
         const policy = editDraft.policy_id
           ? await getPolicyMergeData(editDraft.policy_id, clientId)
@@ -283,8 +267,6 @@ export default function NewConsentFlow({
           hash: freshHash,
         });
 
-        // current_date moves every day, so it would report as drift on every
-        // edit and drown the fields that actually matter.
         setDrift(
           findDrift(snapshot?.values ?? {}, freshValues).filter(
             (d) => d.token !== 'current_date' && d.token !== 'current_year'
@@ -303,20 +285,12 @@ export default function NewConsentFlow({
     };
   }, [editDraft, clientId]);
 
-  /** What the preview and the save should use, following the agent's choice. */
   const activeDocument = useMemo(() => {
     if (!isEditing) return merged;
     return documentChoice === 'regenerate' ? freshMerge : merged;
   }, [isEditing, documentChoice, freshMerge, merged]);
 
-  // ---- Merge -------------------------------------------------------------
-
-  /**
-   * Loads real data, renders the document, and hashes it.
-   *
-   * Everything is recomputed from scratch on every run — no partial reuse — so
-   * changing the policy can never leave a stale value behind in the preview.
-   */
+  // Run Merge Document
   const runMerge = useCallback(async () => {
     if (!template) return;
 
@@ -328,14 +302,12 @@ export default function NewConsentFlow({
       const currentVersion = await getCurrentVersion(template);
       if (!currentVersion) {
         throw new Error(
-          `Version ${template.current_version} of "${template.internal_name}" is missing. The template may be corrupted.`
+          `Version ${template.current_version} of "${template.internal_name}" is missing.`
         );
       }
 
       const client = await getClientMergeData(clientId);
-      // getPolicyMergeData verifies the policy belongs to this client. An agent
-      // owns many clients, so RLS alone would happily return someone else's
-      // policy here.
+      // Validate policy ownership cleanly
       const policy = policyId ? await getPolicyMergeData(policyId, clientId) : null;
 
       const now = new Date();
@@ -353,7 +325,6 @@ export default function NewConsentFlow({
       setPolicyData(policy);
       setMerged({ content, consentText, values, unresolved, hash });
 
-      // Prefill the signer from the client record — the agent can correct it.
       setSignerName(client.full_name ?? '');
       setSignerEmail(client.email ?? '');
       setSignerPhone(client.phone ?? '');
@@ -367,8 +338,7 @@ export default function NewConsentFlow({
     }
   }, [template, clientId, policyId]);
 
-  // ---- Save --------------------------------------------------------------
-
+  // Validation Check
   const signerNameError = !signerName.trim() ? 'The signer needs a full name.' : null;
   const titleError = !title.trim() ? 'A title is required.' : null;
   const expiryError = !isValidExpiryDays(expiryDays)
@@ -376,61 +346,21 @@ export default function NewConsentFlow({
     : null;
   const canSave = !signerNameError && !titleError && !expiryError;
 
-  const handleSave = async () => {
+  // Step 2 "Send" Button Click Handler -> Opens Channel Modal
+  const handleOpenSendModal = () => {
     setShowErrors(true);
     setSaveError(null);
-
     if (!canSave) return;
+    setIsChannelModalOpen(true);
+  };
 
-    // ---- Editing an existing draft --------------------------------------
-    if (isEditing && editDraft) {
-      const doc = activeDocument;
-      if (!doc) return;
-
-      setSaving(true);
-      try {
-        const expiresAt = expiryFromDays(expiryDays);
-
-        await updateConsentDraft({
-          requestId: editDraft.id,
-          title,
-          signer: { fullName: signerName, email: signerEmail || null, phone: signerPhone || null },
-          expiresAt,
-          // Omitted entirely when keeping the original: the document, its
-          // snapshot and its hash are then never touched.
-          regenerated:
-            documentChoice === 'regenerate'
-              ? {
-                  policyId: policyData?.policy_id ?? null,
-                  renderedContent: doc.content,
-                  mergeSnapshot: buildMergeSnapshot(
-                    doc.values,
-                    doc.unresolved,
-                    clientId,
-                    policyData?.policy_id ?? null,
-                    doc.consentText
-                  ),
-                  originalDocumentHash: doc.hash,
-                }
-              : undefined,
-        });
-
-        onCreated(
-          documentChoice === 'regenerate'
-            ? 'Draft updated and the document was rebuilt with current data.'
-            : 'Draft updated. The document was left exactly as it was.'
-        );
-      } catch (err) {
-        setSaveError(err instanceof Error ? err.message : 'Could not update the draft.');
-        setSaving(false);
-      }
-      return;
-    }
-
-    // ---- Creating a new consent ------------------------------------------
+  // Channel Selection Modal -> Execute Delivery
+  const handleExecuteSend = async () => {
     if (!template || !version || !merged) return;
 
-    setSaving(true);
+    setSendingConsent(true);
+    setSaveError(null);
+
     try {
       const expiresAt = expiryFromDays(expiryDays);
       const snapshot = buildMergeSnapshot(
@@ -441,7 +371,8 @@ export default function NewConsentFlow({
         merged.consentText
       );
 
-      const result = await createConsentDraft({
+      // 1. Create canonical signature_request record (policyId is NULL for general client consents)
+      const draftResult = await createConsentDraft({
         clientId,
         policyId: policyData?.policy_id ?? null,
         template,
@@ -459,27 +390,44 @@ export default function NewConsentFlow({
         expiresAt,
       });
 
-      // The raw token is returned once and is not stored. This phase does not
-      // deliver it anywhere, so it is intentionally dropped here — Phase 7 owns
-      // the link. Reading result.token and doing nothing with it is the correct
-      // behaviour today.
-      void result.token;
+      // Update selected delivery channel on database
+      await supabase
+        .from('signature_requests')
+        .update({ selected_delivery_channel: selectedChannel })
+        .eq('id', draftResult.requestId);
 
+      // 2. Fetch created signature_requests row and prepare DashboardConsentRow object for delivery orchestration
+      const createdRow = await getConsent(draftResult.requestId);
+      const dashboardRow: DashboardConsentRow = {
+        ...createdRow,
+        selected_delivery_channel: selectedChannel,
+        client_name: clientName,
+        template_internal_name: template.internal_name,
+        signer_name: signerName,
+        signer_email: signerEmail || null,
+        signer_phone: signerPhone || null,
+      };
+
+      // 3. Trigger delivery adapter (opens WhatsApp / sends Email)
+      await deliverConsent(dashboardRow, selectedChannel);
+
+      setIsChannelModalOpen(false);
       onCreated(
-        result.warning
-          ? `Draft saved. ${result.warning}`
-          : 'Draft saved. Nothing has been sent to the client yet.'
+        `Consent sent successfully via ${
+          selectedChannel === 'whatsapp' ? 'WhatsApp' : selectedChannel === 'email' ? 'Email' : 'SMS'
+        }.`
       );
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Could not save the draft.');
-      setSaving(false);
+    } catch (err: any) {
+      console.error('Error sending consent:', err);
+      setSaveError(err instanceof Error ? err.message : 'Could not send consent.');
+      setIsChannelModalOpen(false);
+    } finally {
+      setSendingConsent(false);
     }
   };
 
-  // ---- Render ------------------------------------------------------------
-
   return (
-    <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+    <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden font-sans text-xs">
       {/* Header + step indicator */}
       <div className="px-5 py-4 border-b border-slate-50 flex items-center justify-between gap-4">
         <div>
@@ -489,7 +437,7 @@ export default function NewConsentFlow({
         <div className="flex items-center gap-2">
           <StepDot n={1} active={step === 1} done={step > 1} label="Document" />
           <div className="w-6 h-px bg-slate-200" />
-          <StepDot n={2} active={step === 2} done={false} label="Review & signer" />
+          <StepDot n={2} active={step === 2} done={false} label="Review & Send" />
         </div>
       </div>
 
@@ -508,8 +456,7 @@ export default function NewConsentFlow({
             <div className="text-center py-8">
               <p className="text-sm font-bold text-slate-700">No active templates</p>
               <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                A consent can only be built from an active template. Create one, or activate an
-                existing draft.
+                A consent can only be built from an active template. Create one in Consent Templates.
               </p>
               <Link
                 href="/consents/templates"
@@ -540,7 +487,7 @@ export default function NewConsentFlow({
                     id="consent-template"
                     value={templateId}
                     onChange={(e) => setTemplateId(e.target.value)}
-                    className="w-full text-sm text-slate-800 border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full text-xs font-semibold text-slate-800 border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select a published template…</option>
                     {templates
@@ -565,7 +512,7 @@ export default function NewConsentFlow({
                 )}
               </div>
 
-              {/* Policy */}
+              {/* Policy Selection (Optional) */}
               <div>
                 <label
                   htmlFor="consent-policy"
@@ -575,16 +522,16 @@ export default function NewConsentFlow({
                 </label>
                 {policies.length === 0 ? (
                   <p className="text-xs text-slate-400 border border-slate-100 rounded-xl px-3 py-2 bg-slate-50/60">
-                    This client has no policies. Documents using policy fields will show a warning.
+                    This client has no policies. General client fields will be used.
                   </p>
                 ) : (
                   <select
                     id="consent-policy"
                     value={policyId}
                     onChange={(e) => setPolicyId(e.target.value)}
-                    className="w-full text-sm text-slate-800 border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full text-xs font-semibold text-slate-800 border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">No policy</option>
+                    <option value="">No policy (General Client Consent)</option>
                     {policies.map((p) => (
                       <option key={p.id} value={p.id}>
                         {[p.policy_number || 'No number', p.policy_type, p.company_name]
@@ -596,7 +543,7 @@ export default function NewConsentFlow({
                   </select>
                 )}
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Only policies belonging to this client are listed.
+                  General consents leave policy_id as NULL. Policy-specific consents tie directly to that record.
                 </p>
               </div>
 
@@ -631,73 +578,9 @@ export default function NewConsentFlow({
         </div>
       )}
 
-      {step === 2 && !editLoading && mergeError && isEditing && (
-        <div className="p-5">
-          <ErrorBox title="Could not load this draft" message={mergeError} />
-          <button
-            type="button"
-            onClick={onCancel}
-            className="mt-3 px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold rounded-xl transition-colors"
-          >
-            Back
-          </button>
-        </div>
-      )}
-
       {step === 2 && !editLoading && activeDocument && template && (
         <div className="p-5 space-y-5">
-          {saveError && <ErrorBox title="Could not save" message={saveError} />}
-
-          {/* ---- The data changed since this draft was built ---- */}
-          {isEditing && drift.length > 0 && (
-            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-              <p className="text-sm font-bold text-blue-900">
-                {drift.length} field{drift.length === 1 ? '' : 's'} changed since this draft was
-                created
-              </p>
-              <p className="text-xs text-blue-800 mt-1">
-                The saved document still shows the old values. Choose what to keep — nothing is
-                replaced unless you say so.
-              </p>
-
-              <ul className="mt-3 space-y-1.5">
-                {drift.map((d) => (
-                  <li key={d.token} className="text-xs text-blue-900">
-                    <code className="font-mono font-bold">{`{{${d.token}}}`}</code>{' '}
-                    <span className="line-through text-blue-500">{d.before}</span>
-                    {' → '}
-                    <strong>{d.after}</strong>
-                  </li>
-                ))}
-              </ul>
-
-              <div className="mt-4 space-y-2">
-                <ChoiceRow
-                  name="doc-choice"
-                  checked={documentChoice === 'keep'}
-                  onChange={() => setDocumentChoice('keep')}
-                  title="Keep the original document"
-                  description="The document and its hash stay exactly as they are. The old values remain."
-                />
-                <ChoiceRow
-                  name="doc-choice"
-                  checked={documentChoice === 'regenerate'}
-                  onChange={() => setDocumentChoice('regenerate')}
-                  title="Rebuild with current data"
-                  description="The document is re-merged and re-hashed. Safe here because nothing has been sent yet."
-                />
-              </div>
-            </div>
-          )}
-
-          {isEditing && drift.length === 0 && freshMerge && (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs text-slate-600">
-                The client&apos;s data has not changed since this draft was created. The document is
-                still current.
-              </p>
-            </div>
-          )}
+          {saveError && <ErrorBox title="Could not process consent" message={saveError} />}
 
           {/* Warnings */}
           {activeDocument.unresolved.length > 0 && (
@@ -722,14 +605,11 @@ export default function NewConsentFlow({
                   Go back and select a policy
                 </button>
               )}
-              <p className="text-[11px] text-amber-700 mt-2">
-                You can still save this draft. The fields will print exactly as highlighted.
-              </p>
             </div>
           )}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
-            {/* Left: signer + settings */}
+            {/* Left: Signer & Settings */}
             <div className="space-y-4">
               <div>
                 <label
@@ -778,14 +658,9 @@ export default function NewConsentFlow({
                       value={signerEmail}
                       onChange={(e) => setSignerEmail(e.target.value)}
                       disabled={saving}
-                      placeholder="Not on file"
+                      placeholder="Email address..."
                       className={inputClass(false)}
                     />
-                    {!signerEmail.trim() && (
-                      <p className="text-[10px] text-slate-400 mt-1">
-                        Optional for a draft. Required later to send by email.
-                      </p>
-                    )}
                   </div>
 
                   <div>
@@ -797,14 +672,9 @@ export default function NewConsentFlow({
                       value={signerPhone}
                       onChange={(e) => setSignerPhone(e.target.value)}
                       disabled={saving}
-                      placeholder="Not on file"
+                      placeholder="Phone number..."
                       className={inputClass(false)}
                     />
-                    {!signerPhone.trim() && (
-                      <p className="text-[10px] text-slate-400 mt-1">
-                        Optional for a draft. Required later to send by WhatsApp or SMS.
-                      </p>
-                    )}
                   </div>
                 </div>
               </div>
@@ -849,19 +719,13 @@ export default function NewConsentFlow({
                         ? [policyData.policy_number || 'No number', policyData.policy_type]
                             .filter(Boolean)
                             .join(' · ')
-                        : 'None'
+                        : 'None (General Client Consent)'
                     }
-                  />
-                  <SummaryRow label="Fields filled" value={`${Object.keys(activeDocument.values).length}`} />
-                  <SummaryRow
-                    label="Document hash"
-                    value={activeDocument.hash.slice(0, 16) + '…'}
-                    mono
-                    title={activeDocument.hash}
                   />
                 </dl>
               </div>
 
+              {/* ACTION BUTTONS: SAVE AS DRAFT REPLACED WITH SEND */}
               <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-50">
                 <button
                   type="button"
@@ -882,34 +746,137 @@ export default function NewConsentFlow({
                   </button>
                   <button
                     type="button"
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors disabled:opacity-60 active:scale-[0.98]"
+                    onClick={handleOpenSendModal}
+                    className="inline-flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors shadow-md active:scale-[0.98]"
                   >
-                    {saving && <Spinner />}
-                    {saving ? 'Saving…' : 'Save as Draft'}
+                    Send →
                   </button>
                 </div>
               </div>
+            </div>
 
-              <p className="text-[10px] text-slate-400 text-center">
-                Saving does not send anything. Delivery comes later.
+            {/* Right: Document Preview */}
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Document preview
+              </p>
+              <ConsentPreview
+                content={activeDocument.content}
+                publicTitle={title}
+                consentText={activeDocument.consentText}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SEND CONSENT / DELIVERY CHANNEL SELECTION MODAL */}
+      {isChannelModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-2xl max-w-md w-full space-y-5 font-sans animate-scale-up">
+            <div>
+              <h4 className="text-base font-extrabold text-slate-900">Send Consent</h4>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {clientName} · {title || template?.public_title}
               </p>
             </div>
 
-            {/* Right: the real document */}
-            <div className="lg:sticky lg:top-4">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                Document preview — real client data
-              </p>
-              <div className="max-h-[60vh] overflow-y-auto border border-slate-100 rounded-2xl">
-                <ConsentPreview
-                  content={activeDocument.content}
-                  publicTitle={title}
-                  consentText={activeDocument.consentText}
-                  bare
+            <div className="space-y-3">
+              <label className="block text-xs font-extrabold text-slate-700">
+                Choose delivery method:
+              </label>
+
+              {/* WhatsApp Option */}
+              <div
+                onClick={() => setSelectedChannel('whatsapp')}
+                className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex items-start gap-3 ${
+                  selectedChannel === 'whatsapp'
+                    ? 'border-emerald-500 bg-emerald-50/60 ring-2 ring-emerald-400/40'
+                    : 'border-slate-200 bg-white hover:bg-slate-50'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="deliveryChannel"
+                  checked={selectedChannel === 'whatsapp'}
+                  onChange={() => setSelectedChannel('whatsapp')}
+                  className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
                 />
+                <div>
+                  <span className="font-extrabold text-slate-900 block text-xs">WhatsApp</span>
+                  <span className="text-xs text-slate-600 font-mono block mt-0.5">
+                    {signerPhone || 'No phone number'}
+                  </span>
+                </div>
               </div>
+
+              {/* Email Option */}
+              <div
+                onClick={() => setSelectedChannel('email')}
+                className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex items-start gap-3 ${
+                  selectedChannel === 'email'
+                    ? 'border-blue-500 bg-blue-50/60 ring-2 ring-blue-400/40'
+                    : 'border-slate-200 bg-white hover:bg-slate-50'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="deliveryChannel"
+                  checked={selectedChannel === 'email'}
+                  onChange={() => setSelectedChannel('email')}
+                  className="mt-0.5 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <span className="font-extrabold text-slate-900 block text-xs">Email</span>
+                  <span className="text-xs text-slate-600 font-medium block mt-0.5">
+                    {signerEmail || 'No email address'}
+                  </span>
+                </div>
+              </div>
+
+              {/* SMS Option */}
+              <div
+                onClick={() => setSelectedChannel('sms')}
+                className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex items-start gap-3 ${
+                  selectedChannel === 'sms'
+                    ? 'border-amber-500 bg-amber-50/60 ring-2 ring-amber-400/40'
+                    : 'border-slate-200 bg-white hover:bg-slate-50'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="deliveryChannel"
+                  checked={selectedChannel === 'sms'}
+                  onChange={() => setSelectedChannel('sms')}
+                  className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                />
+                <div>
+                  <span className="font-extrabold text-slate-900 block text-xs">SMS</span>
+                  <span className="text-xs text-slate-600 font-mono block mt-0.5">
+                    {signerPhone || 'No phone number'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsChannelModalOpen(false)}
+                disabled={sendingConsent}
+                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteSend}
+                disabled={sendingConsent}
+                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md transition-all flex items-center gap-2"
+              >
+                {sendingConsent && <Spinner />}
+                {sendingConsent ? 'Sending...' : 'Send Consent'}
+              </button>
             </div>
           </div>
         </div>
@@ -918,65 +885,23 @@ export default function NewConsentFlow({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Small pieces
-// ---------------------------------------------------------------------------
-
-function inputClass(hasError: unknown): string {
-  const base =
-    'w-full text-sm text-slate-800 border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:border-transparent disabled:bg-slate-50 disabled:opacity-60';
-  return hasError ? `${base} border-rose-300 focus:ring-rose-500` : `${base} border-slate-200 focus:ring-blue-500`;
-}
-
-function FieldError({ message }: { message: string }) {
-  return <p className="text-xs text-rose-600 font-medium mt-1">{message}</p>;
-}
-
-/**
- * A radio option with room to explain itself.
- *
- * Used for the keep-vs-rebuild decision, where the consequence of each choice is
- * the whole point and a bare label would leave the agent guessing.
- */
-function ChoiceRow({
-  name,
-  checked,
-  onChange,
-  title,
-  description,
-}: {
-  name: string;
-  checked: boolean;
-  onChange: () => void;
-  title: string;
-  description: string;
-}) {
+function StepDot({ n, active, done, label }: { n: number; active: boolean; done: boolean; label: string }) {
   return (
-    <label
-      className={`flex gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
-        checked ? 'border-blue-400 bg-white' : 'border-blue-200/60 bg-white/50 hover:bg-white'
-      }`}
-    >
-      <input
-        type="radio"
-        name={name}
-        checked={checked}
-        onChange={onChange}
-        className="mt-0.5 accent-blue-600 flex-shrink-0"
-      />
-      <span>
-        <span className="block text-xs font-bold text-slate-800">{title}</span>
-        <span className="block text-[11px] text-slate-500 mt-0.5 leading-relaxed">{description}</span>
+    <div className="flex items-center gap-1.5">
+      <div
+        className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center ${
+          done
+            ? 'bg-blue-600 text-white'
+            : active
+            ? 'bg-blue-600 text-white'
+            : 'bg-slate-100 text-slate-400'
+        }`}
+      >
+        {done ? '✓' : n}
+      </div>
+      <span className={`text-xs font-bold ${active || done ? 'text-slate-800' : 'text-slate-400'}`}>
+        {label}
       </span>
-    </label>
-  );
-}
-
-function ErrorBox({ title, message }: { title: string; message: string }) {
-  return (
-    <div className="bg-rose-50 border border-rose-100 rounded-xl px-4 py-3">
-      <p className="text-sm font-bold text-rose-800">{title}</p>
-      <p className="text-xs text-rose-700 mt-0.5">{message}</p>
     </div>
   );
 }
@@ -993,10 +918,10 @@ function SummaryRow({
   title?: string;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-slate-400 font-semibold flex-shrink-0">{label}</dt>
+    <div className="flex justify-between gap-3">
+      <dt className="text-slate-400">{label}</dt>
       <dd
-        className={`text-slate-700 font-semibold text-right truncate ${mono ? 'font-mono text-[10px]' : ''}`}
+        className={`font-semibold text-slate-800 truncate text-right ${mono ? 'font-mono' : ''}`}
         title={title}
       >
         {value}
@@ -1005,32 +930,36 @@ function SummaryRow({
   );
 }
 
-function StepDot({ n, active, done, label }: { n: number; active: boolean; done: boolean; label: string }) {
+function FieldError({ message }: { message: string }) {
+  return <p className="text-[10px] text-rose-500 mt-1 font-medium">{message}</p>;
+}
+
+function ErrorBox({ title, message }: { title: string; message: string }) {
   return (
-    <div className="flex items-center gap-1.5" title={label}>
-      <span
-        className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-colors ${
-          done
-            ? 'bg-emerald-100 text-emerald-700'
-            : active
-              ? 'bg-blue-600 text-white'
-              : 'bg-slate-100 text-slate-400'
-        }`}
-      >
-        {done ? '✓' : n}
-      </span>
-      <span className={`text-[10px] font-bold hidden sm:inline ${active ? 'text-slate-700' : 'text-slate-400'}`}>
-        {label}
-      </span>
+    <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900">
+      <p className="font-bold">{title}</p>
+      <p className="text-[11px] text-rose-700 mt-0.5">{message}</p>
     </div>
   );
 }
 
+function inputClass(hasError: boolean | string | null) {
+  return `w-full text-xs font-semibold text-slate-800 border rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 ${
+    hasError
+      ? 'border-rose-300 focus:ring-rose-400 bg-rose-50/30'
+      : 'border-slate-200 focus:ring-blue-500'
+  }`;
+}
+
 function Spinner() {
   return (
-    <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+    <svg className="animate-spin h-3.5 w-3.5 text-current" fill="none" viewBox="0 0 24 24">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
     </svg>
   );
 }

@@ -16,8 +16,8 @@ export interface ClientLinkItem {
 
 interface HealthLeftRailProps {
   clientId: string;
-  activeSubTab: 'summary' | 'documents' | 'notes' | 'timeline' | 'links';
-  setActiveSubTab: (tab: 'summary' | 'documents' | 'notes' | 'timeline' | 'links') => void;
+  activeSubTab: 'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links';
+  setActiveSubTab: (tab: 'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links') => void;
   marketplacePlanData?: any | null;
   marketplaceContextInfo?: {
     context: MarketplaceClientContext;
@@ -48,6 +48,7 @@ export default function HealthLeftRail({
   const [openBenefitGroup, setOpenBenefitGroup] = useState<'overview' | 'medical' | 'drugs' | 'extra' | null>('overview');
 
   const loadLinks = useCallback(async () => {
+    if (!clientId) return;
     try {
       setLoadingLinks(true);
       const { data, error } = await supabase
@@ -56,11 +57,10 @@ export default function HealthLeftRail({
         .eq('client_id', clientId)
         .order('created_at', { ascending: false });
 
-      if (!error && data) {
-        setLinks(data);
-      }
+      if (error) throw error;
+      setLinks(data || []);
     } catch (err) {
-      console.error('Failed to load client links:', err);
+      console.error('Failed to load links:', err);
     } finally {
       setLoadingLinks(false);
     }
@@ -72,31 +72,29 @@ export default function HealthLeftRail({
 
   const handleSaveLink = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!linkTitle.trim() || !linkUrl.trim() || savingLink) return;
-
-    setSavingLink(true);
     setLinkError(null);
-
-    let cleanUrl = linkUrl.trim();
-    if (!/^https?:\/\//i.test(cleanUrl)) {
-      cleanUrl = 'https://' + cleanUrl;
+    if (!linkTitle.trim() || !linkUrl.trim()) {
+      setLinkError('Title and URL are required.');
+      return;
     }
 
     try {
-      const { error } = await supabase.from('client_links').insert({
-        client_id: clientId,
-        title: linkTitle.trim(),
-        url: cleanUrl
-      });
+      setSavingLink(true);
+      const formattedUrl = linkUrl.startsWith('http://') || linkUrl.startsWith('https://')
+        ? linkUrl
+        : `https://${linkUrl}`;
+
+      const { error } = await supabase
+        .from('client_links')
+        .insert([{ client_id: clientId, title: linkTitle.trim(), url: formattedUrl }]);
 
       if (error) throw error;
-
       setLinkTitle('');
       setLinkUrl('');
       setShowAddLinkModal(false);
       await loadLinks();
     } catch (err: any) {
-      console.error('Failed to save link:', err);
+      console.error('Failed to add link:', err);
       setLinkError(err?.message || 'Failed to save link.');
     } finally {
       setSavingLink(false);
@@ -114,11 +112,13 @@ export default function HealthLeftRail({
     }
   };
 
-  const navItems: Array<{ id: 'summary' | 'documents' | 'notes' | 'timeline' | 'links'; label: string; icon: string }> = [
+  const navItems: Array<{ id: 'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links'; label: string; icon: string }> = [
     { id: 'summary', label: 'SUMMARY', icon: '📋' },
     { id: 'documents', label: 'DOCUMENTS', icon: '📁' },
     { id: 'notes', label: 'NOTES', icon: '📝' },
     { id: 'timeline', label: 'TIMELINE', icon: '⏱️' },
+    { id: 'marketplace', label: 'MARKETPLACE SEARCH', icon: '🔍' },
+    { id: 'medical', label: 'HEALTH MEDICAL', icon: '🩺' },
     { id: 'links', label: 'LINKS', icon: '🔗' },
   ];
 
@@ -192,114 +192,6 @@ export default function HealthLeftRail({
                 </button>
               </div>
             ))}
-          </div>
-        )}
-      </div>
-
-      {/* 3. Marketplace Lookup Area (Above Plan Benefits) */}
-      {marketplaceContextInfo && (
-        <div className="border-t border-slate-100 pt-4">
-          <MarketplacePlanLookupPanel
-            initialPlanId={marketplaceContextInfo.planId}
-            context={marketplaceContextInfo.context}
-            isEditing={marketplaceContextInfo.isEditing}
-            onApplyPlan={marketplaceContextInfo.onApplyPlan}
-            appliedPlan={marketplaceContextInfo.appliedPlan}
-            addToast={marketplaceContextInfo.addToast}
-          />
-        </div>
-      )}
-
-      {/* 4. Plan Benefits Area */}
-      <div className="border-t border-slate-100 pt-4 space-y-3">
-        <span className="block text-xs font-extrabold text-slate-800 uppercase tracking-wider px-1">
-          Plan Benefits
-        </span>
-
-        {!marketplacePlanData ? (
-          <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center text-xs text-slate-400 font-medium">
-            Search a Marketplace plan to view benefits.
-          </div>
-        ) : (
-          <div className="space-y-2 text-xs">
-            <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl space-y-1">
-              <span className="font-extrabold text-blue-900 block truncate">{marketplacePlanData.name || marketplacePlanData.plan_name || 'Selected Plan'}</span>
-              <span className="text-[11px] text-blue-700 font-semibold block">{marketplacePlanData.issuer_name || marketplacePlanData.company_2026 || 'Marketplace Insurer'}</span>
-            </div>
-
-            {/* Overview Accordion */}
-            <div className="border border-slate-100 rounded-xl overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setOpenBenefitGroup(openBenefitGroup === 'overview' ? null : 'overview')}
-                className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100 flex items-center justify-between font-bold text-slate-800 text-left"
-              >
-                <span>Overview</span>
-                <span>{openBenefitGroup === 'overview' ? '▲' : '▼'}</span>
-              </button>
-              {openBenefitGroup === 'overview' && (
-                <div className="p-3 space-y-1.5 bg-white text-[11px] text-slate-600 border-t border-slate-100">
-                  <div className="flex justify-between"><span>Deductible:</span> <strong>${marketplacePlanData.deductible ?? marketplacePlanData.medical_deductible ?? '—'}</strong></div>
-                  <div className="flex justify-between"><span>Max Out of Pocket:</span> <strong>${marketplacePlanData.moop ?? marketplacePlanData.max_out_of_pocket ?? '—'}</strong></div>
-                  <div className="flex justify-between"><span>Plan Type:</span> <strong>{marketplacePlanData.type_plan || marketplacePlanData.plan_type || '—'}</strong></div>
-                </div>
-              )}
-            </div>
-
-            {/* Medical Accordion */}
-            <div className="border border-slate-100 rounded-xl overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setOpenBenefitGroup(openBenefitGroup === 'medical' ? null : 'medical')}
-                className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100 flex items-center justify-between font-bold text-slate-800 text-left"
-              >
-                <span>Medical</span>
-                <span>{openBenefitGroup === 'medical' ? '▲' : '▼'}</span>
-              </button>
-              {openBenefitGroup === 'medical' && (
-                <div className="p-3 space-y-1.5 bg-white text-[11px] text-slate-600 border-t border-slate-100">
-                  <div className="flex justify-between"><span>Primary Doctor:</span> <strong>${marketplacePlanData.primary_care_copay ?? '—'}</strong></div>
-                  <div className="flex justify-between"><span>Specialist:</span> <strong>${marketplacePlanData.specialist_copay ?? '—'}</strong></div>
-                  <div className="flex justify-between"><span>Emergency Room:</span> <strong>${marketplacePlanData.emergency_room_copay ?? '—'}</strong></div>
-                </div>
-              )}
-            </div>
-
-            {/* Drugs Accordion */}
-            <div className="border border-slate-100 rounded-xl overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setOpenBenefitGroup(openBenefitGroup === 'drugs' ? null : 'drugs')}
-                className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100 flex items-center justify-between font-bold text-slate-800 text-left"
-              >
-                <span>Drugs</span>
-                <span>{openBenefitGroup === 'drugs' ? '▲' : '▼'}</span>
-              </button>
-              {openBenefitGroup === 'drugs' && (
-                <div className="p-3 space-y-1.5 bg-white text-[11px] text-slate-600 border-t border-slate-100">
-                  <div className="flex justify-between"><span>Generic Drugs:</span> <strong>${marketplacePlanData.generic_drug_copay ?? '—'}</strong></div>
-                  <div className="flex justify-between"><span>Brand Drugs:</span> <strong>${marketplacePlanData.brand_drug_copay ?? '—'}</strong></div>
-                </div>
-              )}
-            </div>
-
-            {/* Extra Benefits Accordion */}
-            <div className="border border-slate-100 rounded-xl overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setOpenBenefitGroup(openBenefitGroup === 'extra' ? null : 'extra')}
-                className="w-full px-3 py-2 bg-slate-50 hover:bg-slate-100 flex items-center justify-between font-bold text-slate-800 text-left"
-              >
-                <span>Extra Benefits</span>
-                <span>{openBenefitGroup === 'extra' ? '▲' : '▼'}</span>
-              </button>
-              {openBenefitGroup === 'extra' && (
-                <div className="p-3 space-y-1.5 bg-white text-[11px] text-slate-600 border-t border-slate-100">
-                  <div className="flex justify-between"><span>Dental:</span> <strong>{marketplacePlanData.has_dental ? 'Included' : 'Not Included'}</strong></div>
-                  <div className="flex justify-between"><span>Vision:</span> <strong>{marketplacePlanData.has_vision ? 'Included' : 'Not Included'}</strong></div>
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>

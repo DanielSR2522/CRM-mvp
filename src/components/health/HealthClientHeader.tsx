@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
+import { supabase } from '@/lib/supabaseClient';
+import ClientConsentHeaderControl from '@/components/consents/ClientConsentHeaderControl';
 
 interface HealthClientHeaderProps {
   clientId: string;
@@ -12,6 +14,7 @@ interface HealthClientHeaderProps {
   onSendEmail?: () => void;
   onConsent?: () => void;
   onDeleteProfile?: () => void;
+  onPhotoUpdated?: (newPhotoUrl: string | null) => void;
   isCompanyClient?: boolean;
   activeSection?: 'overview' | 'personal-information' | 'health' | 'medicare' | 'supplemental' | 'life' | 'policies' | 'documents' | 'notes' | 'timeline';
 }
@@ -24,18 +27,82 @@ export default function HealthClientHeader({
   onSendEmail,
   onConsent,
   onDeleteProfile,
+  onPhotoUpdated,
   isCompanyClient = false,
   activeSection = 'health',
 }: HealthClientHeaderProps) {
   const router = useRouter();
   const { isLineEnabled } = useBusinessLines();
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showPhotoMenu, setShowPhotoMenu] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [currentPhoto, setCurrentPhoto] = useState<string | null>(photoUrl || null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setCurrentPhoto(photoUrl || null);
+  }, [photoUrl]);
+
+  // Fallback to localStorage if photo was saved locally
+  useEffect(() => {
+    if (!photoUrl && typeof window !== 'undefined' && clientId) {
+      try {
+        const saved = localStorage.getItem(`smartrack:client-photo:${clientId}`);
+        if (saved) setCurrentPhoto(saved);
+      } catch {}
+    }
+  }, [clientId, photoUrl]);
 
   const getInitials = (name: string) => {
     if (!name) return 'C';
     const parts = name.trim().split(/\s+/);
     if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
     return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+  };
+
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingPhoto(true);
+      setShowPhotoMenu(false);
+
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const dataUrl = event.target?.result as string;
+        setCurrentPhoto(dataUrl);
+
+        try {
+          // Attempt update on database
+          await supabase.from('clients').update({ photo_url: dataUrl }).eq('id', clientId);
+          localStorage.setItem(`smartrack:client-photo:${clientId}`, dataUrl);
+        } catch (err) {
+          console.warn('DB photo save warning:', err);
+        }
+
+        if (onPhotoUpdated) onPhotoUpdated(dataUrl);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Photo upload error:', err);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    try {
+      setShowPhotoMenu(false);
+      setCurrentPhoto(null);
+      try {
+        await supabase.from('clients').update({ photo_url: null }).eq('id', clientId);
+        localStorage.removeItem(`smartrack:client-photo:${clientId}`);
+      } catch {}
+      if (onPhotoUpdated) onPhotoUpdated(null);
+    } catch (err) {
+      console.error('Remove photo error:', err);
+    }
   };
 
   const navTab = (label: string, section: string, isActive: boolean) => (
@@ -67,6 +134,14 @@ export default function HealthClientHeader({
 
   return (
     <div className="bg-white border-b border-slate-200 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 font-sans shadow-2xs">
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handlePhotoSelect}
+        accept="image/*"
+        className="hidden"
+      />
+
       {/* Left side: Back arrow, Avatar, Name & Level 1 Client Profile Navigation */}
       <div className="flex flex-wrap items-center gap-4 min-w-0 flex-1">
         <div className="flex items-center gap-3.5 shrink-0">
@@ -81,29 +156,63 @@ export default function HealthClientHeader({
             </svg>
           </button>
 
+          {/* Interactive Zoho-style Avatar/Photo Box */}
           <div className="relative">
-            {photoUrl ? (
-              <img
-                src={photoUrl}
-                alt={clientName}
-                className="w-10 h-10 rounded-full object-cover border border-slate-200 shadow-2xs"
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-blue-600 text-white font-extrabold text-sm flex items-center justify-center border border-blue-500 shadow-2xs">
-                {getInitials(clientName)}
+            <div
+              onClick={() => setShowPhotoMenu(!showPhotoMenu)}
+              className="relative group cursor-pointer w-12 h-12 md:w-14 md:h-14 rounded-full overflow-hidden shrink-0 border-2 border-slate-200 hover:border-blue-500 transition-all shadow-xs"
+              title="Click to edit profile picture"
+            >
+              {currentPhoto ? (
+                <img
+                  src={currentPhoto}
+                  alt={clientName}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full bg-blue-600 text-white font-extrabold text-base md:text-lg flex items-center justify-center">
+                  {getInitials(clientName)}
+                </div>
+              )}
+              <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition-opacity">
+                📷 Edit
+              </div>
+            </div>
+
+            {/* Compact Photo Interaction Menu Modal */}
+            {showPhotoMenu && (
+              <div className="absolute top-full left-0 mt-2 z-50 bg-white border border-slate-200 rounded-2xl shadow-xl p-1.5 w-44 font-sans animate-fadeIn text-xs">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-100 hover:text-blue-600 rounded-xl font-bold transition-colors flex items-center gap-2"
+                >
+                  <span>📷</span> {currentPhoto ? 'Change Photo' : 'Upload Photo'}
+                </button>
+                {currentPhoto && (
+                  <button
+                    type="button"
+                    onClick={handleRemovePhoto}
+                    className="w-full text-left px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl font-bold transition-colors flex items-center gap-2 border-t border-slate-100 mt-1"
+                  >
+                    <span>🗑️</span> Remove Photo
+                  </button>
+                )}
               </div>
             )}
           </div>
 
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-base font-extrabold text-slate-900 tracking-tight">{clientName || 'Client Profile'}</h1>
+              <h1 className="text-[22px] md:text-[24px] font-bold text-slate-950 tracking-tight leading-tight">
+                {clientName || 'Client Profile'}
+              </h1>
               <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-100 uppercase tracking-wider">
                 {activeBadgeLabel}
               </span>
             </div>
             {lastUpdated && (
-              <span className="text-[11px] font-medium text-slate-400 block">
+              <span className="text-[11px] font-medium text-slate-400 block mt-0.5">
                 Last updated: {lastUpdated}
               </span>
             )}
@@ -135,28 +244,17 @@ export default function HealthClientHeader({
           <span>✉️</span> Send Email
         </button>
 
-        <button
-          type="button"
-          onClick={onConsent}
-          className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-xl transition-all shadow-2xs flex items-center gap-1.5"
-        >
-          <span>📝</span> Consent
-        </button>
+        <ClientConsentHeaderControl
+          clientId={clientId}
+          clientName={clientName}
+          onSendConsent={onConsent || (() => {})}
+        />
 
-        <button
-          type="button"
-          onClick={onDeleteProfile}
-          className="px-3.5 py-1.5 text-xs font-bold text-rose-700 bg-rose-50/80 border border-rose-200 hover:bg-rose-100 rounded-xl transition-all flex items-center gap-1.5"
-        >
-          <span>🗑️</span> Delete Profile
-        </button>
-
-        {/* More Menu Dropdown */}
         <div className="relative">
           <button
             type="button"
             onClick={() => setShowMoreMenu(!showMoreMenu)}
-            className="p-1.5 text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
+            className="p-1.5 text-slate-500 hover:text-slate-800 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-all shadow-2xs"
             title="More Options"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -165,17 +263,19 @@ export default function HealthClientHeader({
           </button>
 
           {showMoreMenu && (
-            <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 z-50 text-xs font-medium animate-scale-up">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowMoreMenu(false);
-                  window.location.reload();
-                }}
-                className="w-full px-4 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-              >
-                🔄 Refresh Page
-              </button>
+            <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg p-1 z-50 animate-fadeIn">
+              {onDeleteProfile && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    onDeleteProfile();
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                >
+                  Delete Client Profile
+                </button>
+              )}
             </div>
           )}
         </div>

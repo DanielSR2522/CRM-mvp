@@ -70,7 +70,7 @@ export default function InlineEditablePhone({
 
   return (
     <div className={`w-full font-sans ${className}`}>
-      {label && <span className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{label}</span>}
+      {label && <span className="block text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">{label}</span>}
 
       {isEditing ? (
         <div className="flex items-center gap-1.5 w-full" onKeyDown={handleKeyDown}>
@@ -81,7 +81,7 @@ export default function InlineEditablePhone({
               setError(null);
             }}
             disabled={saving}
-            className="w-full bg-white border border-blue-500 ring-2 ring-blue-100 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-semibold outline-none transition-all"
+            className="w-full bg-white border border-blue-500 ring-2 ring-blue-100 rounded-xl px-3 py-1.5 text-sm text-slate-900 font-bold outline-none transition-all"
           />
           <InlineEditActions onSave={handleSave} onCancel={handleCancel} saving={saving} error={error} />
         </div>
@@ -93,7 +93,7 @@ export default function InlineEditablePhone({
             disabled ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:bg-slate-100/80 hover:text-blue-600'
           }`}
         >
-          <span className="text-xs font-semibold text-slate-900 truncate">
+          <span className="text-[15px] font-semibold text-slate-950 truncate">
             {value ? formatUSPhone(value) : <span className="text-slate-400 font-normal italic">{emptyDisplay}</span>}
           </span>
           {!disabled && (
