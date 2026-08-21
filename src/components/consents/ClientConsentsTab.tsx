@@ -1,20 +1,16 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import type { ClientConsentRow, DashboardConsentRow } from '@/lib/consents/types';
-import { deleteConsentDraft, listClientConsents } from '@/lib/consents/request-service';
+import type { ClientConsentRow, DashboardConsentRow, SignatureRequestSigner } from '@/lib/consents/types';
+import { deleteConsentDraft, getPrimarySigner, listClientConsents } from '@/lib/consents/request-service';
+import { downloadSignedDocument } from '@/lib/consents/document-service';
+import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { supabase } from '@/lib/supabaseClient';
-import { formatIsoToUsDate } from '@/utils/dateUtils';
+import { formatDateTimeToUs, formatIsoToUsDate } from '@/utils/dateUtils';
 import ConsentPreview from './ConsentPreview';
 import ConsentStatusBadge from './ConsentStatusBadge';
 import NewConsentFlow from './NewConsentFlow';
 import ConsentDocumentActions from './ConsentDocumentActions';
-/**
- * The Consents & Signatures tab inside a client profile.
- *
- * Everything the tab does lives here, so the change to the (very large) client
- * page stays down to mounting one component.
- */
 
 interface ClientConsentsTabProps {
   clientId: string;
@@ -31,6 +27,11 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
 
   const [view, setView] = useState<View>('list');
   const [previewing, setPreviewing] = useState<ClientConsentRow | null>(null);
+  const [primarySigner, setPrimarySigner] = useState<SignatureRequestSigner | null>(null);
+  const [signatureImgUrl, setSignatureImgUrl] = useState<string | null>(null);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+  const [pdfModalUrl, setPdfModalUrl] = useState<string | null>(null);
+
   /** The draft being edited. Null when creating a new consent. */
   const [editing, setEditing] = useState<ClientConsentRow | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -68,13 +69,63 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
     };
   }, [clientId, reloadToken]);
 
-  /**
-   * What clicking a row does, decided by status.
-   *
-   * A draft is unfinished work, so it opens for editing. Anything else has left
-   * the building and is a record — it opens read-only. Same button, honest label,
-   * no way to accidentally "edit" something already sent.
-   */
+  // Load primary signer details and signed signature image when viewing signed detail
+  useEffect(() => {
+    if (!previewing || previewing.status !== 'signed') {
+      setPrimarySigner(null);
+      setSignatureImgUrl(null);
+      return;
+    }
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const signer = await getPrimarySigner(previewing.id);
+        if (cancelled) return;
+        setPrimarySigner(signer);
+
+        if (signer?.signature_image_path) {
+          const { data } = await supabase.storage
+            .from('signatures')
+            .createSignedUrl(signer.signature_image_path, 300);
+          if (!cancelled && data?.signedUrl) {
+            setSignatureImgUrl(data.signedUrl);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load primary signer signature:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previewing]);
+
+  useEffect(() => {
+    if (!clientId) return;
+
+    const channel = supabase
+      .channel(`client_tab_${clientId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'signature_requests',
+          filter: `client_id=eq.${clientId}`,
+        },
+        () => {
+          reload();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [clientId, reload]);
+
   const openRow = (row: ClientConsentRow) => {
     if (row.status === 'draft') {
       setEditing(row);
@@ -148,13 +199,38 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
     }
   };
 
+  const handleDownloadPdfDirect = async (row: ClientConsentRow) => {
+    setBusyId(row.id);
+    setError(null);
+    try {
+      const url = await downloadSignedDocument(row.id);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not download the file.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleViewPdfModal = async () => {
+    if (!previewing) return;
+    setBusyId(previewing.id);
+    setError(null);
+    try {
+      const url = await downloadSignedDocument(previewing.id);
+      setPdfModalUrl(url);
+      setIsPdfModalOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open PDF preview.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   // ---- New consent / edit draft -----------------------------------------
-  // The same wizard does both: editing skips straight to step 2, because a
-  // draft's template and version are already frozen into it.
   if (view === 'new') {
     return (
       <NewConsentFlow
-        // Remounts on switching drafts, so no state leaks between them.
         key={editing?.id ?? 'new'}
         clientId={clientId}
         clientName={clientName}
@@ -173,114 +249,237 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
     );
   }
 
-  // ---- Preview ----------------------------------------------------------
+  // ---- Preview in-workspace ---------------------------------------------
   if (view === 'preview' && previewing) {
+    const isSigned = previewing.status === 'signed';
+    const pdfReady = previewing.final_document_status === 'generated' && Boolean(previewing.final_file_path);
+
     return (
-      <div className="space-y-4">
-        <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm font-extrabold text-slate-900 truncate">{previewing.title}</h3>
-              <ConsentStatusBadge status={previewing.status} />
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              {previewing.template_internal_name ?? 'Unknown template'} · Created{' '}
-              {formatIsoToUsDate(previewing.created_at)}
-            </p>
-            {previewing.original_document_hash && (
-              <p
-                className="text-[10px] text-slate-300 font-mono mt-1 truncate"
-                title={previewing.original_document_hash}
-              >
-                sha256 {previewing.original_document_hash.slice(0, 24)}…
-              </p>
-            )}
+      <div className="space-y-6 font-sans animate-fade-in">
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <h3 className="text-lg font-extrabold text-slate-900">{previewing.title}</h3>
+            <ConsentStatusBadge status={previewing.status} />
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setView('list');
-              setPreviewing(null);
+
+          <div className="flex items-center gap-2">
+            {isSigned && (
+              <>
+                <button
+                  type="button"
+                  disabled={!pdfReady}
+                  onClick={handleViewPdfModal}
+                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all shadow-xs disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  <span>👁️</span> View PDF
+                </button>
+                <button
+                  type="button"
+                  disabled={!pdfReady}
+                  onClick={() => handleDownloadPdfDirect(previewing)}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  <span>⬇️</span> Download PDF
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setView('list');
+                setPreviewing(null);
+              }}
+              className="px-3.5 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-7 space-y-4">
+            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                  Document Preview
+                </h4>
+                <span className="text-[11px] font-medium text-slate-400">
+                  Frozen Content Snapshot
+                </span>
+              </div>
+
+              <div className="max-h-[520px] overflow-y-auto pr-1">
+                <ConsentPreview
+                  content={previewing.rendered_content}
+                  publicTitle={previewing.title}
+                  consentText={previewing.merge_data_snapshot?.rendered_consent_text ?? ''}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-5 space-y-6">
+            {isSigned && (
+              <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                    Client Signature
+                  </h4>
+                  {primarySigner?.signature_method && (
+                    <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+                      {primarySigner.signature_method === 'draw' ? 'Drawn Signature' : 'Typed Signature'}
+                    </span>
+                  )}
+                </div>
+
+                <div className="bg-slate-50/80 border border-slate-200/80 rounded-xl p-4 min-h-[120px] flex items-center justify-center relative overflow-hidden">
+                  {signatureImgUrl ? (
+                    <img
+                      src={signatureImgUrl}
+                      alt="Client Signature"
+                      className="max-h-24 max-w-full object-contain"
+                    />
+                  ) : primarySigner?.typed_signature || previewing.signer_name ? (
+                    <div className="text-center py-2">
+                      <span className="text-2xl font-serif italic text-slate-900 tracking-wide font-medium">
+                        {primarySigner?.typed_signature || previewing.signer_name}
+                      </span>
+                      <span className="block text-[10px] text-slate-400 font-sans mt-1">
+                        Electronically typed signature
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-400 italic">Signature image loading or recorded</span>
+                  )}
+                </div>
+
+                <div className="border-t border-slate-100 pt-3">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Signed By
+                  </span>
+                  <div className="text-xs font-bold text-slate-800">
+                    {previewing.signer_name || 'Unknown Signer'}
+                  </div>
+                  {previewing.signer_email && (
+                    <div className="text-xs text-slate-500 font-mono mt-0.5">
+                      {previewing.signer_email}
+                    </div>
+                  )}
+                  {primarySigner?.phone && (
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      {primarySigner.phone}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                  Legal Record &amp; Audit
+                </h4>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-md">
+                  Verified
+                </span>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Delivery Channel
+                  </span>
+                  <span className="font-semibold text-slate-800">
+                    {previewing.selected_delivery_channel
+                      ? channelLabel(previewing.selected_delivery_channel)
+                      : '—'}
+                  </span>
+                </div>
+
+                {previewing.sent_at && (
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Sent Timestamp
+                    </span>
+                    <span className="font-semibold text-slate-800">
+                      {formatDateTimeToUs(previewing.sent_at)}
+                    </span>
+                  </div>
+                )}
+
+                {previewing.viewed_at && (
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Viewed Timestamp
+                    </span>
+                    <span className="font-semibold text-slate-800">
+                      {formatDateTimeToUs(previewing.viewed_at)}
+                    </span>
+                  </div>
+                )}
+
+                {previewing.signed_at && (
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Signed Timestamp
+                    </span>
+                    <span className="font-semibold text-emerald-700 font-bold">
+                      {formatDateTimeToUs(previewing.signed_at)}
+                    </span>
+                  </div>
+                )}
+
+                <div className="border-t border-slate-100 pt-2">
+                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Request ID
+                  </span>
+                  <span className="font-mono text-[10px] text-slate-500 break-all">
+                    {previewing.id}
+                  </span>
+                </div>
+
+                {previewing.final_document_hash && (
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      SHA-256 Hash
+                    </span>
+                    <span className="font-mono text-[10px] text-slate-500 break-all">
+                      {previewing.final_document_hash}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-100 pt-3">
+                <ConsentDocumentActions
+                  row={previewing as unknown as DashboardConsentRow}
+                  onChanged={reload}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {isPdfModalOpen && pdfModalUrl && (
+          <DocumentPreviewModal
+            isOpen={isPdfModalOpen}
+            onClose={() => {
+              setIsPdfModalOpen(false);
+              setPdfModalUrl(null);
             }}
-            className="px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold rounded-xl transition-colors flex-shrink-0"
-          >
-            Back
-          </button>
-        </div>
-
-        {/*
-          rendered_content and the snapshot are what was frozen at creation, not a
-          fresh merge. This is the document as the client will see it, even if the
-          template or the client record has changed since.
-        */}
-        <ConsentPreview
-          content={previewing.rendered_content}
-          publicTitle={previewing.title}
-          consentText={previewing.merge_data_snapshot?.rendered_consent_text ?? ''}
-        />
-        {previewing.status === 'signed' && (
-  <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm space-y-4">
-    <div>
-      <h4 className="text-sm font-extrabold text-slate-900">
-        Signed Document
-      </h4>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-        <div className="bg-slate-50 rounded-xl px-4 py-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            Signed by
-          </p>
-
-          <p className="text-sm font-bold text-slate-800 mt-1">
-            {previewing.signer_name ?? 'Unknown signer'}
-          </p>
-
-          {previewing.signer_email && (
-            <p className="text-xs text-slate-500 mt-0.5">
-              {previewing.signer_email}
-            </p>
-          )}
-        </div>
-
-        <div className="bg-slate-50 rounded-xl px-4 py-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            Signed date and time
-          </p>
-
-          <p className="text-sm font-bold text-slate-800 mt-1">
-            {previewing.signed_at
-              ? formatIsoToUsDateTime(previewing.signed_at)
-              : 'Not recorded'}
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <ConsentDocumentActions
-      row={previewing as unknown as DashboardConsentRow}
-      onChanged={reload}
-    />
-
-    {previewing.final_document_hash && (
-      <div className="border-t border-slate-100 pt-3">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-          Signed document SHA-256
-        </p>
-
-        <p className="text-[10px] font-mono text-slate-500 break-all mt-1">
-          {previewing.final_document_hash}
-        </p>
-      </div>
-    )}
-  </div>
-)}
+            fileName={`${previewing.title || 'Signed_Consent'}.pdf`}
+            mimeType="application/pdf"
+            signedUrl={pdfModalUrl}
+            onDownload={() => handleDownloadPdfDirect(previewing)}
+          />
+        )}
       </div>
     );
   }
 
   // ---- List -------------------------------------------------------------
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 font-sans">
       {notice && (
         <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
           <p className="text-sm font-semibold text-emerald-800">{notice}</p>
@@ -358,97 +557,177 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
           </div>
         ) : (
           <>
-            {/* Desktop table */}
             <div className="hidden lg:block overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="border-b border-slate-100">
-                    <Th>Title</Th>
-                    <Th>Template</Th>
-                    <Th>Status</Th>
-                    <Th>Created</Th>
-                    <Th>Sent</Th>
-                    <Th>Viewed</Th>
-                    <Th>Signed</Th>
-                    <Th>Channel</Th>
-                    <Th align="right">Actions</Th>
+                  <tr className="border-b border-slate-100 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                    <th className="py-3 px-3">TITLE</th>
+                    <th className="py-3 px-3">STATUS</th>
+                    <th className="py-3 px-3">DELIVERY</th>
+                    <th className="py-3 px-3">ACTIVITY</th>
+                    <th className="py-3 px-3 text-right">ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {consents.map((row) => (
-                    <tr key={row.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                      <Td>
-                        <span className="font-bold text-slate-800">{row.title}</span>
-                        {row.signer_name && (
-                          <span className="block text-[10px] text-slate-400 mt-0.5">{row.signer_name}</span>
-                        )}
-                      </Td>
-                      <Td>{row.template_internal_name ?? '—'}</Td>
-                      <Td>
-                        <ConsentStatusBadge status={row.status} />
-                      </Td>
-                      <Td>{formatIsoToUsDate(row.created_at)}</Td>
-                      <Td>{row.sent_at ? formatIsoToUsDate(row.sent_at) : '—'}</Td>
-                      <Td>{row.viewed_at ? formatIsoToUsDate(row.viewed_at) : '—'}</Td>
-                      <Td>{row.signed_at ? formatIsoToUsDate(row.signed_at) : '—'}</Td>
-                      <Td>{row.selected_delivery_channel ? channelLabel(row.selected_delivery_channel) : '—'}</Td>
-                      <Td align="right">
-                        <RowActions
-                          row={row}
-                          busy={busyId === row.id}
-                          confirming={confirmDelete === row.id}
-                          onOpen={() => openRow(row)}
-                          onSendEmail={() => handleSendEmail(row)}
-                          onAskDelete={() => setConfirmDelete(row.id)}
-                          onCancelDelete={() => setConfirmDelete(null)}
-                          onConfirmDelete={() => handleDelete(row)}
-                        />
-                      </Td>
-                    </tr>
-                  ))}
+                  {consents.map((row) => {
+                    const isSigned = row.status === 'signed';
+                    const isDraft = row.status === 'draft';
+                    const pdfReady = row.final_document_status === 'generated' && Boolean(row.final_file_path);
+
+                    return (
+                      <tr key={row.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3.5 px-3">
+                          <div className="font-extrabold text-slate-900 text-sm">{row.title}</div>
+                          {row.template_internal_name && row.template_internal_name !== row.title && (
+                            <div className="text-[10px] text-slate-400 font-medium mt-0.5">
+                              {row.template_internal_name}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-3">
+                          <ConsentStatusBadge status={row.status} />
+                        </td>
+                        <td className="py-3.5 px-3">
+                          <div className="font-bold text-slate-800">
+                            {row.selected_delivery_channel ? channelLabel(row.selected_delivery_channel) : '—'}
+                          </div>
+                          {row.signer_email && (
+                            <div className="text-[10px] text-slate-400 font-mono mt-0.5 truncate max-w-[180px]">
+                              {row.signer_email}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-3">
+                          <div className="space-y-0.5 text-[11px] text-slate-600 font-medium">
+                            {row.sent_at && (
+                              <div><span className="text-slate-400 text-[10px]">Sent:</span> {formatIsoToUsDate(row.sent_at)}</div>
+                            )}
+                            {row.viewed_at && (
+                              <div><span className="text-slate-400 text-[10px]">Viewed:</span> {formatIsoToUsDate(row.viewed_at)}</div>
+                            )}
+                            {row.signed_at ? (
+                              <div className="text-emerald-700 font-bold">
+                                <span className="text-emerald-600 text-[10px]">Signed:</span> {formatDateTimeToUs(row.signed_at)}
+                              </div>
+                            ) : !row.sent_at && !row.viewed_at ? (
+                              <div><span className="text-slate-400 text-[10px]">Created:</span> {formatIsoToUsDate(row.created_at)}</div>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openRow(row)}
+                              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs"
+                            >
+                              {isSigned ? 'Preview' : isDraft ? 'Continue' : 'View Status'}
+                            </button>
+
+                            {isSigned && (
+                              <button
+                                type="button"
+                                disabled={!pdfReady || busyId === row.id}
+                                onClick={() => handleDownloadPdfDirect(row)}
+                                className="px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                Download PDF
+                              </button>
+                            )}
+
+                            {(isDraft || row.status === 'pending' || row.status === 'failed') && (
+                              <button
+                                type="button"
+                                disabled={busyId === row.id || !row.signer_email?.trim()}
+                                onClick={() => handleSendEmail(row)}
+                                className="px-2.5 py-1 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold rounded-xl transition-all disabled:opacity-40"
+                              >
+                                {busyId === row.id ? 'Sending...' : 'Email'}
+                              </button>
+                            )}
+
+                            {isDraft && (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDelete(row.id)}
+                                className="px-2.5 py-1 text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 text-xs font-bold rounded-xl transition-all"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
-            {/* Mobile cards */}
             <div className="lg:hidden space-y-3">
-              {consents.map((row) => (
-                <div key={row.id} className="border border-slate-100 rounded-xl p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-slate-800 truncate">{row.title}</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        {row.template_internal_name ?? '—'}
-                      </p>
+              {consents.map((row) => {
+                const isSigned = row.status === 'signed';
+                const isDraft = row.status === 'draft';
+                const pdfReady = row.final_document_status === 'generated' && Boolean(row.final_file_path);
+
+                return (
+                  <div key={row.id} className="border border-slate-100 rounded-xl p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900 truncate">{row.title}</p>
+                        {row.template_internal_name && row.template_internal_name !== row.title && (
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            {row.template_internal_name}
+                          </p>
+                        )}
+                      </div>
+                      <ConsentStatusBadge status={row.status} />
                     </div>
-                    <ConsentStatusBadge status={row.status} />
-                  </div>
 
-                  <dl className="grid grid-cols-2 gap-x-3 gap-y-1 mt-3 pt-3 border-t border-slate-50">
-                    <MobileMeta label="Created" value={formatIsoToUsDate(row.created_at)} />
-                    <MobileMeta label="Sent" value={row.sent_at ? formatIsoToUsDate(row.sent_at) : '—'} />
-                    <MobileMeta label="Viewed" value={row.viewed_at ? formatIsoToUsDate(row.viewed_at) : '—'} />
-                    <MobileMeta label="Signed" value={row.signed_at ? formatIsoToUsDate(row.signed_at) : '—'} />
-                    <MobileMeta
-                      label="Channel"
-                      value={row.selected_delivery_channel ? channelLabel(row.selected_delivery_channel) : '—'}
-                    />
-                  </dl>
+                    <div className="bg-slate-50 rounded-lg p-2.5 text-xs space-y-1">
+                      <div className="flex items-center justify-between text-slate-500">
+                        <span>Delivery:</span>
+                        <span className="font-bold text-slate-800">
+                          {row.selected_delivery_channel ? channelLabel(row.selected_delivery_channel) : '—'}
+                        </span>
+                      </div>
+                      {row.sent_at && (
+                        <div className="flex items-center justify-between text-slate-500">
+                          <span>Sent:</span>
+                          <span className="font-medium text-slate-700">{formatIsoToUsDate(row.sent_at)}</span>
+                        </div>
+                      )}
+                      {row.signed_at && (
+                        <div className="flex items-center justify-between text-emerald-700 font-bold">
+                          <span>Signed:</span>
+                          <span>{formatDateTimeToUs(row.signed_at)}</span>
+                        </div>
+                      )}
+                    </div>
 
-                  <div className="mt-3 pt-3 border-t border-slate-50 flex justify-end">
-                    <RowActions
-                      row={row}
-                      busy={busyId === row.id}
-                      confirming={confirmDelete === row.id}
-                      onOpen={() => openRow(row)}
-                      onSendEmail={() => handleSendEmail(row)}
-                      onAskDelete={() => setConfirmDelete(row.id)}
-                      onCancelDelete={() => setConfirmDelete(null)}
-                      onConfirmDelete={() => handleDelete(row)}
-                    />
+                    <div className="flex items-center justify-end gap-2 border-t border-slate-50 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => openRow(row)}
+                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all"
+                      >
+                        {isSigned ? 'Preview' : isDraft ? 'Continue' : 'View Status'}
+                      </button>
+
+                      {isSigned && (
+                        <button
+                          type="button"
+                          disabled={!pdfReady || busyId === row.id}
+                          onClick={() => handleDownloadPdfDirect(row)}
+                          className="px-3 py-1.5 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all"
+                        >
+                          Download PDF
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}
@@ -457,159 +736,17 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
   );
 }
 
-// ---------------------------------------------------------------------------
-// Row actions
-// ---------------------------------------------------------------------------
-
-/**
- * Actions depend on status. Only a draft can be deleted — everything else is
- * evidence of something that already reached a client, and the database refuses
- * to remove it regardless of what this menu offers.
- */
-function RowActions({
-  row,
-  busy,
-  confirming,
-  onOpen,
-  onSendEmail,
-  onAskDelete,
-  onCancelDelete,
-  onConfirmDelete,
-}: {
-  row: ClientConsentRow;
-  busy: boolean;
-  confirming: boolean;
-  onOpen: () => void;
-  onSendEmail: () => void;
-  onAskDelete: () => void;
-  onCancelDelete: () => void;
-  onConfirmDelete: () => void;
-}) {
-  const isDraft = row.status === 'draft';
-
-  if (confirming) {
-    return (
-      <div className="inline-flex items-center gap-2">
-        <span className="text-[10px] font-bold text-slate-500">Delete draft?</span>
-        <button
-          type="button"
-          onClick={onConfirmDelete}
-          disabled={busy}
-          className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold rounded-lg transition-colors disabled:opacity-50"
-        >
-          {busy ? 'Deleting…' : 'Yes, delete'}
-        </button>
-        <button
-          type="button"
-          onClick={onCancelDelete}
-          disabled={busy}
-          className="px-2 py-1 border border-slate-200 hover:bg-slate-50 text-slate-600 text-[10px] font-bold rounded-lg transition-colors"
-        >
-          Keep
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="inline-flex items-center gap-1.5">
-      <button
-        type="button"
-        onClick={onOpen}
-        className="px-2.5 py-1 border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 text-slate-600 hover:text-blue-700 text-[10px] font-bold rounded-lg transition-all"
-      >
-        {isDraft ? 'Continue Draft' : 'View'}
-      </button>
-      {(row.status === 'draft' ||
-  row.status === 'pending' ||
-  row.status === 'failed') && (
-  <button
-    type="button"
-    onClick={onSendEmail}
-    disabled={busy || !row.signer_email?.trim()}
-    title={
-      row.signer_email?.trim()
-        ? 'Send this consent by email'
-        : 'This signer has no email address.'
-    }
-    className="px-2.5 py-1 border border-blue-200 hover:border-blue-400 hover:bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-  >
-    {busy ? 'Sending…' : 'Send by Email'}
-  </button>
-)}
-      
-      {isDraft && (
-        <button
-          type="button"
-          onClick={onAskDelete}
-          disabled={busy}
-          className="px-2.5 py-1 border border-slate-200 hover:border-rose-300 hover:bg-rose-50 text-slate-500 hover:text-rose-600 text-[10px] font-bold rounded-lg transition-all disabled:opacity-50"
-        >
-          Delete
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Small pieces
-// ---------------------------------------------------------------------------
-
 function channelLabel(channel: string): string {
-  const labels: Record<string, string> = {
-    email: 'Email',
-    whatsapp: 'WhatsApp',
-    sms: 'SMS',
-    copy_link: 'Link',
-  };
-  return labels[channel] ?? channel;
-}
-
-function Th({ children, align }: { children: React.ReactNode; align?: 'right' }) {
-  return (
-    <th
-      className={`py-2 px-3 text-[9px] font-bold uppercase tracking-wider text-slate-400 ${
-        align === 'right' ? 'text-right' : ''
-      }`}
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({ children, align }: { children: React.ReactNode; align?: 'right' }) {
-  return (
-    <td className={`py-3 px-3 text-slate-600 align-top ${align === 'right' ? 'text-right' : ''}`}>
-      {children}
-    </td>
-  );
-}
-
-function MobileMeta({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{label}</dt>
-      <dd className="text-xs text-slate-600 font-semibold">{value}</dd>
-    </div>
-  );
-}
-
-
-function formatIsoToUsDateTime(value: string): string {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return 'Invalid date';
+  switch (channel) {
+    case 'email':
+      return 'Email';
+    case 'whatsapp':
+      return 'WhatsApp';
+    case 'sms':
+      return 'SMS';
+    case 'copy_link':
+      return 'Shared Link';
+    default:
+      return channel ? channel.toUpperCase() : '—';
   }
-
-  return new Intl.DateTimeFormat('en-US', {
-    month: '2-digit',
-    day: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    timeZoneName: 'short',
-  }).format(date);
 }

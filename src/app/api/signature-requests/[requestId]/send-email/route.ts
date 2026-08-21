@@ -37,9 +37,9 @@ export async function POST(
 
   const resendApiKey = process.env.RESEND_API_KEY;
   const resendFromEmail = process.env.RESEND_FROM_EMAIL;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '');
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '') || (process.env.NODE_ENV === 'production' ? 'https://smartrackcrm.com' : 'http://localhost:3001');
 
-  if (!resendApiKey || !resendFromEmail || !appUrl) {
+  if (!resendApiKey || !resendFromEmail) {
     return NextResponse.json(
       { error: 'Email delivery is not configured.' },
       { status: 503 }
@@ -326,6 +326,7 @@ export async function POST(
     .from('signature_requests')
     .update({
       selected_delivery_channel: 'email',
+      sent_at: new Date().toISOString(),
     })
     .eq('id', requestId);
 

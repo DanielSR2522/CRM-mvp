@@ -1319,8 +1319,8 @@ VALUES (
     'signatures',
     'signatures',
     FALSE,
-    2097152, -- 2 MB
-    ARRAY['image/png', 'image/webp']
+    5242880, -- 5 MB
+    ARRAY['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
 )
 ON CONFLICT (id) DO UPDATE SET
     public             = EXCLUDED.public,

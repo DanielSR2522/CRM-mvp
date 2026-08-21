@@ -9,6 +9,7 @@ export interface FileDropzoneProps {
   multiple?: boolean;
   disabled?: boolean;
   loading?: boolean;
+  compact?: boolean;
   label?: string;
   selectedFiles?: File[];
   onRemoveFile?: (index: number) => void;
@@ -25,7 +26,8 @@ export default function FileDropzone({
   multiple = true,
   disabled = false,
   loading = false,
-  label = 'Drag files here or click to select',
+  compact = false,
+  label = 'Drag & drop files here or click to select',
   selectedFiles = [],
   onRemoveFile,
   error: externalError,
@@ -153,10 +155,14 @@ export default function FileDropzone({
         role="button"
         aria-label={label}
         aria-disabled={disabled || loading}
-        className={`min-h-[120px] border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex flex-col items-center justify-center ${
+        className={`${
+          compact
+            ? 'h-[52px] border border-dashed rounded-xl px-4 flex items-center justify-center'
+            : 'min-h-[120px] border-2 border-dashed rounded-2xl p-5 text-center flex flex-col items-center justify-center'
+        } cursor-pointer transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
           isDragOver
-            ? 'border-blue-500 bg-blue-100/80 dark:bg-blue-900/50 scale-[1.01] shadow-md'
-            : 'border-blue-400/50 hover:border-blue-500 bg-slate-100/80 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-800/90'
+            ? 'border-blue-500 bg-blue-50/80 scale-[1.005] shadow-xs'
+            : 'border-slate-300 hover:border-blue-300 bg-white hover:bg-slate-50'
         } ${disabled || loading ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         <input
@@ -169,19 +175,34 @@ export default function FileDropzone({
           className="hidden"
         />
 
-        <div className="flex flex-col items-center justify-center space-y-2">
-          <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shadow-xs">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+        {compact ? (
+          <div className="flex items-center justify-center space-x-2.5 text-center truncate">
+            <svg className="w-5 h-5 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
             </svg>
+            <span className="text-sm font-medium text-slate-800 truncate">
+              {label}
+            </span>
+            <span className="h-4 w-px bg-slate-200 mx-3 hidden sm:inline-block flex-shrink-0" />
+            <span className="text-sm text-slate-500 hidden sm:inline-block truncate font-sans">
+              PDF, Word, Excel, Images, TXT (Max {Math.round(maxSizeBytes / (1024 * 1024))}MB)
+            </span>
           </div>
-          <div>
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{label}</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-sans">
-              Supports PDF, Word, Excel, Images, and TXT (Max {Math.round(maxSizeBytes / (1024 * 1024))}MB)
-            </p>
+        ) : (
+          <div className="flex flex-col items-center justify-center space-y-2">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shadow-xs">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{label}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-sans">
+                Supports PDF, Word, Excel, Images, and TXT (Max {Math.round(maxSizeBytes / (1024 * 1024))}MB)
+              </p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {displayError && (

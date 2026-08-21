@@ -25,6 +25,8 @@ import { effectiveStatus, type ConsentAction } from '@/lib/consents/status';
 import { LINK_ISSUANCE_ENABLED } from '@/lib/delivery/readiness';
 import { formatIsoToUsDate } from '@/utils/dateUtils';
 
+import { supabase } from '@/lib/supabaseClient';
+
 const PAGE_SIZE = 25;
 
 /**
@@ -114,6 +116,28 @@ export default function ConsentsDashboardPage() {
       window.clearTimeout(timer);
     };
   }, [filterKey, page, reloadToken]);
+
+  // Real-time subscription to signature_requests table for automatic UI updates (no F5)
+  useEffect(() => {
+    const channel = supabase
+      .channel('consents_dashboard_realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'signature_requests',
+        },
+        () => {
+          reload();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [reload]);
 
   // ---- Counts -----------------------------------------------------------
   // Deliberately ignores `status`: the cards must keep showing every bucket even

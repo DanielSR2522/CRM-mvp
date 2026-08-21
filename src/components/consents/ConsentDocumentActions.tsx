@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import type { DashboardConsentRow } from '@/lib/consents/types';
+import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import {
   canRetryGeneration,
   downloadAuditCertificate,
@@ -31,9 +32,11 @@ interface ConsentDocumentActionsProps {
 
 export default function ConsentDocumentActions({ row, onChanged }: ConsentDocumentActionsProps) {
   const [certificateExists, setCertificateExists] = useState(false);
-  const [busy, setBusy] = useState<'signed' | 'certificate' | 'retry' | null>(null);
+  const [busy, setBusy] = useState<'signed' | 'certificate' | 'retry' | 'view' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   const isSigned = row.status === 'signed';
   const canRetry = canRetryGeneration(row);
@@ -60,6 +63,20 @@ export default function ConsentDocumentActions({ row, onChanged }: ConsentDocume
     setNotice(message);
     window.setTimeout(() => setNotice(null), 4000);
   }, []);
+
+  const handleViewPdf = async () => {
+    setBusy('view');
+    setError(null);
+    try {
+      const url = await downloadSignedDocument(row.id);
+      setPreviewUrl(url);
+      setIsPreviewOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open PDF preview.');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const download = async (which: 'signed' | 'certificate') => {
     setBusy(which);
@@ -123,7 +140,7 @@ export default function ConsentDocumentActions({ row, onChanged }: ConsentDocume
             className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-colors disabled:opacity-60"
           >
             {busy === 'retry' && <Spinner />}
-            {busy === 'retry' ? 'Retrying…' : 'Retry'}
+            {busy === 'retry' ? 'Retrying…' : 'Retry PDF'}
           </button>
         </div>
       )}
@@ -131,10 +148,21 @@ export default function ConsentDocumentActions({ row, onChanged }: ConsentDocume
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
+          onClick={handleViewPdf}
+          disabled={!pdfReady || busy !== null}
+          title={pdfReady ? undefined : 'The signed PDF is not ready yet.'}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
+        >
+          {busy === 'view' ? <Spinner /> : <span>👁️</span>}
+          View Signed PDF
+        </button>
+
+        <button
+          type="button"
           onClick={() => download('signed')}
           disabled={!pdfReady || busy !== null}
           title={pdfReady ? undefined : 'The signed PDF is not ready yet.'}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
         >
           {busy === 'signed' ? <Spinner /> : <DownloadIcon />}
           Download Signed PDF
@@ -154,8 +182,23 @@ export default function ConsentDocumentActions({ row, onChanged }: ConsentDocume
       </div>
 
       <p className="text-[10px] text-slate-400">
-        Downloads open a temporary link that expires after one minute.
+        Signed PDF links expire after one minute for security.
       </p>
+
+      {/* PDF Modal Preview */}
+      {isPreviewOpen && previewUrl && (
+        <DocumentPreviewModal
+          isOpen={isPreviewOpen}
+          onClose={() => {
+            setIsPreviewOpen(false);
+            setPreviewUrl(null);
+          }}
+          fileName={`${row.title || 'Signed_Consent'}.pdf`}
+          mimeType="application/pdf"
+          signedUrl={previewUrl}
+          onDownload={() => download('signed')}
+        />
+      )}
     </div>
   );
 }

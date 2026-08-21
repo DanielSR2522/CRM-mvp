@@ -51,6 +51,28 @@ export default function ClientConsentHeaderControl({
 
   useEffect(() => {
     fetchConsents();
+
+    if (!clientId) return;
+
+    const channel = supabase
+      .channel(`header_control_${clientId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'signature_requests',
+          filter: `client_id=eq.${clientId}`,
+        },
+        () => {
+          fetchConsents();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [clientId]);
 
   // Click outside listener for dropdown

@@ -229,7 +229,7 @@ export default function PublicDocumentViewer({
         ))
       ) : hasHtml ? (
         <div
-          className="prose prose-slate max-w-none text-sm text-slate-800 leading-relaxed"
+          className="prose prose-slate max-w-none text-sm text-slate-800 leading-relaxed [&_img]:max-w-full [&_img]:h-auto [&_img]:object-contain [&_img]:rounded-xl [&_img]:mx-auto font-sans"
           dangerouslySetInnerHTML={{ __html: content.html || '' }}
         />
       ) : (

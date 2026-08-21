@@ -132,7 +132,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
   interface PolicyDocument {
     id: string;
     policy_id: string;
-    section_id: string;
+    section_id: string | null;
     uploaded_by: string;
     display_name: string;
     original_filename: string;
@@ -141,6 +141,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
     size_bytes: number;
     created_at: string;
     updated_at: string;
+    is_unified_document?: boolean;
   }
 
   // Note Attachment interface
@@ -886,7 +887,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
     }
   }, [activeMenuTab]);
 
-  // Fetch sections and documents
+  // Fetch sections and documents (aggregating direct policy_documents + unified client_documents)
   const fetchSectionsAndDocs = async () => {
     try {
       setDocsLoading(true);
@@ -901,6 +902,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
       if (sectionsErr) throw sectionsErr;
       setSections(sectionsData || []);
 
+      // 1. Query direct policy_documents
       const { data: docsData, error: docsErr } = await supabase
         .from('policy_documents')
         .select('*')
@@ -909,9 +911,48 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
 
       if (docsErr) throw docsErr;
       const loadedDocs = (docsData || []) as PolicyDocument[];
-      setDocuments(loadedDocs);
 
-      const uploaderIds = Array.from(new Set(loadedDocs.map(d => d.uploaded_by).filter(Boolean)));
+      // 2. Query unified client_documents canonically associated with this policy_id
+      const { data: unifiedData, error: unifiedErr } = await supabase
+        .from('client_documents')
+        .select('*')
+        .eq('policy_id', policyId)
+        .order('created_at', { ascending: false });
+
+      if (unifiedErr) {
+        console.warn('Could not query unified client_documents for policy:', unifiedErr);
+      }
+
+      const unifiedDocsMapped: PolicyDocument[] = (unifiedData || []).map((uDoc: any) => ({
+        id: uDoc.id,
+        policy_id: uDoc.policy_id || policyId,
+        section_id: null,
+        uploaded_by: uDoc.agent_id,
+        display_name: uDoc.display_name,
+        original_filename: uDoc.original_filename,
+        storage_path: uDoc.storage_path,
+        mime_type: uDoc.mime_type,
+        size_bytes: Number(uDoc.size_bytes || 0),
+        created_at: uDoc.created_at,
+        updated_at: uDoc.updated_at,
+        is_unified_document: true,
+      }));
+
+      // Deduplicate by storage_path or id
+      const docMap = new Map<string, PolicyDocument>();
+      for (const d of loadedDocs) {
+        docMap.set(d.storage_path || d.id, d);
+      }
+      for (const u of unifiedDocsMapped) {
+        if (!docMap.has(u.storage_path || u.id)) {
+          docMap.set(u.storage_path || u.id, u);
+        }
+      }
+
+      const allCombinedDocs = Array.from(docMap.values());
+      setDocuments(allCombinedDocs);
+
+      const uploaderIds = Array.from(new Set(allCombinedDocs.map(d => d.uploaded_by).filter(Boolean)));
       if (uploaderIds.length > 0) {
         const { data: profilesData, error: profilesErr } = await supabase
           .from('profiles')
@@ -1211,6 +1252,25 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
           throw metaErr;
         }
 
+        // Also mirror metadata in client_documents for unified client documents view
+        try {
+          await supabase.from('client_documents').insert({
+            id: documentId,
+            client_id: id,
+            agent_id: uploaderId,
+            display_name: file.name,
+            document_type: 'Policy Document',
+            original_filename: file.name,
+            storage_path: storagePath,
+            mime_type: file.type || null,
+            size_bytes: file.size,
+            module_type: 'property_casualty',
+            policy_id: policyId,
+          });
+        } catch (cErr) {
+          console.warn('Could not mirror direct policy upload to client_documents:', cErr);
+        }
+
         setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
 
         // Log activity event (non-blocking)
@@ -1246,21 +1306,28 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
     }
   };
 
+  // Helper to resolve signed URLs with fallback across buckets (policy-documents, crm-documents, etc.)
+  const getPolicyDocSignedUrl = async (storagePath: string): Promise<string | null> => {
+    const buckets = ['policy-documents', 'crm-documents', 'health-documents', 'health-policy-documents'];
+    for (const b of buckets) {
+      try {
+        const { data, error } = await supabase.storage.from(b).createSignedUrl(storagePath, 3600);
+        if (!error && data?.signedUrl) return data.signedUrl;
+      } catch {}
+    }
+    return null;
+  };
+
   // Download document generating private short-lived signed URL
   const handleDownloadDoc = async (doc: PolicyDocument) => {
     try {
       setNoteActionError(null);
       setNoteActionSuccess(null);
 
-      const { data, error } = await supabase
-        .storage
-        .from('policy-documents')
-        .createSignedUrl(doc.storage_path, 3600);
+      const signedUrl = await getPolicyDocSignedUrl(doc.storage_path);
+      if (!signedUrl) throw new Error('Failed to generate signed download link.');
 
-      if (error) throw error;
-      if (!data?.signedUrl) throw new Error('Failed to generate signed download link.');
-
-      window.open(data.signedUrl, '_blank');
+      window.open(signedUrl, '_blank');
     } catch (err: any) {
       console.error('Error downloading document:', err);
       setNoteActionError(err?.message || 'Failed to download document.');
@@ -1333,17 +1400,13 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
       }
     } else {
       try {
-        const { data, error } = await supabase
-          .storage
-          .from('policy-documents')
-          .createSignedUrl(doc.storage_path, 3600);
-
-        if (error || !data?.signedUrl) throw error || new Error('Failed to generate signed preview URL.');
+        const signedUrl = await getPolicyDocSignedUrl(doc.storage_path);
+        if (!signedUrl) throw new Error('Failed to generate signed preview URL.');
 
         setPcPreviewState((prev) => ({
           ...prev,
           loading: false,
-          signedUrl: data.signedUrl,
+          signedUrl,
         }));
       } catch (err: any) {
         console.error('Error previewing document:', err);
@@ -1368,14 +1431,16 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) throw new Error('You must be logged in.');
 
+      const doc = documents.find(d => d.id === docId);
+      const targetTable = doc?.is_unified_document ? 'client_documents' : 'policy_documents';
+
       const { error } = await supabase
-        .from('policy_documents')
+        .from(targetTable)
         .update({ display_name: renamingDocName.trim() })
         .eq('id', docId);
 
       if (error) throw error;
 
-      const doc = documents.find(d => d.id === docId);
       const section = sections.find(s => s.id === doc?.section_id);
 
       setRenamingDocId(null);
@@ -1422,18 +1487,15 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) throw new Error('You must be logged in.');
 
-      const { data: deleteData, error: deleteErr } = await supabase
-        .storage
-        .from('policy-documents')
-        .remove([doc.storage_path]);
+      // 1. Try deleting from policy-documents or crm-documents bucket
+      const bucket = doc.is_unified_document ? 'crm-documents' : 'policy-documents';
+      await supabase.storage.from(bucket).remove([doc.storage_path]);
+      await supabase.storage.from('policy-documents').remove([doc.storage_path]);
 
-      if (deleteErr) throw deleteErr;
-      if (!deleteData || deleteData.length === 0) {
-        throw new Error('Failed to delete file from storage. Metadata deletion aborted.');
-      }
-
+      // 2. Delete metadata row
+      const targetTable = doc.is_unified_document ? 'client_documents' : 'policy_documents';
       const { error: metaErr } = await supabase
-        .from('policy_documents')
+        .from(targetTable)
         .delete()
         .eq('id', doc.id);
 
@@ -2405,7 +2467,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 border-t border-slate-100 pt-4 text-xs">
                   <div>
                     <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Writing Carrier</span>
-                    <span className="font-semibold text-slate-800 mt-0.5 block truncate">{writingCompany || '-'}</span>
+                    <span className="font-semibold text-blue-700 text-[18px] sm:text-[19px] leading-tight mt-0.5 block truncate">{writingCompany || '-'}</span>
                   </div>
                   <div>
                     <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Term</span>
@@ -2468,51 +2530,68 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                   </div>
                 )}
 
-                {docsLoading && sections.length === 0 ? (
-                  <div className="flex justify-center items-center py-20">
-                    <svg className="animate-spin h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                  </div>
-                ) : sections.length === 0 ? (
-                  <div className="text-center py-12 px-6 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-4">
-                    <svg className="w-12 h-12 text-slate-300 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <div>
-                      <h4 className="text-sm font-extrabold text-slate-800 font-sans">No documents uploaded yet</h4>
-                      <p className="text-xs text-slate-450 font-sans mt-1">Upload policy files directly or organize them into custom sections.</p>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                      <label className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 cursor-pointer font-sans">
-                        Select Files to Upload
-                        <input
-                          type="file"
-                          multiple
-                          disabled={savingSection}
-                          className="hidden"
-                          onChange={(e) => {
-                            handleDirectOrSectionUpload(null, e.target.files);
-                            e.target.value = '';
-                          }}
-                        />
-                      </label>
-                      <button
-                        onClick={handleAddSection}
-                        disabled={savingSection || sections.length >= 10}
-                        className="inline-flex items-center justify-center bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl transition-all font-sans"
-                      >
-                        Create Section
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {sections.map(section => {
-                      const sectionDocs = documents.filter(d => d.section_id === section.id);
-                      const isRenaming = renamingSectionId === section.id;
-                      const isUploading = !!uploadingFiles[section.id];
+                {(() => {
+                  const effectiveSections: DocumentSection[] = sections.length > 0
+                    ? sections
+                    : documents.length > 0
+                      ? [{ id: 'general-default', policy_id: policyId, name: 'General', position: 0, created_by: '', created_at: '', updated_at: '' }]
+                      : [];
+
+                  if (docsLoading && documents.length === 0 && sections.length === 0) {
+                    return (
+                      <div className="flex justify-center items-center py-20">
+                        <svg className="animate-spin h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                      </div>
+                    );
+                  }
+
+                  if (effectiveSections.length === 0) {
+                    return (
+                      <div className="text-center py-12 px-6 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-4">
+                        <svg className="w-12 h-12 text-slate-300 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <div>
+                          <h4 className="text-sm font-extrabold text-slate-800 font-sans">No documents uploaded yet</h4>
+                          <p className="text-xs text-slate-450 font-sans mt-1">Upload policy files directly or organize them into custom sections.</p>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                          <label className="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 cursor-pointer font-sans">
+                            Select Files to Upload
+                            <input
+                              type="file"
+                              multiple
+                              disabled={savingSection}
+                              className="hidden"
+                              onChange={(e) => {
+                                handleDirectOrSectionUpload(null, e.target.files);
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                          <button
+                            onClick={handleAddSection}
+                            disabled={savingSection || sections.length >= 10}
+                            className="inline-flex items-center justify-center bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl transition-all font-sans"
+                          >
+                            Create Section
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-6">
+                      {effectiveSections.map(section => {
+                        const sectionDocs = documents.filter(
+                          d => d.section_id === section.id || (!d.section_id && (section.id === 'general-default' || section.id === (sections[0]?.id || '')))
+                        );
+                        const isRenaming = renamingSectionId === section.id;
+                        const isUploading = !!uploadingFiles[section.id];
 
                       return (
                         <div key={section.id} className="border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
@@ -2579,7 +2658,8 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                             {/* Upload Area with Visible Dropzone */}
                             <div className="pb-2">
                               <FileDropzone
-                                label="Drag files here or click to select"
+                                compact={true}
+                                label="Drag & drop files here or click to select"
                                 onFilesSelected={(files) => handleFileUpload(section.id, files)}
                                 disabled={isUploading}
                                 multiple={true}
@@ -2700,7 +2780,8 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
                       );
                     })}
                   </div>
-                )}
+                );
+              })()}
               </div>
             )}
 

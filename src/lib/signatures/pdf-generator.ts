@@ -88,10 +88,25 @@ class Layout {
  * A character-count approximation drifts badly with proportional fonts — the
  * difference between a clean document and one with text running off the page.
  */
+export function toWinAnsi(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/[●•▪◆▶►]/g, '-')
+    .replace(/[✓✔☑]/g, '[X]')
+    .replace(/[☐🔲]/g, '[ ]')
+    .replace(/[‘’‚‛]/g, "'")
+    .replace(/[“”„‟]/g, '"')
+    .replace(/[–—]/g, '-')
+    .replace(/…/g, '...')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, '-');
+}
+
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  const safeText = toWinAnsi(text);
   const lines: string[] = [];
 
-  for (const paragraph of text.split('\n')) {
+  for (const paragraph of safeText.split('\n')) {
     if (paragraph.trim() === '') {
       lines.push('');
       continue;
@@ -124,22 +139,6 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): 
   }
 
   return lines;
-}
-
-/**
- * WinAnsi is all the standard fonts encode. An em dash or a smart quote — both
- * of which our own templates emit — would throw at draw time, taking the whole
- * PDF with it. Substituting is better than failing on punctuation.
- */
-function toWinAnsi(text: string): string {
-  return text
-    .replace(/[‘’‚‛]/g, "'")
-    .replace(/[“”„‟]/g, '"')
-    .replace(/[–—]/g, '-')
-    .replace(/…/g, '...')
-    .replace(/ /g, ' ')
-    // Anything still outside Latin-1 becomes '?', which is ugly but survivable.
-    .replace(/[^\x00-\xFF]/g, '?');
 }
 
 function drawLines(

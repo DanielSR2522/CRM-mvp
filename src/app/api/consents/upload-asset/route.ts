@@ -112,16 +112,24 @@ export async function POST(request: Request) {
     if (uploadErr) {
       console.error('Storage upload error:', uploadErr);
       return NextResponse.json(
-        { error: 'UPLOAD_FAILED', message: 'Unable to upload image. Please try again.' },
+        { error: 'UPLOAD_FAILED', message: `Storage upload failed: ${uploadErr.message}` },
         { status: 500 }
       );
     }
 
+    const { data: publicData } = admin.storage.from('signatures').getPublicUrl(storagePath);
     const { data: signedData } = await admin.storage
       .from('signatures')
       .createSignedUrl(storagePath, 60 * 60 * 24 * 365 * 10); // 10 years
 
-    const url = signedData?.signedUrl || '';
+    const url = signedData?.signedUrl || publicData?.publicUrl || '';
+
+    if (!url) {
+      return NextResponse.json(
+        { error: 'URL_GENERATION_FAILED', message: 'Could not generate a valid URL for the uploaded image.' },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,

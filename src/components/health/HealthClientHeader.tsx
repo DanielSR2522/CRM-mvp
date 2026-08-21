@@ -16,7 +16,7 @@ interface HealthClientHeaderProps {
   onDeleteProfile?: () => void;
   onPhotoUpdated?: (newPhotoUrl: string | null) => void;
   isCompanyClient?: boolean;
-  activeSection?: 'overview' | 'personal-information' | 'health' | 'medicare' | 'supplemental' | 'life' | 'policies' | 'documents' | 'notes' | 'timeline';
+  activeSection?: 'overview' | 'personal-information' | 'health' | 'medicare' | 'supplemental' | 'life' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline';
 }
 
 export default function HealthClientHeader({
@@ -35,6 +35,7 @@ export default function HealthClientHeader({
   const { isLineEnabled } = useBusinessLines();
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showPhotoMenu, setShowPhotoMenu] = useState(false);
+  const [isViewPhotoModalOpen, setIsViewPhotoModalOpen] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [currentPhoto, setCurrentPhoto] = useState<string | null>(photoUrl || null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -130,6 +131,8 @@ export default function HealthClientHeader({
     ? 'P&C Active'
     : activeSection === 'health'
     ? 'Health Active'
+    : activeSection === 'consents'
+    ? 'Consents Active'
     : 'Client Profile';
 
   return (
@@ -182,9 +185,24 @@ export default function HealthClientHeader({
             {/* Compact Photo Interaction Menu Modal */}
             {showPhotoMenu && (
               <div className="absolute top-full left-0 mt-2 z-50 bg-white border border-slate-200 rounded-2xl shadow-xl p-1.5 w-44 font-sans animate-fadeIn text-xs">
+                {currentPhoto && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPhotoMenu(false);
+                      setIsViewPhotoModalOpen(true);
+                    }}
+                    className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-100 hover:text-blue-600 rounded-xl font-bold transition-colors flex items-center gap-2"
+                  >
+                    <span>👁️</span> View Photo
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => {
+                    setShowPhotoMenu(false);
+                    fileInputRef.current?.click();
+                  }}
                   className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-100 hover:text-blue-600 rounded-xl font-bold transition-colors flex items-center gap-2"
                 >
                   <span>📷</span> {currentPhoto ? 'Change Photo' : 'Upload Photo'}
@@ -192,7 +210,10 @@ export default function HealthClientHeader({
                 {currentPhoto && (
                   <button
                     type="button"
-                    onClick={handleRemovePhoto}
+                    onClick={() => {
+                      setShowPhotoMenu(false);
+                      handleRemovePhoto();
+                    }}
                     className="w-full text-left px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl font-bold transition-colors flex items-center gap-2 border-t border-slate-100 mt-1"
                   >
                     <span>🗑️</span> Remove Photo
@@ -201,6 +222,59 @@ export default function HealthClientHeader({
               </div>
             )}
           </div>
+
+          {/* View Client Profile Photo Preview Modal */}
+          {isViewPhotoModalOpen && currentPhoto && (
+            <div
+              className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn"
+              onClick={() => setIsViewPhotoModalOpen(false)}
+            >
+              <div
+                className="bg-white border border-slate-200 rounded-3xl shadow-2xl overflow-hidden max-w-lg w-full font-sans animate-scaleIn"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">{clientName || 'Client Photo'}</h3>
+                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">Profile Photo Preview</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsViewPhotoModalOpen(false)}
+                    className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition-colors text-sm"
+                    title="Close preview"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Body - Full image visible with object-fit: contain */}
+                <div className="p-6 bg-slate-50/50 flex items-center justify-center min-h-[250px] max-h-[70vh]">
+                  <img
+                    src={currentPhoto}
+                    alt={clientName || 'Client Photo'}
+                    className="max-w-full max-h-[60vh] w-auto h-auto object-contain rounded-2xl shadow-sm border border-slate-200/80"
+                    onError={() => {
+                      setIsViewPhotoModalOpen(false);
+                      alert('Could not load profile photo preview.');
+                    }}
+                  />
+                </div>
+
+                {/* Footer */}
+                <div className="px-5 py-3.5 bg-white border-t border-slate-100 flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsViewPhotoModalOpen(false)}
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all shadow-xs"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div>
             <div className="flex items-center gap-2">
@@ -230,6 +304,7 @@ export default function HealthClientHeader({
           {isLineEnabled('property_casualty') && navTab('Property & Casualty', 'policies', activeSection === 'policies')}
           {navTab('Documents', 'documents', activeSection === 'documents')}
           {navTab('Notes', 'notes', activeSection === 'notes')}
+          {navTab('Consents', 'consents', activeSection === 'consents')}
           {navTab('Timeline', 'timeline', activeSection === 'timeline')}
         </nav>
       </div>

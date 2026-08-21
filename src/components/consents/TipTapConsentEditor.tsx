@@ -11,6 +11,8 @@ import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import ImageExtension from '@tiptap/extension-image';
 
+import { supabase } from '@/lib/supabaseClient';
+
 interface TipTapConsentEditorProps {
   content: string;
   onChange: (html: string) => void;
@@ -107,11 +109,27 @@ export default function TipTapConsentEditor({
     setModalError(null);
 
     try {
+      const allowedMimeTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+      if (!allowedMimeTypes.includes(file.type.toLowerCase())) {
+        throw new Error('Invalid file format. Please select a PNG, JPG, or WEBP image.');
+      }
+
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error('File size exceeds the 5 MB limit. Please select a smaller image.');
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
       const formData = new FormData();
       formData.append('file', file);
 
       const res = await fetch('/api/consents/upload-asset', {
         method: 'POST',
+        headers,
         credentials: 'include',
         body: formData,
       });
@@ -126,8 +144,10 @@ export default function TipTapConsentEditor({
         throw new Error(data.message || data.error || 'Unable to upload image. Please try again.');
       }
 
-      const elemId = `elem-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-      const imgHtml = `<p class="text-center my-4" data-element-type="image" data-element-id="${elemId}" data-alignment="center" data-size="medium"><img src="${data.url}" alt="${file.name}" style="max-width: 75%; height: auto; display: inline-block; border-radius: 8px;" /></p>`;
+      const elemId = `elem-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+      const safeAlt = file.name.replace(/"/g, '&quot;');
+      const storageAttr = data.path ? `data-storage-path="${data.path}"` : '';
+      const imgHtml = `<p class="text-center my-4" data-element-type="image" data-element-id="${elemId}" data-alignment="center" data-size="medium"><img src="${data.url}" ${storageAttr} alt="${safeAlt}" style="max-width: 100%; height: auto; object-fit: contain; display: inline-block; border-radius: 8px;" /></p><p></p>`;
 
       editor.chain().focus().insertContent(imgHtml).run();
       setModalType(null);

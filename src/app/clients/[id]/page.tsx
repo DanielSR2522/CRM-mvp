@@ -213,9 +213,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const activeTab = (normalizedSection === 'personal-information' ? 'personal-info' : normalizedSection) as 'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health' | 'life' | 'medicare' | 'supplemental';
 
   const isModuleWorkspace = activeTab === 'health' || activeTab === 'medicare' || activeTab === 'supplemental' || activeTab === 'life';
-  const isCoreWorkspace = activeTab === 'overview' || activeTab === 'personal-info' || activeTab === 'documents' || activeTab === 'notes' || activeTab === 'timeline' || activeTab === 'policies';
-  const isModernClientWorkspace = isModuleWorkspace || isCoreWorkspace || (activeTab as string) === 'consents';
-  const isOperationalWorkspace = isModuleWorkspace || (activeTab as string) === 'consents';
+  const isCoreWorkspace = activeTab === 'overview' || activeTab === 'personal-info' || activeTab === 'documents' || activeTab === 'notes' || activeTab === 'consents' || activeTab === 'timeline' || activeTab === 'policies';
+  const isModernClientWorkspace = isModuleWorkspace || isCoreWorkspace;
+  const isOperationalWorkspace = isModuleWorkspace;
 
 
 
@@ -2759,7 +2759,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   return (
     <DashboardLayout>
-      {['overview', 'personal-info', 'documents', 'notes', 'timeline', 'policies', 'health', 'medicare', 'supplemental', 'life'].includes(activeTab) && client && (
+      {['overview', 'personal-info', 'documents', 'notes', 'timeline', 'policies', 'health', 'medicare', 'supplemental', 'life', 'consents'].includes(activeTab) && client && (
         <HealthClientHeader
           clientId={clientId}
           clientName={personalForm.full_name || client.full_name || 'Client Profile'}
@@ -3283,6 +3283,16 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         }`}
                       >
                         Notes
+                      </button>
+                      <button
+                        onClick={() => handleTabChange('consents')}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                          (activeTab as string) === 'consents'
+                            ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                            : 'text-[#556176] hover:bg-[#F8FAFC] hover:text-[#172033]'
+                        }`}
+                      >
+                        Consents
                       </button>
                       <button
                         onClick={() => handleTabChange('timeline')}

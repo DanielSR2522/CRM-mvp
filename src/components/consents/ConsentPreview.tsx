@@ -105,6 +105,16 @@ function Block({ block }: { block: TemplateBlock }) {
           {renderText(block.text || '')}
         </p>
       );
+    case 'image':
+      return (
+        <div className="py-2 flex justify-center">
+          <img
+            src={(block as any).url || (block as any).src}
+            alt={(block as any).alt || 'Consent document image'}
+            className="max-w-full h-auto object-contain rounded-xl shadow-xs max-h-[450px]"
+          />
+        </div>
+      );
     default:
       return null;
   }
@@ -149,7 +159,7 @@ export default function ConsentPreview({
 
       {html ? (
         <div
-          className="prose prose-slate max-w-none text-sm text-slate-700 leading-relaxed"
+          className="prose prose-slate max-w-none text-sm text-slate-700 leading-relaxed [&_img]:max-w-full [&_img]:h-auto [&_img]:object-contain [&_img]:rounded-xl [&_img]:mx-auto font-sans"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : blocks.length === 0 ? (
