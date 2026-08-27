@@ -1,5 +1,5 @@
 import mammoth from 'mammoth';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 import DOMPurify from 'isomorphic-dompurify';
 
@@ -15,6 +15,15 @@ export interface OfficePreviewResult {
   slides?: OfficeSlide[];
   sheetNames?: string[];
   warning?: string;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 export async function renderOfficeDocument(
@@ -36,28 +45,46 @@ export async function renderOfficeDocument(
     };
   }
 
-  // 2. XLSX / XLS Handling
-  if (ext === 'xlsx' || ext === 'xls' || mime.includes('spreadsheetml') || mime.includes('ms-excel')) {
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
-    const sheetNames = workbook.SheetNames || [];
+  // 2. XLSX Handling
+  // Legacy binary .xls preview intentionally stays disabled. The old SheetJS npm
+  // package has unresolved high-severity advisories; users can still upload and
+  // download .xls documents without parsing untrusted binary spreadsheet input.
+  if (ext === 'xls' || mime.includes('ms-excel')) {
+    return {
+      type: 'html',
+      html: '<div class="p-6 text-center text-slate-500 font-sans">Legacy XLS preview is disabled for security. Download the file to view it in a trusted spreadsheet application.</div>',
+      warning: 'Legacy XLS preview disabled for security.',
+    };
+  }
+
+  if (ext === 'xlsx' || mime.includes('spreadsheetml')) {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+
+    const sheetNames = workbook.worksheets.map((worksheet) => worksheet.name);
     let combinedHtml = '';
 
-    sheetNames.forEach((sheetName) => {
-      const sheet = workbook.Sheets[sheetName];
-      if (sheet) {
-        const tableHtml = XLSX.utils.sheet_to_html(sheet, { header: '', footer: '' });
-        const sanitizedTable = DOMPurify.sanitize(tableHtml);
-        combinedHtml += `
-          <div style="margin-bottom: 2rem;">
-            <div style="font-weight: 800; font-size: 0.875rem; color: #1e293b; margin-bottom: 0.75rem; padding-bottom: 0.35rem; border-bottom: 2px solid #e2e8f0; font-family: sans-serif;">
-              Worksheet: ${sheetName}
-            </div>
-            <div style="overflow-x: auto;" class="excel-table-container">
-              ${sanitizedTable}
-            </div>
+    workbook.worksheets.forEach((worksheet) => {
+      const rows: string[] = [];
+
+      worksheet.eachRow({ includeEmpty: false }, (row) => {
+        const cells: string[] = [];
+        row.eachCell({ includeEmpty: true }, (cell) => {
+          cells.push(`<td>${escapeHtml(cell.text || '')}</td>`);
+        });
+        rows.push(`<tr>${cells.join('')}</tr>`);
+      });
+
+      combinedHtml += `
+        <div style="margin-bottom: 2rem;">
+          <div style="font-weight: 800; font-size: 0.875rem; color: #1e293b; margin-bottom: 0.75rem; padding-bottom: 0.35rem; border-bottom: 2px solid #e2e8f0; font-family: sans-serif;">
+            Worksheet: ${escapeHtml(worksheet.name)}
           </div>
-        `;
-      }
+          <div style="overflow-x: auto;" class="excel-table-container">
+            <table>${rows.join('')}</table>
+          </div>
+        </div>
+      `;
     });
 
     const styledHtml = `
@@ -73,7 +100,7 @@ export async function renderOfficeDocument(
 
     return {
       type: 'html',
-      html: styledHtml,
+      html: DOMPurify.sanitize(styledHtml),
       sheetNames,
     };
   }
