@@ -29,8 +29,8 @@ jobs:
       - name: Refresh vulnerable dependencies
         run: |
           npm uninstall xlsx
-          npm install exceljs@latest next@16.3.3
-          npm audit fix
+          npm install next@16.3.3
+          npm audit fix || true
 
       - name: Verify high-severity audit
         run: npm audit --audit-level=high
