@@ -60,6 +60,11 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Non-secret CI-only placeholders. They satisfy build-time initialization
+      # without exposing or depending on production credentials.
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
 
     steps:
       - name: Checkout
