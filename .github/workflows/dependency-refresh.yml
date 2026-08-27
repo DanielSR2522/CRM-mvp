@@ -1,0 +1,48 @@
+name: Dependency Refresh
+
+on:
+  push:
+    branches:
+      - cleanup/2026-08-27-repo-audit
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout cleanup branch
+        uses: actions/checkout@v5
+        with:
+          ref: cleanup/2026-08-27-repo-audit
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Refresh vulnerable dependencies
+        run: |
+          npm uninstall xlsx
+          npm install exceljs@latest next@16.3.3
+          npm audit fix
+
+      - name: Verify high-severity audit
+        run: npm audit --audit-level=high
+
+      - name: Commit refreshed manifests
+        run: |
+          if git diff --quiet -- package.json package-lock.json; then
+            echo "Dependency manifests already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "security: refresh vulnerable dependencies"
+          git push origin HEAD:cleanup/2026-08-27-repo-audit
