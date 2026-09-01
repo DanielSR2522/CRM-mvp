@@ -62,7 +62,9 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/clients') ||
     pathname.startsWith('/leads') ||
     pathname.startsWith('/consents') ||
-    pathname.startsWith('/calendar');
+    pathname.startsWith('/calendar') ||
+    pathname.startsWith('/carrier-portals') ||
+    pathname.startsWith('/agent-information');
 
   // ONLY ALLOWED PROXY REDIRECT:
   // Redirect unauthenticated real document navigations to protected routes -> /login
@@ -84,6 +86,8 @@ export const config = {
     '/leads/:path*',
     '/consents/:path*',
     '/calendar/:path*',
+    '/carrier-portals/:path*',
+    '/agent-information/:path*',
     '/login',
     '/register',
   ],
