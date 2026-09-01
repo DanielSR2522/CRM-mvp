@@ -44,3 +44,9 @@ yarn-error.log*
 next-env.d.ts
 supabase/.temp/
 scratch/
+
+# local carrier portals automation secret sessions & downloads
+.carrier-sessions/
+.carrier-downloads/
+.carrier-profiles/
+

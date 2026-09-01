@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "carrier-worker": "npx tsx scripts/carrier-worker-runner.ts",
+    "carrier-scheduler": "npx tsx scripts/carrier-scheduler-runner.ts"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.15",
@@ -35,6 +37,7 @@
     "next": "16.2.10",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
+    "playwright": "^1.62.1",
     "postgres": "^3.4.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -49,6 +52,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
+    "tsx": "^4.19.3",
     "typescript": "^5"
   }
 }
