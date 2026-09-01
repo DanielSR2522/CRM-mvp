@@ -275,7 +275,9 @@ async function fetchFallbackNoteAttachments(noteIds: string[]): Promise<{ [noteI
 export async function getAttachmentSignedUrl(storagePath: string): Promise<string | null> {
   try {
     // Try policy-documents bucket first
-    let { data, error } = await supabase.storage.from('policy-documents').createSignedUrl(storagePath, 600);
+    const primaryResult = await supabase.storage.from('policy-documents').createSignedUrl(storagePath, 600);
+    let data = primaryResult.data;
+    const { error } = primaryResult;
     if (error || !data?.signedUrl) {
       // Try health-policy-documents fallback
       const fallback = await supabase.storage.from('health-policy-documents').createSignedUrl(storagePath, 600);

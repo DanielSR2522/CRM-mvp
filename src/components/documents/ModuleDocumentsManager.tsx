@@ -111,7 +111,7 @@ export default function ModuleDocumentsManager({
   // Helper to generate signed URLs with fallback across buckets
   const getSignedUrlForDoc = async (storagePath: string): Promise<string | null> => {
     try {
-      let { data, error: err } = await supabase.storage.from('crm-documents').createSignedUrl(storagePath, 300);
+      const { data, error: err } = await supabase.storage.from('crm-documents').createSignedUrl(storagePath, 300);
       if (!err && data?.signedUrl) return data.signedUrl;
 
       const buckets = ['policy-documents', 'health-documents', 'health-policy-documents'];

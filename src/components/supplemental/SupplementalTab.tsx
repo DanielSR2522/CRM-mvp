@@ -280,7 +280,11 @@ export default function SupplementalTab({
                 <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 text-xs">
                   <div className="flex items-center justify-between font-bold">
                     <span className="text-slate-900">{selectedPolicy.product_type} Policy Activity</span>
-                    <span className="text-slate-500 font-medium">{new Date(selectedPolicy.updated_at || Date.now()).toLocaleDateString()}</span>
+                    <span className="text-slate-500 font-medium">
+                      {selectedPolicy.updated_at
+                        ? new Date(selectedPolicy.updated_at).toLocaleDateString()
+                        : 'No update date'}
+                    </span>
                   </div>
                   <p className="text-slate-600 font-medium">
                     Carrier: <strong>{selectedPolicy.company || 'Not specified'}</strong> | Premium: <strong>${selectedPolicy.monthly_premium || 0}/mo</strong> | Status: <strong>{selectedPolicy.status || 'Active'}</strong>

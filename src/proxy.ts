@@ -24,7 +24,7 @@ function createCookieRedirect(url: URL, supabaseResponse: NextResponse): NextRes
   return redirectResponse;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -64,7 +64,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/consents') ||
     pathname.startsWith('/calendar');
 
-  // ONLY ALLOWED MIDDLEWARE REDIRECT:
+  // ONLY ALLOWED PROXY REDIRECT:
   // Redirect unauthenticated real document navigations to protected routes -> /login
   if (isProtectedRoute && !user && isDocNav) {
     const url = request.nextUrl.clone();
@@ -72,7 +72,7 @@ export async function middleware(request: NextRequest) {
     return createCookieRedirect(url, supabaseResponse);
   }
 
-  // Middleware MUST NEVER redirect an authenticated user to /dashboard.
+  // Proxy MUST NEVER redirect an authenticated user to /dashboard.
   return supabaseResponse;
 }
 

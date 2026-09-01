@@ -12,7 +12,7 @@ export type SessionValidationStatus = CarrierSessionStatus;
 export interface CarrierSyncPayload {
   csvContent: string;
   sourceFilename?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export type SyncBookPayload = CarrierSyncPayload;
