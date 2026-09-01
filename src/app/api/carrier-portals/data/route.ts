@@ -145,31 +145,10 @@ export async function GET(request: Request) {
     const inactivePolicies = enrichedRecords.filter((r) => r.carrier_status === 'inactive').length;
     const gracePeriodCount = enrichedRecords.filter((r) => r.carrier_status === 'grace_period').length;
     const paymentsDueCount = enrichedRecords.filter((r) => r.payment_due).length;
-    const notOnAutopayCount = enrichedRecords.filter((r) => r.autopay_status === 'not_enrolled').length;
     const totalBalanceDue = enrichedRecords.reduce((sum, r) => sum + Number(r.amount_due || 0), 0);
     const unmatchedCount = enrichedRecords.filter((r) => r.match.match_status === 'unmatched').length;
     const reviewCount = enrichedRecords.filter((r) => r.match.match_status === 'review').length;
     const matchedCount = enrichedRecords.filter((r) => r.match.match_status === 'matched').length;
-
-    // Helper CSV line parser function
-    function parseCsvLine(line: string): string[] {
-      const result: string[] = [];
-      let current = '';
-      let inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        if (char === '"') {
-          inQuotes = !inQuotes;
-        } else if (char === ',' && !inQuotes) {
-          result.push(current.trim());
-          current = '';
-        } else {
-          current += char;
-        }
-      }
-      result.push(current.trim());
-      return result.map(s => s.replace(/^["']|["']$/g, ''));
-    }
 
     // Primary connection for backwards compatibility with Oscar UI
     const primaryConnection =

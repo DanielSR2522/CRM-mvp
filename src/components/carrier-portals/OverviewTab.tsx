@@ -14,9 +14,7 @@ interface OverviewTabProps {
 
 export default function OverviewTab({
   kpis,
-  connection,
   allConnections = [],
-  onOpenImportModal,
   onSelectTab,
   onRefresh,
 }: OverviewTabProps) {
@@ -24,25 +22,6 @@ export default function OverviewTab({
   const [automationMessage, setAutomationMessage] = useState<string | null>(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<any | null>(null);
-
-  const connStatus = connection?.connection_status || 'never_synced';
-  const isConnected = connStatus === 'connected';
-  const isReauthReq = connStatus === 'reauthentication_required';
-  const isAutomationEnabled = connection?.automation_enabled !== false;
-
-  const formattedLastSuccess = connection?.last_success_at
-    ? formatDateTimeMMDDYYYY(connection.last_success_at)
-    : connection?.last_sync_at
-    ? formatDateTimeMMDDYYYY(connection.last_sync_at)
-    : 'Never Synced';
-
-  const formattedLastAttempt = connection?.last_attempt_at
-    ? formatDateTimeMMDDYYYY(connection.last_attempt_at)
-    : 'None';
-
-  const formattedNextSync = connection?.next_sync_at
-    ? formatDateTimeMMDDYYYY(connection.next_sync_at)
-    : 'Not Scheduled';
 
   const [isWorkerOnline, setIsWorkerOnline] = useState(true);
   const [activePollJobId, setActivePollJobId] = useState<string | null>(null);
@@ -104,7 +83,7 @@ export default function OverviewTab({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [activePollJobId]);
+  }, [activePollJobId, onRefresh]);
 
   const handleSyncNow = async (carrierTarget = 'oscar') => {
     setAutomationLoading(`sync-now-${carrierTarget}`);
@@ -179,28 +158,6 @@ export default function OverviewTab({
       onRefresh();
     } catch (err: any) {
       setAutomationError(err?.message || 'Failed to complete interactive login.');
-    } finally {
-      setAutomationLoading(null);
-    }
-  };
-
-  const handleValidateSession = async () => {
-    setAutomationLoading('validate');
-    setAutomationMessage('Testing persisted Oscar session state...');
-    setAutomationError(null);
-
-    try {
-      const res = await fetch('/api/carrier-portals/automation/validate', { method: 'POST' });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Session validation failed.');
-      if (json.sessionStatus === 'connected') {
-        setAutomationMessage('✓ Oscar Session is VALID and ACTIVE!');
-      } else {
-        setAutomationError('⚠ Oscar Session Expired. Reauthentication Required via Connect Oscar.');
-      }
-      onRefresh();
-    } catch (err: any) {
-      setAutomationError(err?.message || 'Failed to validate session.');
     } finally {
       setAutomationLoading(null);
     }

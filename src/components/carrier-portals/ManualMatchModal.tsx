@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { formatDateMMDDYYYY } from '@/lib/carrier-portals/date-formatter';
 
 interface ManualMatchModalProps {
@@ -23,15 +23,7 @@ export default function ManualMatchModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isOpen && carrierRecord) {
-      setSearchTerm(carrierRecord.member_name || '');
-      setSelectedClientId(carrierRecord.match?.client?.id || null);
-      fetchClients(carrierRecord.member_name || '');
-    }
-  }, [isOpen, carrierRecord]);
-
-  const fetchClients = async (query: string) => {
+  const fetchClients = useCallback(async (query: string) => {
     setLoading(true);
     setError(null);
     try {
@@ -58,7 +50,15 @@ export default function ManualMatchModal({
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && carrierRecord) {
+      setSearchTerm(carrierRecord.member_name || '');
+      setSelectedClientId(carrierRecord.match?.client?.id || null);
+      void fetchClients(carrierRecord.member_name || '');
+    }
+  }, [isOpen, carrierRecord, fetchClients]);
 
   if (!isOpen || !carrierRecord) return null;
 

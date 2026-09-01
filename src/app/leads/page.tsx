@@ -101,7 +101,7 @@ export default function LeadsPage() {
 
       if (data) {
         const now = new Date().toISOString();
-        let totalLeads = data.length;
+        const totalLeads = data.length;
         let newLeads = 0;
         let inProgressLeads = 0;
         let qualifiedLeads = 0;

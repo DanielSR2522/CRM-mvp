@@ -24,7 +24,7 @@ export class OscarAutomationAdapter implements CarrierAutomationAdapter {
     if (fs.existsSync(filePath)) {
       try {
         fs.unlinkSync(filePath);
-      } catch (e) {}
+      } catch {}
     }
 
     return {

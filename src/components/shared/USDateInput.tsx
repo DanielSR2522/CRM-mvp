@@ -35,7 +35,7 @@ export default function USDateInput({
   }, [value]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let raw = e.target.value;
+    const raw = e.target.value;
     const digits = raw.replace(/\D/g, '').slice(0, 8);
 
     // Apply MM/DD/YYYY mask

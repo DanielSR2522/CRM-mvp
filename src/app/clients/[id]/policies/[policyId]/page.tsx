@@ -824,7 +824,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
       const actorIds = Array.from(new Set(loadedEvents.map(e => e.actor_id).filter(Boolean)));
 
       // 3. Fetch profiles separately
-      let profilesMap: { [id: string]: { name?: string | null; full_name?: string | null; email?: string | null } } = {};
+      const profilesMap: { [id: string]: { name?: string | null; full_name?: string | null; email?: string | null } } = {};
       if (actorIds.length > 0) {
         const { data: profilesData, error: profilesErr } = await supabase
           .from('profiles')

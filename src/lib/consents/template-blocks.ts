@@ -65,7 +65,7 @@ export async function sha256Hex(str: string): Promise<string> {
 
   // Fallback for Node CLI environments without Web Crypto
   try {
-    const nodeCrypto = require('node:crypto');
+    const nodeCrypto = await import('node:crypto');
     return nodeCrypto.createHash('sha256').update(data).digest('hex');
   } catch (e) {
     throw new Error('No crypto engine available for SHA-256 hashing.');
