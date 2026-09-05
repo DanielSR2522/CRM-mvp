@@ -109,12 +109,20 @@ export function normalizeZip(value: ImportCell | undefined): string | null {
 export function normalizePhone(value: ImportCell | undefined): string | null {
   const text = cellToString(value);
   if (!text) return null;
-  const digits = text.replace(/\D/g, '');
+  const trimmed = text.trim();
+  if (trimmed.startsWith('+')) {
+    // Preserve international format with country code
+    const digits = trimmed.slice(1).replace(/\D/g, '');
+    if (digits.length >= 7 && digits.length <= 15) {
+      return `+${digits}`;
+    }
+  }
+  const digits = trimmed.replace(/\D/g, '');
   if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
   if (digits.length === 11 && digits.startsWith('1')) {
     return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
   }
-  return text.trim();
+  return trimmed;
 }
 
 export function normalizeSsn(
@@ -145,8 +153,39 @@ export function normalizeMoney(value: ImportCell | undefined): number | null {
 export function normalizeEmail(value: ImportCell | undefined): string | null {
   const text = cellToString(value);
   if (!text) return null;
-  const email = text.toLowerCase();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : text;
+  const email = text.trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : text.trim();
+}
+
+export function normalizeGender(value: ImportCell | undefined): string | null {
+  const text = cellToString(value);
+  if (!text) return null;
+  const lower = text.trim().toLowerCase();
+  if (lower === 'm' || lower === 'male' || lower === 'hombre' || lower === 'masculino') return 'Male';
+  if (lower === 'f' || lower === 'female' || lower === 'mujer' || lower === 'femenino') return 'Female';
+  return text.trim();
+}
+
+export function normalizeTypePlan(value: ImportCell | undefined): string | null {
+  const text = cellToString(value);
+  if (!text) return null;
+  const lower = text.trim().toLowerCase();
+  if (lower.includes('bronze') || lower.includes('bronce')) return 'Bronze';
+  if (lower.includes('silver') || lower.includes('plata')) return 'Silver';
+  if (lower.includes('gold') || lower.includes('oro')) return 'Gold';
+  if (lower.includes('platinum') || lower.includes('platino')) return 'Platinum';
+  if (lower.includes('catastrophic') || lower.includes('catastrófico')) return 'Catastrophic';
+  return text.trim();
+}
+
+export function normalizePolicyStatus(value: ImportCell | undefined): string | null {
+  const text = cellToString(value);
+  if (!text) return null;
+  const lower = text.trim().toLowerCase();
+  if (lower === 'active' || lower === 'activo' || lower === 'activa') return 'Active';
+  if (lower === 'pending' || lower === 'pendiente') return 'Pending';
+  if (lower === 'cancelled' || lower === 'canceled' || lower === 'cancelado' || lower === 'cancelada') return 'Cancelled';
+  return text.trim();
 }
 
 export function splitFullName(fullName: string | null): { firstName: string | null; lastName: string | null } {

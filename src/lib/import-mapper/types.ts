@@ -9,18 +9,22 @@ export type DestinationFieldId =
   | 'client.last_name'
   | 'client.date_of_birth'
   | 'client.ssn'
+  | 'client.gender'
   | 'client.phone'
   | 'client.email'
   | 'client.address'
   | 'client.city'
   | 'client.state'
   | 'client.zip'
+  | 'client.county'
   | 'client.agent'
   | 'client.external_legacy_id'
   | 'client.notes'
   | 'health_policy.carrier'
   | 'health_policy.policy_number'
+  | 'health_policy.plan_id'
   | 'health_policy.member_id'
+  | 'health_policy.type_plan'
   | 'health_policy.status'
   | 'health_policy.effective_date'
   | 'health_policy.term_date'
@@ -69,12 +73,14 @@ export interface NormalizedImportRecord {
     lastName: string | null;
     dateOfBirth: string | null;
     ssn: string | null;
+    gender: string | null;
     phone: string | null;
     email: string | null;
     address: string | null;
     city: string | null;
     state: string | null;
     zip: string | null;
+    county: string | null;
     agentName: string | null;
     externalLegacyId: string | null;
     notes: string | null;
@@ -82,7 +88,9 @@ export interface NormalizedImportRecord {
   healthPolicy: {
     carrier: string | null;
     policyNumber: string | null;
+    planId: string | null;
     memberId: string | null;
+    typePlan: string | null;
     status: string | null;
     effectiveDate: string | null;
     termDate: string | null;

@@ -53,6 +53,11 @@ export default function ConsentsDashboardPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Agent profile — loaded once on mount and passed to DeliveryDialog so
+  // channel adapters that build message bodies have the agent's real name.
+  const [agentName, setAgentName] = useState<string | null>(null);
+  const [agencyName, setAgencyName] = useState<string | null>(null);
+
   const [detail, setDetail] = useState<{ row: DashboardConsentRow; tab: 'document' | 'audit' } | null>(null);
   const [confirmCancel, setConfirmCancel] = useState<DashboardConsentRow | null>(null);
   const [delivery, setDelivery] = useState<{ row: DashboardConsentRow; channel: DeliveryChannel } | null>(null);
@@ -70,6 +75,32 @@ export default function ConsentsDashboardPage() {
   // Filters are serialised so the effect compares by value, not by object
   // identity — otherwise every render would refetch.
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
+
+  // ---- Agent profile (for message body previews and fallback display) ----
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || cancelled) return;
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('name, first_name, last_name, agency_name')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (cancelled || !profile) return;
+        const fullName =
+          profile.name?.trim() ||
+          [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim() ||
+          null;
+        setAgentName(fullName);
+        setAgencyName(profile.agency_name?.trim() || null);
+      } catch {
+        // Non-fatal — the dialogs still work without it.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // ---- Template list (static for the session) ---------------------------
   useEffect(() => {
@@ -431,6 +462,8 @@ export default function ConsentsDashboardPage() {
         <DeliveryDialog
           row={delivery.row}
           channel={delivery.channel}
+          agentName={agentName}
+          agencyName={agencyName}
           onClose={() => setDelivery(null)}
           onDone={(message) => {
             setDelivery(null);

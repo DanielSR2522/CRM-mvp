@@ -190,6 +190,67 @@ export async function deliverConsent(
     };
   }
 
+  if (channel === 'whatsapp') {
+    // WhatsApp is delivered via Meta Cloud API — server-side only.
+    // The old wa.me path is retained as a manual fallback in the UI but is
+    // never called here for the primary flow.
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const accessToken = session?.access_token;
+
+    if (!accessToken) {
+      throw new Error('Your session has expired. Sign in again.');
+    }
+
+    const response = await fetch(
+      `/api/signature-requests/${encodeURIComponent(row.id)}/send-whatsapp`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    const payload = (await response.json()) as {
+      success?: boolean;
+      message?: string;
+      providerReference?: string;
+      signingUrl?: string;
+      expiresAt?: string;
+      error?: string;
+    };
+
+    if (
+      !response.ok ||
+      !payload.success ||
+      !payload.signingUrl ||
+      !payload.expiresAt
+    ) {
+      throw new Error(
+        payload.error ?? 'The WhatsApp message could not be sent.'
+      );
+    }
+
+    return {
+      status: 'sent',
+      eventType: 'whatsapp_sent',
+      maskedDestination: null,
+      nextRequestStatus: 'sent',
+      message: payload.message ?? 'WhatsApp consent sent.',
+      providerReference: payload.providerReference,
+      metadata: {
+        sent_at: new Date().toISOString(),
+        transport: 'cloud_api',
+        handled_by_server: true,
+      },
+      signingUrl: payload.signingUrl,
+      expiresAt: new Date(payload.expiresAt),
+    };
+  }
+
   const readiness = adapter.isReady();
 
   if (!readiness.ready) {

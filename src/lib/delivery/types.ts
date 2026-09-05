@@ -64,7 +64,8 @@ export interface DeliveryOutcome {
     | 'request_sent'
     | 'email_sent'
     | 'email_failed'
-    | 'whatsapp_link_opened'
+    | 'whatsapp_sent'        // Cloud API: Meta accepted the message and returned a WAMID
+    | 'whatsapp_link_opened' // Manual fallback: wa.me link opened in browser
     | 'sms_link_opened'
     | 'secure_link_copied'
     | 'delivery_failed';

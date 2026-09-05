@@ -3,17 +3,26 @@
 import React, { useCallback, useState } from 'react';
 import type { DashboardConsentRow, DeliveryChannel } from '@/lib/consents/types';
 import { adapterFor, confirmManualSend, deliverConsent, type DeliveryResult } from '@/lib/delivery/delivery-service';
-import { formatExpiry } from '@/lib/delivery/types';
+import { buildSigningMessage, formatExpiry } from '@/lib/delivery/types';
 import { EMAIL_NOT_CONFIGURED, emailAdapter } from '@/lib/delivery/email-adapter';
+import { whatsappAdapter } from '@/lib/delivery/whatsapp-adapter';
 
 /**
  * The send dialog.
  *
- * It exists because delivery through these channels is not a fire-and-forget
- * action: WhatsApp and SMS hand the message to an app the agent still has to
- * press send in, and email has no provider at all. The dialog is where that
- * truth is told — including offering the raw link when a popup gets blocked, and
- * asking the agent to confirm a manual send rather than guessing.
+ * WhatsApp now uses Meta Cloud API as the primary flow:
+ *   Agent clicks Send → CRM calls /api/signature-requests/[id]/send-whatsapp →
+ *   Meta accepts → WAMID stored → status moves to 'sent' → green banner.
+ *
+ * The old wa.me flow is retained as a clearly labelled MANUAL FALLBACK for
+ * cases where the Cloud API is unavailable (e.g. template not yet approved,
+ * missing config). The manual fallback:
+ *   - Does NOT call the Cloud API.
+ *   - Does NOT advance the status automatically.
+ *   - Shows message text for the agent to copy and send themselves.
+ *   - Requires agent confirmation ("Yes, I sent it") to advance status.
+ *
+ * Email, SMS, and Copy Link are unchanged.
  */
 
 interface DeliveryDialogProps {
@@ -40,10 +49,18 @@ export default function DeliveryDialog({
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [showManualFallback, setShowManualFallback] = useState(false);
+  const [manualRunning, setManualRunning] = useState(false);
+  const [manualResult, setManualResult] = useState<DeliveryResult | null>(null);
+  const [manualConfirming, setManualConfirming] = useState(false);
 
   const isEmail = channel === 'email';
+  const isWhatsApp = channel === 'whatsapp';
   const emailBlocked = isEmail && !emailAdapter.isReady().ready;
 
+  // -------------------------------------------------------------------------
+  // Primary flow (Cloud API for WhatsApp, server-side for Email)
+  // -------------------------------------------------------------------------
   const run = useCallback(async () => {
     setRunning(true);
     setError(null);
@@ -57,6 +74,48 @@ export default function DeliveryDialog({
       setRunning(false);
     }
   }, [row, channel, agencyName, agentName]);
+
+  // -------------------------------------------------------------------------
+  // Manual WhatsApp fallback (wa.me link + copy-message, no auto-status)
+  // -------------------------------------------------------------------------
+  const runManualFallback = useCallback(async () => {
+    setManualRunning(true);
+    try {
+      // Use the WhatsApp adapter directly (the wa.me path).
+      // This returns status:'opened', nextRequestStatus: null — the status
+      // does NOT advance until the agent explicitly confirms they sent it.
+      // We build a minimal context here; the full context is built server-side
+      // for the Cloud API path. For the manual path we only need the URL.
+      const outcome = await whatsappAdapter.deliver({
+        requestId: row.id,
+        signerId: '',
+        clientName: row.client_name ?? '',
+        signerName: row.signer_name ?? '',
+        signerEmail: row.signer_email,
+        signerPhone: row.signer_phone,
+        documentTitle: row.title,
+        agencyName: agencyName ?? null,
+        agentName: agentName ?? null,
+        signingUrl: manualResult?.signingUrl ?? '',
+        expiresAt: manualResult?.expiresAt ?? new Date(row.expires_at ?? Date.now()),
+        language: 'en',
+      });
+      setManualResult((prev) => prev ? { ...prev, ...outcome } : null);
+    } finally {
+      setManualRunning(false);
+    }
+  }, [row, agencyName, agentName, manualResult]);
+
+  const confirmManualSent = async () => {
+    setManualConfirming(true);
+    try {
+      await confirmManualSend(row, channel);
+      onDone(`Marked as sent via ${adapter.label} (manual send).`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not mark it as sent.');
+      setManualConfirming(false);
+    }
+  };
 
   const copy = async (text: string, what: string) => {
     try {
@@ -86,7 +145,9 @@ export default function DeliveryDialog({
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-50 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-sm font-extrabold text-slate-900">Send via {adapter.label}</h2>
+            <h2 className="text-sm font-extrabold text-slate-900">
+              {isWhatsApp ? 'Send via WhatsApp' : `Send via ${adapter.label}`}
+            </h2>
             <p className="text-xs text-slate-500 mt-0.5">
               {row.title} · {row.client_name}
             </p>
@@ -127,8 +188,162 @@ export default function DeliveryDialog({
             </>
           )}
 
-          {/* ---- Everything else ---- */}
-          {!emailBlocked && (
+          {/* ---- WhatsApp — Cloud API primary flow ---- */}
+          {isWhatsApp && !emailBlocked && (
+            <>
+              {!result && !running && (
+                <>
+                  <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+                    <p className="text-xs text-slate-600">
+                      A consent signature request will be sent directly to the client&apos;s WhatsApp.
+                      A new secure link will be created and{' '}
+                      <strong>any previous link for this consent will stop working.</strong>
+                    </p>
+                  </div>
+                  <dl className="space-y-1.5 text-xs">
+                    <Row label="Signer" value={row.signer_name ?? '—'} />
+                    <Row label="Phone" value={row.signer_phone ?? '—'} />
+                    <Row label="Expires" value={row.expires_at ? formatExpiry(new Date(row.expires_at)) : '—'} />
+                  </dl>
+                  <button
+                    type="button"
+                    onClick={run}
+                    className="w-full px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-xl transition-colors active:scale-[0.98]"
+                  >
+                    Send via WhatsApp
+                  </button>
+                  {/* Manual fallback toggle */}
+                  <div className="border-t border-slate-100 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowManualFallback(!showManualFallback)}
+                      className="text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors"
+                    >
+                      {showManualFallback ? '▲ Hide' : '▼ Show'} manual send option (fallback)
+                    </button>
+                    {showManualFallback && (
+                      <div className="mt-3 bg-amber-50 border border-amber-100 rounded-xl p-3 space-y-2">
+                        <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wide">
+                          Manual send — fallback only
+                        </p>
+                        <p className="text-xs text-amber-700">
+                          Opens WhatsApp with a pre-filled message. Use this only if the automatic
+                          send above fails. Opening WhatsApp does{' '}
+                          <strong>not</strong> mark the consent as sent — you must confirm after
+                          pressing Send in WhatsApp.
+                        </p>
+                        {row.signer_phone && (
+                          <a
+                            href={whatsappAdapter.buildUrl({
+                              requestId: row.id,
+                              signerId: '',
+                              clientName: row.client_name ?? '',
+                              signerName: row.signer_name ?? '',
+                              signerEmail: row.signer_email,
+                              signerPhone: row.signer_phone,
+                              documentTitle: row.title,
+                              agencyName: agencyName ?? null,
+                              agentName: agentName ?? null,
+                              signingUrl: `[copy the link above after using Send via WhatsApp]`,
+                              expiresAt: new Date(row.expires_at ?? Date.now()),
+                              language: 'en',
+                            })}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-block px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition-colors"
+                          >
+                            Open WhatsApp manually →
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {running && (
+                <div className="py-8 text-center">
+                  <svg className="animate-spin h-5 w-5 mx-auto text-green-600" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <p className="text-xs text-slate-500 mt-3">Sending via WhatsApp Cloud API…</p>
+                </div>
+              )}
+
+              {result && result.status === 'sent' && (
+                <>
+                  <div className="bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+                    <p className="text-xs font-semibold text-emerald-800 flex items-center gap-1.5">
+                      <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      {result.message}
+                    </p>
+                    <p className="text-[10px] text-emerald-700 mt-1">
+                      The message was accepted by Meta. The client will receive it on their
+                      WhatsApp. Delivery status updates will be tracked automatically.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                      Secure link (backup)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        readOnly
+                        value={result.signingUrl}
+                        onFocus={(e) => e.currentTarget.select()}
+                        className="flex-1 text-xs text-slate-700 border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copy(result.signingUrl, 'link')}
+                        className="px-3 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-[10px] font-bold rounded-lg transition-colors whitespace-nowrap"
+                      >
+                        {copied === 'link' ? 'Copied' : 'Copy Link'}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Expires {formatExpiry(result.expiresAt)}. The client can also use this link
+                      directly if they prefer not to open the WhatsApp message.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onDone(result.message)}
+                    className="w-full px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold rounded-xl transition-colors"
+                  >
+                    Done
+                  </button>
+                </>
+              )}
+
+              {result && result.status === 'failed' && (
+                <>
+                  <div className="bg-rose-50 border border-rose-100 rounded-xl px-4 py-3">
+                    <p className="text-xs font-semibold text-rose-800">WhatsApp send failed.</p>
+                    <p className="text-xs text-rose-700 mt-1">
+                      {result.message || error || 'The message could not be delivered.'}
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    You can use the manual option below or try again after resolving the issue.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setResult(null); setError(null); }}
+                    className="w-full px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-xl transition-colors"
+                  >
+                    Try again
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
+          {/* ---- Everything else (SMS, Copy Link, Email when ready) ---- */}
+          {!isWhatsApp && !emailBlocked && (
             <>
               {!result && !running && (
                 <>
@@ -220,8 +435,8 @@ export default function DeliveryDialog({
                     </p>
                   </div>
 
-                  {/* SMS on desktop, or any manual channel: the message text. */}
-                  {(channel === 'sms' || channel === 'whatsapp') && (
+                  {/* SMS on desktop: the message text. */}
+                  {channel === 'sms' && (
                     <ManualMessage
                       row={row}
                       channel={channel}

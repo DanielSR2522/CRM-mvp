@@ -82,13 +82,14 @@ export async function POST(request: Request) {
             policy_status: row.healthPolicy.status || null,
             action_pending: row.healthPolicy.pendingAction || row.pendingAction || null,
             company_2026: row.healthPolicy.carrier || null,
-            application_number: row.healthPolicy.marketplaceApplicationId || row.healthPolicy.policyNumber || null,
-            plan_id: row.healthPolicy.policyNumber || null,
+            application_number: row.healthPolicy.marketplaceApplicationId || null,
+            type_plan: row.healthPolicy.typePlan || null,
+            plan_id: row.healthPolicy.planId || row.healthPolicy.policyNumber || null,
             plan_name: row.healthPolicy.plan || null,
             no_membership: row.healthPolicy.memberId || null,
             plan_cost: row.healthPolicy.premium ?? 0,
             tax_credit: row.healthPolicy.taxCredit ?? 0,
-            effective_date: row.healthPolicy.effectiveDate,
+            effective_date: row.healthPolicy.effectiveDate || null,
             updated_at: new Date().toISOString(),
           });
         }
@@ -165,25 +166,30 @@ async function updateClient(supabase: ReturnType<typeof createCookieSupabase>, c
 }
 
 async function upsertClientDetails(supabase: ReturnType<typeof createCookieSupabase>, clientId: string, row: ReturnType<typeof buildImportPlan>['rows'][number]) {
-  await supabase.from('client_personal_information').upsert({
+  const personalPatch: Record<string, unknown> = {
     client_id: clientId,
-    full_name: row.client.fullName,
-    date_of_birth: row.client.dateOfBirth,
-    ssn: row.client.ssn,
-    email: row.client.email,
-    phone: row.client.phone,
-    has_co_applicant: false,
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'client_id' });
+  };
+  if (row.client.fullName) personalPatch.full_name = row.client.fullName;
+  if (row.client.dateOfBirth) personalPatch.date_of_birth = row.client.dateOfBirth;
+  if (row.client.ssn) personalPatch.ssn = row.client.ssn;
+  if (row.client.email) personalPatch.email = row.client.email;
+  if (row.client.phone) personalPatch.phone = row.client.phone;
+  if (row.client.gender) personalPatch.gender = row.client.gender;
 
-  if (row.client.address || row.client.city || row.client.state || row.client.zip) {
-    await supabase.from('client_residence_information').upsert({
+  await supabase.from('client_personal_information').upsert(personalPatch, { onConflict: 'client_id' });
+
+  if (row.client.address || row.client.city || row.client.state || row.client.zip || row.client.county) {
+    const residencePatch: Record<string, unknown> = {
       client_id: clientId,
-      address: row.client.address,
-      city: row.client.city,
-      state: row.client.state,
-      zip_code: row.client.zip,
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'client_id' });
+    };
+    if (row.client.address) residencePatch.address = row.client.address;
+    if (row.client.city) residencePatch.city = row.client.city;
+    if (row.client.state) residencePatch.state = row.client.state;
+    if (row.client.zip) residencePatch.zip_code = row.client.zip;
+    if (row.client.county) residencePatch.county = row.client.county;
+
+    await supabase.from('client_residence_information').upsert(residencePatch, { onConflict: 'client_id' });
   }
 }
