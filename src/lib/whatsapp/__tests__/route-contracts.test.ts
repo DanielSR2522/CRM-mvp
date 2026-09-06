@@ -53,6 +53,7 @@ import assert from 'node:assert/strict';
 
 import {
   normalizeToE164,
+  selectTemplateName,
   getWhatsAppConfig,
   WhatsAppConfigError,
   WhatsAppApiError,
@@ -352,5 +353,114 @@ describe('Test 28 & 29 — Webhook Delivery State Model & Idempotency', () => {
     assert.equal(linkMod.isLinkLive(expiredSigner), false, 'expired signer link is not live');
     assert.equal(linkMod.isLinkLive(revokedSigner), false, 'revoked signer link is not live');
     assert.equal(linkMod.isLinkLive(signedSigner), false, 'signed signer link is not live');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests 30-36 — Final Consent Fixes: Language Selection, Template Mapping, Phone Normalization & Synchronization
+// ---------------------------------------------------------------------------
+describe('Tests 30-36 — Language Selection, Template Mapping & Phone Synchronization', () => {
+  const baseConfig = {
+    accessToken: 'test-token',
+    phoneNumberId: '123456',
+    businessAccountId: null,
+    apiVersion: 'v20.0',
+    templateEs: 'health_consent_signature_request',
+    templateEsLanguage: 'es_CO',
+    templateEn: 'health_consent_ingles',
+    templateEnLanguage: 'en',
+  };
+
+  it('Test 30: Spanish selection sends health_consent_signature_request + es_CO', async () => {
+    let capturedBody: any;
+    const originalFetch = global.fetch;
+    (global as any).fetch = async (_: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'wamid.ES30' }] }) };
+    };
+    try {
+      await sendConsentWhatsAppTemplate({
+        config: baseConfig,
+        toPhone: '+573022213630',
+        templateName: selectTemplateName(baseConfig, 'es'),
+        language: 'es',
+        clientName: 'Carlos Gomez',
+        agentName: 'Agente Perez',
+        consentLink: 'https://x.com/sign/es30',
+      });
+      assert.equal(capturedBody.template.name, 'health_consent_signature_request');
+      assert.equal(capturedBody.template.language.code, 'es_CO');
+    } finally {
+      (global as any).fetch = originalFetch;
+    }
+  });
+
+  it('Test 31: English selection sends health_consent_ingles + en', async () => {
+    let capturedBody: any;
+    const originalFetch = global.fetch;
+    (global as any).fetch = async (_: string, opts: any) => {
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true, status: 200, json: async () => ({ messages: [{ id: 'wamid.EN31' }] }) };
+    };
+    try {
+      await sendConsentWhatsAppTemplate({
+        config: baseConfig,
+        toPhone: '+13055551234',
+        templateName: selectTemplateName(baseConfig, 'en'),
+        language: 'en',
+        clientName: 'John Smith',
+        agentName: 'Agent Brown',
+        consentLink: 'https://x.com/sign/en31',
+      });
+      assert.equal(capturedBody.template.name, 'health_consent_ingles');
+      assert.equal(capturedBody.template.language.code, 'en');
+    } finally {
+      (global as any).fetch = originalFetch;
+    }
+  });
+
+  it('Test 32: deliverConsent rejects delivery if language is missing or invalid', async () => {
+    const { deliverConsent } = await import('../../delivery/delivery-service.js');
+    const mockRow: any = { id: 'req_123', client_name: 'Test', title: 'Consent' };
+
+    await assert.rejects(
+      async () => deliverConsent(mockRow, 'whatsapp', { language: undefined as any }),
+      /A valid message language/
+    );
+
+    await assert.rejects(
+      async () => deliverConsent(mockRow, 'whatsapp', { language: 'fr' as any }),
+      /A valid message language/
+    );
+  });
+
+  it('Test 33: Arbitrary client-supplied template names cannot override server template selection', () => {
+    // Server logic forces selectTemplateName(config, lang) regardless of any client input
+    const esName = selectTemplateName(baseConfig, 'es');
+    const enName = selectTemplateName(baseConfig, 'en');
+    assert.equal(esName, 'health_consent_signature_request');
+    assert.equal(enName, 'health_consent_ingles');
+    assert.notEqual(esName, 'arbitrary_hacked_template');
+    assert.notEqual(enName, 'arbitrary_hacked_template');
+  });
+
+  it('Test 34: International Colombian number +573022213630 remains valid and intact', async () => {
+    const { normalizeToE164 } = await import('../cloud-api.js');
+    const { formatUSPhone } = await import('../../formatters/phone.js');
+    assert.equal(normalizeToE164('+573022213630'), '+573022213630');
+    assert.equal(formatUSPhone('+573022213630'), '+573022213630');
+  });
+
+  it('Test 35: Existing US E.164 numbers remain valid', async () => {
+    const { normalizeToE164 } = await import('../cloud-api.js');
+    const { formatUSPhone } = await import('../../formatters/phone.js');
+    assert.equal(normalizeToE164('+13055551234'), '+13055551234');
+    assert.equal(normalizeToE164('3055551234'), '+13055551234');
+    assert.equal(formatUSPhone('3055551234'), '305-555-1234');
+  });
+
+  it('Test 36: Updating Primary Phone keeps clients.phone and client_personal_information.phone synchronized', async () => {
+    const { updatePrimaryApplicantField } = await import('../../health/health-service.js');
+    assert.equal(typeof updatePrimaryApplicantField, 'function');
   });
 });

@@ -191,6 +191,10 @@ export async function deliverConsent(
   }
 
   if (channel === 'whatsapp') {
+    if (!options.language || !['es', 'en'].includes(options.language)) {
+      throw new Error('A valid message language ("es" or "en") must be selected before sending via WhatsApp.');
+    }
+
     // WhatsApp is delivered via Meta Cloud API — server-side only.
     // The old wa.me path is retained as a manual fallback in the UI but is
     // never called here for the primary flow.
@@ -210,7 +214,11 @@ export async function deliverConsent(
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          language: options.language,
+        }),
       }
     );
 
@@ -239,12 +247,13 @@ export async function deliverConsent(
       eventType: 'whatsapp_sent',
       maskedDestination: null,
       nextRequestStatus: 'sent',
-      message: payload.message ?? 'WhatsApp consent sent.',
+      message: payload.message ?? 'Message accepted by WhatsApp. Delivery status will update automatically.',
       providerReference: payload.providerReference,
       metadata: {
         sent_at: new Date().toISOString(),
         transport: 'cloud_api',
         handled_by_server: true,
+        language: options.language,
       },
       signingUrl: payload.signingUrl,
       expiresAt: new Date(payload.expiresAt),

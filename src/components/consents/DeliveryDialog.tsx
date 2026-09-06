@@ -54,6 +54,8 @@ export default function DeliveryDialog({
   const [manualResult, setManualResult] = useState<DeliveryResult | null>(null);
   const [manualConfirming, setManualConfirming] = useState(false);
 
+  const [selectedLanguage, setSelectedLanguage] = useState<'es' | 'en' | null>(null);
+
   const isEmail = channel === 'email';
   const isWhatsApp = channel === 'whatsapp';
   const emailBlocked = isEmail && !emailAdapter.isReady().ready;
@@ -62,10 +64,19 @@ export default function DeliveryDialog({
   // Primary flow (Cloud API for WhatsApp, server-side for Email)
   // -------------------------------------------------------------------------
   const run = useCallback(async () => {
+    if (isWhatsApp && !selectedLanguage) {
+      setError('Please select a message language before sending via WhatsApp.');
+      return;
+    }
+
     setRunning(true);
     setError(null);
     try {
-      const outcome = await deliverConsent(row, channel, { agencyName, agentName });
+      const outcome = await deliverConsent(row, channel, {
+        agencyName,
+        agentName,
+        language: selectedLanguage ?? undefined,
+      });
       setResult(outcome);
       if (outcome.status === 'failed') setError(outcome.message);
     } catch (err) {
@@ -73,7 +84,7 @@ export default function DeliveryDialog({
     } finally {
       setRunning(false);
     }
-  }, [row, channel, agencyName, agentName]);
+  }, [row, channel, agencyName, agentName, isWhatsApp, selectedLanguage]);
 
   // -------------------------------------------------------------------------
   // Manual WhatsApp fallback (wa.me link + copy-message, no auto-status)
@@ -205,10 +216,56 @@ export default function DeliveryDialog({
                     <Row label="Phone" value={row.signer_phone ?? '—'} />
                     <Row label="Expires" value={row.expires_at ? formatExpiry(new Date(row.expires_at)) : '—'} />
                   </dl>
+
+                  {/* Language Selection (Required for WhatsApp) */}
+                  <div className="border-t border-slate-100 pt-3">
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-2">
+                      Message language / Idioma del mensaje <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedLanguage('es'); setError(null); }}
+                        className={`p-3 rounded-xl border text-left transition-all ${
+                          selectedLanguage === 'es'
+                            ? 'border-green-600 bg-green-50/50 ring-2 ring-green-500/20'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="font-bold text-xs text-slate-900">Español</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">Template: health_consent_signature_request</div>
+                        <div className="text-[10px] text-slate-400 font-mono">es_CO</div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedLanguage('en'); setError(null); }}
+                        className={`p-3 rounded-xl border text-left transition-all ${
+                          selectedLanguage === 'en'
+                            ? 'border-green-600 bg-green-50/50 ring-2 ring-green-500/20'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="font-bold text-xs text-slate-900">English</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">Template: health_consent_ingles</div>
+                        <div className="text-[10px] text-slate-400 font-mono">en</div>
+                      </button>
+                    </div>
+                    {!selectedLanguage && (
+                      <p className="text-[11px] text-amber-600 font-medium mt-1.5">
+                        Select a language above to enable sending.
+                      </p>
+                    )}
+                  </div>
+
                   <button
                     type="button"
                     onClick={run}
-                    className="w-full px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-xl transition-colors active:scale-[0.98]"
+                    disabled={!selectedLanguage || running}
+                    className={`w-full px-4 py-2.5 text-white text-xs font-bold rounded-xl transition-colors active:scale-[0.98] ${
+                      !selectedLanguage
+                        ? 'bg-slate-300 cursor-not-allowed'
+                        : 'bg-green-600 hover:bg-green-700'
+                    }`}
                   >
                     Send via WhatsApp
                   </button>
@@ -281,8 +338,7 @@ export default function DeliveryDialog({
                       {result.message}
                     </p>
                     <p className="text-[10px] text-emerald-700 mt-1">
-                      The message was accepted by Meta. The client will receive it on their
-                      WhatsApp. Delivery status updates will be tracked automatically.
+                      Message accepted by WhatsApp. Delivery status will update automatically.
                     </p>
                   </div>
                   <div>

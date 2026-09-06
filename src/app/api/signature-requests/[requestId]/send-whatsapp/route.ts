@@ -6,6 +6,7 @@ import {
   getWhatsAppConfig,
   normalizeToE164,
   selectTemplateName,
+  selectLanguageCode,
   sendConsentWhatsAppTemplate,
   WhatsAppConfigError,
   WhatsAppApiError,
@@ -245,21 +246,26 @@ export async function POST(
   }
 
   // -------------------------------------------------------------------------
-  // 10. Determine template language from consent template
+  // 10. Validate and determine template language from request body
   // -------------------------------------------------------------------------
-  let templateLanguage: 'en' | 'es' = 'en'; // safe default
-
-  const { data: template } = await admin
-    .from('consent_templates')
-    .select('language')
-    .eq('id', consent.template_id)
-    .maybeSingle();
-
-  if (template?.language === 'es' || template?.language === 'en') {
-    templateLanguage = template.language;
+  let body: { language?: string } = {};
+  try {
+    body = await request.json();
+  } catch {
+    // Body parsing failed or empty body
   }
 
+  const requestedLanguage = body.language;
+  if (requestedLanguage !== 'es' && requestedLanguage !== 'en') {
+    return NextResponse.json(
+      { error: 'Message language is required and must be either "es" or "en".' },
+      { status: 400 }
+    );
+  }
+
+  const templateLanguage: 'es' | 'en' = requestedLanguage;
   const templateName = selectTemplateName(whatsappConfig, templateLanguage);
+  const languageCode = selectLanguageCode(whatsappConfig, templateLanguage);
 
   // -------------------------------------------------------------------------
   // 11. Rotate signing token
@@ -431,6 +437,7 @@ export async function POST(
         transport: 'cloud_api',
         template: templateName,
         language: templateLanguage,
+        language_code: languageCode,
       },
     })
     .then(({ error: insertErr }) => {
@@ -457,6 +464,8 @@ export async function POST(
         // not a secret. It cannot be used to re-send or intercept the message.
         provider_reference: wamid,
         template: templateName,
+        language: templateLanguage,
+        language_code: languageCode,
         masked_destination: maskPhone(signer.phone),
       },
     })
@@ -500,15 +509,10 @@ export async function POST(
   // -------------------------------------------------------------------------
   return NextResponse.json({
     success: true,
-    message: `WhatsApp consent sent successfully to ${maskPhone(signer.phone)}.`,
-    // signingUrl and expiresAt are returned so the dialog can show the manual
-    // fallback link if the agent needs it. The token is embedded in the URL;
-    // the dialog renders it but never logs it.
+    message: 'Message accepted by WhatsApp. Delivery status will update automatically.',
     signingUrl,
     expiresAt: expiresAt.toISOString(),
     sentAt: new Date().toISOString(),
-    // wamid returned for agent UI transparency — it is a message reference ID,
-    // NOT a secret. The client may display it for support reference purposes.
     providerReference: wamid,
     expiry: formatDateMMDDYYYY(expiresAt),
   });

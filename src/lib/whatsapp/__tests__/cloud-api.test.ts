@@ -31,6 +31,10 @@ describe('normalizeToE164', () => {
     assert.equal(normalizeToE164('+5215512345678'), '+5215512345678');
   });
 
+  it('keeps +57 Colombian numbers intact (+573022213630)', () => {
+    assert.equal(normalizeToE164('+573022213630'), '+573022213630');
+  });
+
   it('prepends +1 for bare 10-digit US numbers', () => {
     assert.equal(normalizeToE164('3055551234'), '+13055551234');
   });
