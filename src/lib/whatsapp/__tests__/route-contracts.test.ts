@@ -463,4 +463,25 @@ describe('Tests 30-36 — Language Selection, Template Mapping & Phone Synchroni
     const { updatePrimaryApplicantField } = await import('../../health/health-service.js');
     assert.equal(typeof updatePrimaryApplicantField, 'function');
   });
+
+  it('Test 37: WhatsApp delivery strictly requires valid language option before execution', async () => {
+    const { deliverConsent } = await import('../../delivery/delivery-service.js');
+    const mockRow: any = { id: 'req_456', client_name: 'Test', title: 'Consent' };
+
+    // WhatsApp without language MUST throw immediately before making any fetch/DB call
+    await assert.rejects(
+      async () => deliverConsent(mockRow, 'whatsapp'),
+      /A valid message language/
+    );
+
+    await assert.rejects(
+      async () => deliverConsent(mockRow, 'whatsapp', { language: undefined as any }),
+      /A valid message language/
+    );
+
+    await assert.rejects(
+      async () => deliverConsent(mockRow, 'whatsapp', { language: 'de' as any }),
+      /A valid message language/
+    );
+  });
 });
