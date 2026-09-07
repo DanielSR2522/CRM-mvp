@@ -24,20 +24,59 @@ export function extractUSPhoneDigits(value: string | null | undefined): string {
 }
 
 /**
+ * Canonical E.164 phone normalizer.
+ * Converts valid US or international phone inputs into standard E.164 format (+1XXXXXXXXXX or +countrycode...).
+ *
+ * Behavior:
+ * 1. Explicit '+' international input: preserves country code if digits length is between 7 and 15 inclusive.
+ * 2. Non-'+' input:
+ *    - 10 digits -> defaults to US +1 (e.g. "3055551234" -> "+13055551234")
+ *    - 11 digits starting with '1' -> US +1 (e.g. "13055551234" -> "+13055551234")
+ *    - Any other length / format (e.g. 7-digit local US, or 11/12 digits without '+' not starting with 1) -> rejected (returns null).
+ * 3. Null, empty, or whitespace-only input -> returns null.
+ */
+export function normalizePhoneE164(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith('+')) {
+    const digits = trimmed.slice(1).replace(/\D/g, '');
+    if (digits.length >= 7 && digits.length <= 15) {
+      return `+${digits}`;
+    }
+    return null;
+  }
+
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+${digits}`;
+  }
+
+  return null;
+}
+
+/**
  * Formats a phone string into standard US format (###-###-####) or preserves international E.164 format.
  */
 export function formatUSPhone(value: string | null | undefined): string {
   if (!value) return '';
-  const trimmed = value.trim();
+  const trimmed = String(value).trim();
+  if (!trimmed) return '';
 
-  // If already starts with '+' (e.g. +573022213630, +13055551234), preserve it
   if (trimmed.startsWith('+')) {
     const digits = trimmed.slice(1).replace(/\D/g, '');
+    if (digits.length === 11 && digits.startsWith('1')) {
+      const usDigits = digits.slice(1);
+      return `${usDigits.slice(0, 3)}-${usDigits.slice(3, 6)}-${usDigits.slice(6, 10)}`;
+    }
     return `+${digits}`;
   }
 
   const digits = digitsOnly(trimmed);
-  // If > 11 digits without '+', treat as international E.164 number
   if (digits.length > 11) {
     return `+${digits}`;
   }
@@ -59,18 +98,12 @@ export function formatUSPhone(value: string | null | undefined): string {
  */
 export function normalizeUSPhone(value: string | null | undefined): string {
   if (!value) return '';
-  return formatUSPhone(value);
+  return normalizePhoneE164(value) ?? '';
 }
 
 /**
  * Validates if string represents a valid US (10 digits) or international E.164 phone number.
  */
 export function isValidUSPhoneLength(value: string | null | undefined): boolean {
-  if (!value) return false;
-  const trimmed = value.trim();
-  if (trimmed.startsWith('+')) {
-    const digits = trimmed.slice(1).replace(/\D/g, '');
-    return digits.length >= 7 && digits.length <= 15;
-  }
-  return extractUSPhoneDigits(value).length === 10;
+  return normalizePhoneE164(value) !== null;
 }

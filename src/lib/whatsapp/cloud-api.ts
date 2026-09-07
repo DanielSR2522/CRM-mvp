@@ -107,31 +107,13 @@ export function getWhatsAppWebhookConfig(): WhatsAppWebhookConfig | null {
 }
 
 // ---------------------------------------------------------------------------
+import { normalizePhoneE164 } from '@/lib/formatters/phone';
+
 // Phone normalisation
 // ---------------------------------------------------------------------------
 
 export function normalizeToE164(phone: string | null | undefined): string | null {
-  if (!phone?.trim()) return null;
-
-  const trimmed = phone.trim();
-
-  if (trimmed.startsWith('+')) {
-    const digits = trimmed.slice(1).replace(/\D/g, '');
-    if (digits.length < 7 || digits.length > 15) return null;
-    return `+${digits}`;
-  }
-
-  const digits = trimmed.replace(/\D/g, '');
-
-  if (digits.length === 11 && digits.startsWith('1')) {
-    return `+${digits}`;
-  }
-
-  if (digits.length === 10) {
-    return `+1${digits}`;
-  }
-
-  return null;
+  return normalizePhoneE164(phone);
 }
 
 // ---------------------------------------------------------------------------

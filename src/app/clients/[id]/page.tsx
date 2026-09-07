@@ -33,7 +33,7 @@ import {
 import SSNInput from '@/components/common/SSNInput';
 import PhoneInput from '@/components/common/PhoneInput';
 import { formatSSN } from '@/lib/formatters/ssn';
-import { formatUSPhone } from '@/lib/formatters/phone';
+import { formatUSPhone, normalizePhoneE164 } from '@/lib/formatters/phone';
 import { formatEIN } from '@/lib/formatters/ein';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 import { deleteClientSecure, getClientDeletionSummaryAction, type ClientDeletionSummary } from '@/app/actions/deleteClientAction';
@@ -1487,6 +1487,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   
   const savePersonalField = async (fieldName: string, value: any) => {
     if (!isValidUuid(clientId)) return;
+    let valToSave = value;
+    if ((fieldName === 'phone' || fieldName === 'secondary_phone') && typeof value === 'string' && value.trim()) {
+      valToSave = normalizePhoneE164(value) ?? value;
+    }
+
     const { data: existing } = await supabase
       .from('client_personal_information')
       .select('id')
@@ -1496,18 +1501,18 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     if (existing) {
       const { error } = await supabase
         .from('client_personal_information')
-        .update({ [fieldName]: value, updated_at: new Date().toISOString() })
+        .update({ [fieldName]: valToSave, updated_at: new Date().toISOString() })
         .eq('client_id', clientId);
       if (error) throw error;
     } else {
       const { error } = await supabase
         .from('client_personal_information')
-        .insert({ client_id: clientId, [fieldName]: value });
+        .insert({ client_id: clientId, [fieldName]: valToSave });
       if (error) throw error;
     }
 
     if (['full_name', 'email', 'phone'].includes(fieldName)) {
-      const syncedValue = (value && String(value).trim().length > 0) ? String(value).trim() : null;
+      const syncedValue = (valToSave && String(valToSave).trim().length > 0) ? String(valToSave).trim() : null;
       await supabase
         .from('clients')
         .update({ [fieldName]: syncedValue, updated_at: new Date().toISOString() })
@@ -1515,7 +1520,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       await fetchClientDetails();
     }
 
-    setPersonalForm(prev => ({ ...prev, [fieldName]: value }));
+    setPersonalForm(prev => ({ ...prev, [fieldName]: valToSave }));
     await fetchPersonalInformation();
   };
 

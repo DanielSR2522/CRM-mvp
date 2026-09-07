@@ -44,15 +44,22 @@ export async function fetchPrimaryApplicant(clientId: string): Promise<HealthPri
   };
 }
 
+import { normalizePhoneE164 } from '@/lib/formatters/phone';
+
 /**
  * Update a specific field in client_personal_information (and sync to clients table if applicable).
  */
 export async function updatePrimaryApplicantField(clientId: string, field: string, value: any): Promise<void> {
+  let valToSave = value;
+  if ((field === 'phone' || field === 'secondary_phone') && typeof value === 'string' && value.trim()) {
+    valToSave = normalizePhoneE164(value) ?? value;
+  }
+
   const { error: subError } = await supabase
     .from('client_personal_information')
     .upsert({
       client_id: clientId,
-      [field]: value,
+      [field]: valToSave,
       updated_at: new Date().toISOString()
     }, { onConflict: 'client_id' });
 
@@ -63,7 +70,7 @@ export async function updatePrimaryApplicantField(clientId: string, field: strin
     await supabase
       .from('clients')
       .update({
-        [masterField]: value,
+        [masterField]: valToSave,
         updated_at: new Date().toISOString()
       })
       .eq('id', clientId);

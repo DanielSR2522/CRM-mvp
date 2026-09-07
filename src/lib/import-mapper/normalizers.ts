@@ -1,4 +1,5 @@
 import { ImportCell, NormalizationIssue } from './types';
+import { normalizePhoneE164 } from '../formatters/phone';
 
 const STATE_MAP: Record<string, string> = {
   alabama: 'AL',
@@ -109,20 +110,7 @@ export function normalizeZip(value: ImportCell | undefined): string | null {
 export function normalizePhone(value: ImportCell | undefined): string | null {
   const text = cellToString(value);
   if (!text) return null;
-  const trimmed = text.trim();
-  if (trimmed.startsWith('+')) {
-    // Preserve international format with country code
-    const digits = trimmed.slice(1).replace(/\D/g, '');
-    if (digits.length >= 7 && digits.length <= 15) {
-      return `+${digits}`;
-    }
-  }
-  const digits = trimmed.replace(/\D/g, '');
-  if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
-  if (digits.length === 11 && digits.startsWith('1')) {
-    return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
-  }
-  return trimmed;
+  return normalizePhoneE164(text);
 }
 
 export function normalizeSsn(

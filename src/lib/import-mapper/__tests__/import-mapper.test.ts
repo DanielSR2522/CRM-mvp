@@ -100,8 +100,8 @@ describe('Universal Import Mapper — Normalization & Identifiers', () => {
   });
 
   it('normalizes phone numbers while preserving international country codes', () => {
-    assert.equal(normalizePhone('3055551234'), '(305) 555-1234');
-    assert.equal(normalizePhone('13055551234'), '(305) 555-1234');
+    assert.equal(normalizePhone('3055551234'), '+13055551234');
+    assert.equal(normalizePhone('13055551234'), '+13055551234');
     assert.equal(normalizePhone('+5215512345678'), '+5215512345678');
     assert.equal(normalizePhone('+1 (305) 555-1234'), '+13055551234');
   });
@@ -161,7 +161,7 @@ describe('Universal Import Mapper — Full Row Mapper', () => {
     assert.equal(normalized.client.fullName, 'Amanda Sherpa');
     assert.equal(normalized.client.address, '123 Main St');
     assert.equal(normalized.client.county, 'Miami-Dade');
-    assert.equal(normalized.client.phone, '(305) 555-9999');
+    assert.equal(normalized.client.phone, '+13055559999');
     assert.equal(normalized.client.email, 'amanda@example.com');
     assert.equal(normalized.client.gender, 'Female');
     assert.equal(normalized.healthPolicy.typePlan, 'Silver');
