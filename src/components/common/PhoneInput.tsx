@@ -24,14 +24,15 @@ export default function PhoneInput({
   readOnly = false,
   required = false,
   error,
-  placeholder = '###-###-####',
+  placeholder = '+57 302 221 3630 or 305-555-1234',
   className = 'crm-input w-full',
   name = 'phone',
   id,
   onBlur,
 }: PhoneInputProps) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const formatted = formatUSPhone(e.target.value);
+    const raw = e.target.value;
+    const formatted = formatUSPhone(raw);
     onChange(formatted);
   };
 
@@ -41,14 +42,14 @@ export default function PhoneInput({
         type="text"
         id={id}
         name={name}
-        value={formatUSPhone(value)}
+        value={value ? formatUSPhone(value) : ''}
         onChange={handleChange}
         onBlur={onBlur}
         disabled={disabled}
         readOnly={readOnly}
         required={required}
         placeholder={placeholder}
-        maxLength={12}
+        maxLength={20}
         className={`${className} ${error ? 'border-[#EF4444] focus:ring-[#EF4444]' : ''}`}
         autoComplete="off"
       />

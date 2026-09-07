@@ -140,6 +140,7 @@ export default function NewConsentFlow({
   // Delivery Channel Modal State
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<'whatsapp' | 'email' | 'sms'>('whatsapp');
+  const [selectedLanguage, setSelectedLanguage] = useState<'es' | 'en' | null>(null);
   const [sendingConsent, setSendingConsent] = useState(false);
 
   // Editing draft state
@@ -351,12 +352,18 @@ export default function NewConsentFlow({
     setShowErrors(true);
     setSaveError(null);
     if (!canSave) return;
+    setSelectedLanguage(null);
     setIsChannelModalOpen(true);
   };
 
   // Channel Selection Modal -> Execute Delivery
   const handleExecuteSend = async () => {
     if (!template || !version || !merged) return;
+
+    if (selectedChannel === 'whatsapp' && !selectedLanguage) {
+      setSaveError('Please select a message language for WhatsApp delivery.');
+      return;
+    }
 
     setSendingConsent(true);
     setSaveError(null);
@@ -409,9 +416,12 @@ export default function NewConsentFlow({
       };
 
       // 3. Trigger delivery adapter (opens WhatsApp / sends Email)
-      await deliverConsent(dashboardRow, selectedChannel);
+      await deliverConsent(dashboardRow, selectedChannel, {
+        language: selectedChannel === 'whatsapp' ? selectedLanguage! : undefined,
+      });
 
       setIsChannelModalOpen(false);
+      setSelectedLanguage(null);
       onCreated(
         `Consent sent successfully via ${
           selectedChannel === 'whatsapp' ? 'WhatsApp' : selectedChannel === 'email' ? 'Email' : 'SMS'
@@ -421,6 +431,7 @@ export default function NewConsentFlow({
       console.error('Error sending consent:', err);
       setSaveError(err instanceof Error ? err.message : 'Could not send consent.');
       setIsChannelModalOpen(false);
+      setSelectedLanguage(null);
     } finally {
       setSendingConsent(false);
     }
@@ -802,13 +813,63 @@ export default function NewConsentFlow({
                   onChange={() => setSelectedChannel('whatsapp')}
                   className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
                 />
-                <div>
+                <div className="w-full">
                   <span className="font-extrabold text-slate-900 block text-xs">WhatsApp</span>
                   <span className="text-xs text-slate-600 font-mono block mt-0.5">
                     {signerPhone || 'No phone number'}
                   </span>
                 </div>
               </div>
+
+              {/* WhatsApp Language Selection */}
+              {selectedChannel === 'whatsapp' && (
+                <div className="p-3.5 bg-emerald-50/40 border border-emerald-100 rounded-2xl space-y-2">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                    Idioma del mensaje / Message language <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedLanguage('es');
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        selectedLanguage === 'es'
+                          ? 'border-emerald-600 bg-emerald-100/70 ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="font-bold text-xs text-slate-900">Español</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
+                        health_consent_signature_request · es_CO
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedLanguage('en');
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        selectedLanguage === 'en'
+                          ? 'border-emerald-600 bg-emerald-100/70 ring-2 ring-emerald-500/20'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="font-bold text-xs text-slate-900">English</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
+                        health_consent_ingles · en
+                      </div>
+                    </button>
+                  </div>
+                  {!selectedLanguage && (
+                    <p className="text-[11px] text-amber-600 font-medium mt-1">
+                      Select a language above to enable sending via WhatsApp.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Email Option */}
               <div
@@ -862,7 +923,10 @@ export default function NewConsentFlow({
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setIsChannelModalOpen(false)}
+                onClick={() => {
+                  setIsChannelModalOpen(false);
+                  setSelectedLanguage(null);
+                }}
                 disabled={sendingConsent}
                 className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
               >
@@ -871,8 +935,12 @@ export default function NewConsentFlow({
               <button
                 type="button"
                 onClick={handleExecuteSend}
-                disabled={sendingConsent}
-                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md transition-all flex items-center gap-2"
+                disabled={sendingConsent || (selectedChannel === 'whatsapp' && !selectedLanguage)}
+                className={`px-5 py-2 text-xs font-bold text-white rounded-xl shadow-md transition-all flex items-center gap-2 ${
+                  sendingConsent || (selectedChannel === 'whatsapp' && !selectedLanguage)
+                    ? 'bg-slate-300 cursor-not-allowed shadow-none'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
                 {sendingConsent && <Spinner />}
                 {sendingConsent ? 'Sending...' : 'Send Consent'}

@@ -1506,10 +1506,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       if (error) throw error;
     }
 
-    if (['full_name', 'email', 'phone'].includes(fieldName) && value && String(value).trim().length > 0) {
+    if (['full_name', 'email', 'phone'].includes(fieldName)) {
+      const syncedValue = (value && String(value).trim().length > 0) ? String(value).trim() : null;
       await supabase
         .from('clients')
-        .update({ [fieldName]: String(value).trim(), updated_at: new Date().toISOString() })
+        .update({ [fieldName]: syncedValue, updated_at: new Date().toISOString() })
         .eq('id', clientId);
       await fetchClientDetails();
     }

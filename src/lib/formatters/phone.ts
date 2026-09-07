@@ -1,6 +1,6 @@
 /**
  * Centralized Phone Formatting Utilities for SmarTrack CRM
- * Enforces ###-###-#### formatting while typing for US phone numbers.
+ * Formats US phone numbers (###-###-####) while preserving international E.164 numbers.
  */
 
 /**
@@ -24,23 +24,38 @@ export function extractUSPhoneDigits(value: string | null | undefined): string {
 }
 
 /**
- * Formats a raw phone string into standard US format ###-###-#### as user types.
+ * Formats a phone string into standard US format (###-###-####) or preserves international E.164 format.
  */
 export function formatUSPhone(value: string | null | undefined): string {
   if (!value) return '';
-  const digits = extractUSPhoneDigits(value);
+  const trimmed = value.trim();
 
-  if (digits.length <= 3) {
-    return digits;
+  // If already starts with '+' (e.g. +573022213630, +13055551234), preserve it
+  if (trimmed.startsWith('+')) {
+    const digits = trimmed.slice(1).replace(/\D/g, '');
+    return `+${digits}`;
   }
-  if (digits.length <= 6) {
-    return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+
+  const digits = digitsOnly(trimmed);
+  // If > 11 digits without '+', treat as international E.164 number
+  if (digits.length > 11) {
+    return `+${digits}`;
   }
-  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+
+  const usDigits = extractUSPhoneDigits(trimmed);
+  if (!usDigits) return trimmed;
+
+  if (usDigits.length <= 3) {
+    return usDigits;
+  }
+  if (usDigits.length <= 6) {
+    return `${usDigits.slice(0, 3)}-${usDigits.slice(3)}`;
+  }
+  return `${usDigits.slice(0, 3)}-${usDigits.slice(3, 6)}-${usDigits.slice(6, 10)}`;
 }
 
 /**
- * Normalizes phone number to standard format (or digits) for database storage.
+ * Normalizes phone number to standard format for storage or display.
  */
 export function normalizeUSPhone(value: string | null | undefined): string {
   if (!value) return '';
@@ -48,9 +63,14 @@ export function normalizeUSPhone(value: string | null | undefined): string {
 }
 
 /**
- * Validates if string represents a complete 10-digit US phone number.
+ * Validates if string represents a valid US (10 digits) or international E.164 phone number.
  */
 export function isValidUSPhoneLength(value: string | null | undefined): boolean {
   if (!value) return false;
+  const trimmed = value.trim();
+  if (trimmed.startsWith('+')) {
+    const digits = trimmed.slice(1).replace(/\D/g, '');
+    return digits.length >= 7 && digits.length <= 15;
+  }
   return extractUSPhoneDigits(value).length === 10;
 }
