@@ -38,6 +38,7 @@ import {
   getAutomations,
 } from '@/lib/marketing/marketing-service';
 
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 
 export const dynamic = 'force-dynamic';
