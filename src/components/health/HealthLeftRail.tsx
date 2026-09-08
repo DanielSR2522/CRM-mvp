@@ -113,21 +113,21 @@ export default function HealthLeftRail({
   };
 
   const navItems: Array<{ id: 'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links'; label: string; icon: string }> = [
-    { id: 'summary', label: 'SUMMARY', icon: '📋' },
-    { id: 'documents', label: 'DOCUMENTS', icon: '📁' },
-    { id: 'notes', label: 'NOTES', icon: '📝' },
-    { id: 'timeline', label: 'TIMELINE', icon: '⏱️' },
-    { id: 'marketplace', label: 'MARKETPLACE SEARCH', icon: '🔍' },
-    { id: 'medical', label: 'HEALTH MEDICAL', icon: '🩺' },
-    { id: 'links', label: 'LINKS', icon: '🔗' },
+    { id: 'summary', label: 'Summary', icon: '📋' },
+    { id: 'documents', label: 'Documents', icon: '📁' },
+    { id: 'notes', label: 'Notes', icon: '📝' },
+    { id: 'timeline', label: 'Timeline', icon: '⏱️' },
+    { id: 'marketplace', label: 'Marketplace search', icon: '🔍' },
+    { id: 'medical', label: 'Health medical', icon: '🩺' },
+    { id: 'links', label: 'Links', icon: '🔗' },
   ];
 
   return (
-    <CollapsibleSidebar title="Health">
+    <CollapsibleSidebar title="Health" variant="pane">
       {/* 1. Contextual Navigation Rail */}
       <div className="space-y-1">
-        <span className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider px-2 mb-2">
-          Health Workspace
+        <span className="block text-xs font-semibold text-slate-400 px-2 mb-2">
+          Health workspace
         </span>
         {navItems.map((item) => {
           const isActive = activeSubTab === item.id;
@@ -143,7 +143,7 @@ export default function HealthLeftRail({
               }`}
             >
               <span className="text-sm">{item.icon}</span>
-              <span className="tracking-wider">{item.label}</span>
+              <span>{item.label}</span>
             </button>
           );
         })}
@@ -152,7 +152,7 @@ export default function HealthLeftRail({
       {/* 2. Links Area */}
       <div className="border-t border-slate-100 pt-4 space-y-3">
         <div className="flex items-center justify-between px-1">
-          <span className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Links</span>
+          <span className="text-xs font-bold text-slate-800">Links</span>
           <button
             type="button"
             onClick={() => setShowAddLinkModal(true)}

@@ -2787,7 +2787,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           }
         />
       )}
-      <CrmPageContainer className="pl-0 pr-4 md:pr-6 py-3 font-sans">
+      <CrmPageContainer className={isModuleWorkspace ? 'p-0 bg-white space-y-0 font-sans' : 'pl-0 pr-4 md:pr-6 py-3 font-sans'}>
         {/* Navigation Breadcrumb */}
         {!isModernClientWorkspace && (
           <div className="flex items-center gap-2 text-sm text-slate-500 pl-4">
@@ -2812,8 +2812,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               <CollapsibleSidebar title="Client Profile">
                 <div className="flex items-start justify-between">
                   <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      {isCompanyClient ? 'Company Profile' : 'Client Profile'}
+                    <span className="text-xs font-medium text-slate-400">
+                      {isCompanyClient ? 'Company profile' : 'Client profile'}
                     </span>
                     <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">
                       {loadingClient ? 'Loading...' : (client?.full_name || personalInfo?.full_name || '-')}
@@ -2824,17 +2824,17 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               <div className="border-t border-slate-100 pt-5 space-y-4">
                 {isCompanyClient && (
                   <div>
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Contact Person</span>
+                    <span className="block text-xs font-medium text-slate-400">Contact person</span>
                     <span className="text-sm font-semibold text-slate-800 block mt-1">{personalInfo?.full_name || '-'}</span>
                   </div>
                 )}
                 <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Assigned Agent</span>
+                  <span className="block text-xs font-medium text-slate-400">Assigned agent</span>
                   <span className="text-sm font-semibold text-slate-800 block mt-1">{getAgentDisplayName()}</span>
                 </div>
 
                 <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email Address</span>
+                  <span className="block text-xs font-medium text-slate-400">Email address</span>
                   {(() => {
                     if (loadingClient || loadingPersonal) {
                       return <span className="text-sm font-semibold text-slate-400 block mt-1">Loading...</span>;
@@ -2856,7 +2856,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
                 {Boolean(personalInfo?.secondary_email && personalInfo.secondary_email.trim().length > 0) && (
                   <div>
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Secondary Email</span>
+                    <span className="block text-xs font-medium text-slate-400">Secondary email</span>
                     <a
                       href={`mailto:${personalInfo!.secondary_email.trim()}`}
                       className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline block mt-1 truncate"
@@ -2867,7 +2867,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 )}
 
                 <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Phone Number</span>
+                  <span className="block text-xs font-medium text-slate-400">Phone number</span>
                   {(() => {
                     if (loadingClient || loadingPersonal) {
                       return <span className="text-sm font-semibold text-slate-400 block mt-1">Loading...</span>;
@@ -2889,7 +2889,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
                 {Boolean(personalInfo?.secondary_phone && personalInfo.secondary_phone.trim().length > 0) && (
                   <div>
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Secondary Phone</span>
+                    <span className="block text-xs font-medium text-slate-400">Secondary phone</span>
                     <a
                       href={`tel:${personalInfo!.secondary_phone.trim()}`}
                       className="text-sm font-semibold text-slate-800 hover:text-blue-600 block mt-1"
@@ -2899,7 +2899,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                   </div>
                 )}
                 <div>
-                  <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Address</span>
+                  <span className="block text-xs font-medium text-slate-400">Address</span>
                   {(() => {
                     if (loadingClient || loadingResidence) {
                       return <span className="text-sm font-medium text-slate-400 block mt-1">Loading...</span>;
@@ -2922,7 +2922,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
                 {personalInfo?.has_co_applicant === true && (
                   <div className="border-t border-slate-100 pt-4 space-y-3">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Co-Applicant</span>
+                    <span className="block text-xs font-medium text-slate-400">Co-applicant</span>
                     {loadingCoApplicant && !coApplicantInfo ? (
                       <div className="animate-pulse space-y-2">
                         <div className="h-3 bg-slate-100 rounded w-24"></div>
@@ -2931,17 +2931,17 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                     ) : (
                       <>
                         <div>
-                          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Name</span>
+                          <span className="block text-xs font-medium text-slate-400">Name</span>
                           <span className="text-sm font-semibold text-slate-800 block mt-0.5">{coApplicantInfo?.full_name || '-'}</span>
                         </div>
                         <div>
-                          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Email</span>
+                          <span className="block text-xs font-medium text-slate-400">Email</span>
                           <a href={coApplicantInfo?.primary_email ? `mailto:${coApplicantInfo.primary_email}` : '#'} className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline block mt-0.5 truncate">
                             {coApplicantInfo?.primary_email || '-'}
                           </a>
                         </div>
                         <div>
-                          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Phone</span>
+                          <span className="block text-xs font-medium text-slate-400">Phone</span>
                           <a href={coApplicantInfo?.primary_phone ? `tel:${coApplicantInfo.primary_phone}` : '#'} className="text-sm font-semibold text-slate-800 hover:text-blue-600 block mt-0.5">
                             {coApplicantInfo?.primary_phone || '-'}
                           </a>
@@ -2954,7 +2954,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 {/* Company Search & Linking Block for Personal Profiles (Excluded from Documents and Notes views) */}
                 {!isCompanyClient && activeTab !== 'documents' && activeTab !== 'notes' && (
                   <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Link Company</span>
+                    <span className="block text-xs font-medium text-slate-400">Link company</span>
                     <div className="relative">
                       <input
                         type="text"
@@ -3156,13 +3156,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 {linkedPersonalContact.email}
                               </a>
                             ) : (
-                              '—'
+                              'â€”'
                             )}
                           </div>
                           <div>
                             <span className="text-slate-400">Phone: </span>
                             <span className="font-semibold text-slate-800">
-                              {linkedPersonalContact.phone || '—'}
+                              {linkedPersonalContact.phone || 'â€”'}
                             </span>
                           </div>
                         </div>
@@ -3170,7 +3170,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                           href={`/clients/${linkedPersonalContact.id}`}
                           className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline pt-1"
                         >
-                          View Client Profile →
+                          View Client Profile â†’
                         </Link>
                       </div>
                     ) : (
@@ -3184,7 +3184,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             </CollapsibleSidebar>
           )}
 
-            {/* Main Area */}
             <div className="flex-1 w-full space-y-6">
                         {/* Tabs and Actions bar */}
               {!isModernClientWorkspace && (
@@ -3818,25 +3817,25 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
               {/* PERSONAL INFO TAB CONTENT (ZOHO-STYLE CASCADING ACCORDION) */}
               {activeTab === 'personal-info' && (
-                <div className="space-y-4 font-sans">
+                <div className="space-y-8 font-sans bg-white p-6 md:p-8 rounded-none border-none shadow-none">
                   
-                  {/* SECTION 1: Personal or Company Information Card */}
-                  <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
+                  {/* SECTION 1: Personal or Company Information */}
+                  <div className="space-y-4 relative font-sans">
                     <div
                       onClick={() => setIsPersonalInfoOpen(!isPersonalInfoOpen)}
-                      className="flex items-center justify-between border-b border-slate-100 pb-4 cursor-pointer select-none group"
+                      className="flex items-center justify-between pb-2 cursor-pointer select-none group"
                     >
                       <div className="flex items-center gap-3">
                         <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
                           {isPersonalInfoOpen ? (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
                           ) : (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
                           )}
                         </span>
                         <div>
-                          <h3 className="text-lg font-extrabold text-slate-900">
-                            {isCompanyClient ? 'Company Information' : 'Personal Information'}
+                          <h3 className="text-base font-bold text-slate-900">
+                            {isCompanyClient ? 'Company information' : 'Personal information'}
                           </h3>
                           <p className="text-xs text-slate-400 mt-0.5">
                             {isCompanyClient ? 'Commercial P&C Entity Profile. Click any field to edit directly.' : 'Click any field to edit directly.'}
@@ -3844,14 +3843,14 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         </div>
                       </div>
                       {isCompanyClient && (
-                        <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-100">
+                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100">
                           Commercial Company
                         </span>
                       )}
                     </div>
 
                     {isPersonalInfoOpen && (
-                      <div className="pt-6">
+                      <div className="pt-2">
                         {personalError && (
                           <div className="mb-4 p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm">
                             {personalError}
@@ -3871,7 +3870,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                               {/* Left Column */}
                               <div className="space-y-4">
                                 <InlineEditableText
-                                  label="Company Name"
+                                  label="Company name"
                                   value={client?.full_name || ''}
                                   onSave={async (val) => {
                                     if (!val.trim()) return;
@@ -3891,13 +3890,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 />
 
                                 <InlineEditableText
-                                  label="Contact Person Name"
+                                  label="Contact person name"
                                   value={personalForm.full_name || ''}
                                   onSave={val => savePersonalField('full_name', val)}
                                 />
 
                                 <InlineEditableText
-                                  label="Primary Email"
+                                  label="Primary email"
                                   type="email"
                                   value={personalForm.email || client?.email || ''}
                                   onSave={async (val) => {
@@ -3907,7 +3906,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 />
 
                                 <InlineEditablePhone
-                                  label="Primary Phone"
+                                  label="Primary phone"
                                   value={personalForm.phone || client?.phone || ''}
                                   onSave={async (val) => {
                                     await savePersonalField('phone', val);
@@ -3919,20 +3918,20 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                               {/* Right Column */}
                               <div className="space-y-4">
                                 <InlineEditableText
-                                  label="Secondary Email"
+                                  label="Secondary email"
                                   type="email"
                                   value={personalForm.secondary_email || ''}
                                   onSave={val => savePersonalField('secondary_email', val)}
                                 />
 
                                 <InlineEditablePhone
-                                  label="Secondary Phone"
+                                  label="Secondary phone"
                                   value={personalForm.secondary_phone || ''}
                                   onSave={val => savePersonalField('secondary_phone', val)}
                                 />
 
                                 <div>
-                                  <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Business Address</span>
+                                  <span className="block text-sm font-medium text-slate-500 mb-1">Business address</span>
                                   <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
                                     {[residenceInfo?.address, residenceInfo?.city, residenceInfo?.state, residenceInfo?.zip_code].filter(Boolean).join(', ') || client?.address || 'No business address registered'}
                                   </span>
@@ -3947,7 +3946,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                               {/* Left Column */}
                               <div className="space-y-3.5">
                                 <InlineEditableText
-                                  label="Applicant Name"
+                                  label="Applicant name"
                                   value={personalForm.full_name}
                                   onSave={val => savePersonalField('full_name', val)}
                                 />
@@ -3959,7 +3958,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 />
 
                                 <div>
-                                  <span className="block text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Age</span>
+                                  <span className="block text-sm font-medium text-slate-500 mb-1">Age</span>
                                   <div className="py-1 px-2 -mx-2">
                                     <span className="text-[15px] font-bold text-slate-900 block">
                                       {calculateAge(personalForm.date_of_birth)}
@@ -3974,26 +3973,26 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 />
 
                                 <InlineEditablePhone
-                                  label="Primary Phone"
+                                  label="Primary phone"
                                   value={personalForm.phone}
                                   onSave={val => savePersonalField('phone', val)}
                                 />
 
                                 <InlineEditablePhone
-                                  label="Secondary Phone"
+                                  label="Secondary phone"
                                   value={personalForm.secondary_phone}
                                   onSave={val => savePersonalField('secondary_phone', val)}
                                 />
 
                                 <InlineEditableText
-                                  label="Primary Email"
+                                  label="Primary email"
                                   type="email"
                                   value={personalForm.email}
                                   onSave={val => savePersonalField('email', val)}
                                 />
 
                                 <InlineEditableText
-                                  label="Secondary Email"
+                                  label="Secondary email"
                                   type="email"
                                   value={personalForm.secondary_email}
                                   onSave={val => savePersonalField('secondary_email', val)}
@@ -4014,7 +4013,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 />
 
                                 <InlineEditableSelect
-                                  label="Marital Status"
+                                  label="Marital status"
                                   value={personalForm.marital_status}
                                   options={[
                                     { label: 'Select Marital Status', value: '' },
@@ -4028,7 +4027,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 />
 
                                 <InlineEditableSelect
-                                  label="Preferred Language"
+                                  label="Preferred language"
                                   value={personalForm.language_preference}
                                   options={[
                                     { label: 'Spanish', value: 'Spanish' },
@@ -4045,7 +4044,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 />
 
                                 <InlineEditableSelect
-                                  label="Immigration Status"
+                                  label="Immigration status"
                                   value={personalForm.immigration_status}
                                   options={[
                                     { label: 'Select Status', value: '' },
@@ -4060,12 +4059,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 {personalForm.immigration_status === 'Permanent Resident' && (
                                   <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
                                     <InlineEditableText
-                                      label="Card Number"
+                                      label="Card number"
                                       value={personalForm.card_number}
                                       onSave={val => savePersonalField('card_number', val)}
                                     />
                                     <InlineEditableDate
-                                      label="Expiration Date"
+                                      label="Expiration date"
                                       value={personalForm.immigration_expiration_date}
                                       onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
                                     />
@@ -4075,12 +4074,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 {personalForm.immigration_status === 'Work Permit' && (
                                   <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
                                     <InlineEditableText
-                                      label="Card Number"
+                                      label="Card number"
                                       value={personalForm.card_number}
                                       onSave={val => savePersonalField('card_number', val)}
                                     />
                                     <InlineEditableText
-                                      label="USCIS Number"
+                                      label="USCIS number"
                                       value={personalForm.uscis_number}
                                       onSave={val => savePersonalField('uscis_number', val)}
                                     />
@@ -4090,7 +4089,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                       onSave={val => savePersonalField('immigration_category', val)}
                                     />
                                     <InlineEditableDate
-                                      label="Expiration Date"
+                                      label="Expiration date"
                                       value={personalForm.immigration_expiration_date}
                                       onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
                                     />
@@ -4100,7 +4099,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 {personalForm.immigration_status === 'Other' && (
                                   <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
                                     <InlineEditableTextarea
-                                      label="Other Description"
+                                      label="Other description"
                                       value={personalForm.immigration_other_description}
                                       onSave={val => savePersonalField('immigration_other_description', val)}
                                     />
@@ -4438,7 +4437,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                   onChange={(e) => setPaymentDayVal(e.target.value === '' ? null : Number(e.target.value))}
                                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans"
                                 >
-                                  <option value="">Select Day (1–31)...</option>
+                                  <option value="">Select Day (1â€“31)...</option>
                                   {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
                                     <option key={day} value={day}>
                                       Day {day}
@@ -4527,7 +4526,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                           <label className="block text-xs font-bold text-slate-500 mb-1">Routing Number</label>
                                           <input
                                             type="text"
-                                            value="•••••••••"
+                                            value="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                                             disabled
                                             className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-500 font-mono"
                                           />
@@ -4536,7 +4535,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                           <label className="block text-xs font-bold text-slate-500 mb-1">Account Number</label>
                                           <input
                                             type="text"
-                                            value={`••••${bankLast4}`}
+                                            value={`â€¢â€¢â€¢â€¢${bankLast4}`}
                                             disabled
                                             className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold"
                                           />
@@ -4627,7 +4626,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                         <label className="block text-xs font-bold text-slate-500 mb-1">Card Number</label>
                                         <input
                                           type="text"
-                                          value={`•••• •••• •••• ${cardLast4Val}`}
+                                          value={`â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ ${cardLast4Val}`}
                                           disabled
                                           className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold"
                                         />
@@ -5410,7 +5409,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 }}
                 className="text-slate-400 hover:text-slate-600 font-bold text-sm"
               >
-                ✕
+                âœ•
               </button>
             </div>
 
@@ -5425,7 +5424,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             </div>
 
             <div className="p-3 text-[11px] bg-amber-50 border border-amber-200/60 text-amber-800 rounded-xl font-medium">
-              ⚠️ The policy and both client profiles will remain intact. Only the relationship link will be removed.
+              âš ï¸ The policy and both client profiles will remain intact. Only the relationship link will be removed.
             </div>
 
             {unlinkError && (
@@ -5474,3 +5473,4 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     </DashboardLayout>
   );
 }
+

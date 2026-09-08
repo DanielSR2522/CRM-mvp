@@ -223,6 +223,15 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
       ),
     },
     {
+      name: 'Marketing',
+      href: '/marketing',
+      icon: (
+        <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.684A1.761 1.761 0 013 12c0-.97.784-1.76 1.75-1.76.27 0 .524.06.75.172l6.25 3.125m0 0a1.76 1.76 0 012.75-1.423" />
+        </svg>
+      ),
+    },
+    {
       name: 'Import Mapper',
       href: '/import-mapper',
       icon: (
@@ -236,8 +245,9 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
   const searchParams = useSearchParams();
   const activeSectionInUrl = searchParams.get('section') || searchParams.get('tab');
   const isTopNavWorkspace =
+    pathname === '/marketing' ||
+    pathname.startsWith('/marketing/') ||
     pathname === '/clients' ||
-    pathname.startsWith('/clients/') ||
     pathname === '/calendar' ||
     pathname.startsWith('/calendar/') ||
     pathname === '/consents' ||
@@ -571,3 +581,4 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     </Suspense>
   );
 }
+
