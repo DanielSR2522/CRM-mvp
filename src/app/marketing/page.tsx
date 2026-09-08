@@ -38,9 +38,11 @@ import {
   getAutomations,
 } from '@/lib/marketing/marketing-service';
 
-import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 
-export default function MarketingPage() {
+export const dynamic = 'force-dynamic';
+
+function MarketingPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -259,5 +261,13 @@ export default function MarketingPage() {
         </div>
       )}
     </DashboardLayout>
+  );
+}
+
+export default function MarketingPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-xs text-slate-500 font-bold">Loading Marketing Workspace...</div>}>
+      <MarketingPageContent />
+    </Suspense>
   );
 }

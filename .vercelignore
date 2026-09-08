@@ -1,0 +1,9 @@
+.next/
+node_modules/
+.git/
+scratch/
+scratch_*
+*.log
+.carrier-sessions/
+.carrier-downloads/
+.carrier-profiles/
