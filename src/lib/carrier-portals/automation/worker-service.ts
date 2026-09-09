@@ -178,7 +178,7 @@ export async function processNextJob(
         .update({ heartbeat_at: hbIso, lease_expires_at: leaseIso, updated_at: hbIso })
         .eq('id', job.id)
         .eq('status', 'running');
-    } catch (e) {}
+    } catch {}
   }, 15000);
 
   try {

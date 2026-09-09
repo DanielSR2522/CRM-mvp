@@ -24,7 +24,7 @@ function createCookieRedirect(url: URL, supabaseResponse: NextResponse): NextRes
   return redirectResponse;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -62,9 +62,11 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/clients') ||
     pathname.startsWith('/leads') ||
     pathname.startsWith('/consents') ||
-    pathname.startsWith('/calendar');
+    pathname.startsWith('/calendar') ||
+    pathname.startsWith('/carrier-portals') ||
+    pathname.startsWith('/agent-information');
 
-  // ONLY ALLOWED MIDDLEWARE REDIRECT:
+  // ONLY ALLOWED PROXY REDIRECT:
   // Redirect unauthenticated real document navigations to protected routes -> /login
   if (isProtectedRoute && !user && isDocNav) {
     const url = request.nextUrl.clone();
@@ -72,7 +74,7 @@ export async function middleware(request: NextRequest) {
     return createCookieRedirect(url, supabaseResponse);
   }
 
-  // Middleware MUST NEVER redirect an authenticated user to /dashboard.
+  // Proxy MUST NEVER redirect an authenticated user to /dashboard.
   return supabaseResponse;
 }
 
@@ -84,6 +86,8 @@ export const config = {
     '/leads/:path*',
     '/consents/:path*',
     '/calendar/:path*',
+    '/carrier-portals/:path*',
+    '/agent-information/:path*',
     '/login',
     '/register',
   ],

@@ -65,7 +65,7 @@ export class AmbetterAutomationAdapter implements CarrierAutomationAdapter {
 
       // Fallback check
       return 'connected';
-    } catch (err: any) {
+    } catch (err) {
       console.error(`[Ambetter Automation] Session validation error for agent ${agentId}:`, err);
       return 'reauthentication_required';
     } finally {
@@ -127,7 +127,7 @@ export class AmbetterAutomationAdapter implements CarrierAutomationAdapter {
       await testPage.waitForTimeout(2000);
 
       return 'connected';
-    } catch (err: any) {
+    } catch (err) {
       console.error(`[Ambetter Automation] Interactive login error:`, err);
       throw err;
     } finally {
@@ -247,7 +247,7 @@ export class AmbetterAutomationAdapter implements CarrierAutomationAdapter {
 
       const csvContent = csvLines.join('\n');
       return { csvContent };
-    } catch (err: any) {
+    } catch (err) {
       console.error(`[Ambetter Automation] Sync book execution failed:`, err);
       throw err;
     } finally {

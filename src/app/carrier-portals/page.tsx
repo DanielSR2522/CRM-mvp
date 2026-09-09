@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useCallback, useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import OverviewTab from '@/components/carrier-portals/OverviewTab';
@@ -45,7 +45,7 @@ function CarrierPortalsContent() {
   const [isAddCarrierModalOpen, setIsAddCarrierModalOpen] = useState(false);
   const [matchModalRecord, setMatchModalRecord] = useState<any | null>(null);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -69,11 +69,11 @@ function CarrierPortalsContent() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    void fetchData();
+  }, [fetchData]);
 
   const handleSelectTab = (tabKey: string) => {
     router.push(`/carrier-portals?tab=${tabKey}`);

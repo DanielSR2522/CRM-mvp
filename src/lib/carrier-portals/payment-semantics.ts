@@ -15,6 +15,15 @@ export interface CarrierPaymentStatus {
   autopayStatus: 'enrolled' | 'not_enrolled' | 'unknown';
 }
 
+interface CarrierPaymentRecord {
+  carrier?: string | null;
+  carrier_status?: string | null;
+  paid_through_date?: string | null;
+  autopay?: boolean | string | null;
+  balance?: number | string | null;
+  raw_data?: Record<string, unknown> | null;
+}
+
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
   let current = '';
@@ -48,7 +57,7 @@ function toIsoDate(d: string): string {
  * @param record Normalized DB carrier_record object
  * @param todayStr Local business timezone date string in 'YYYY-MM-DD' format (e.g. '2026-08-25')
  */
-export function getCarrierPaymentStatus(record: any, todayStr?: string): CarrierPaymentStatus {
+export function getCarrierPaymentStatus(record: CarrierPaymentRecord, todayStr?: string): CarrierPaymentStatus {
   const carrier = (record.carrier || '').toLowerCase();
   const carrierStatus = (record.carrier_status || '').toLowerCase();
   const today = todayStr || new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -114,10 +123,9 @@ export function getCarrierPaymentStatus(record: any, todayStr?: string): Carrier
       }
     }
 
-    const rawLine = rawData.rowLine || '';
+    const rawLine = typeof rawData.rowLine === 'string' ? rawData.rowLine : '';
     if (rawLine) {
       const cols = parseCsvLine(rawLine);
-      const brokerEff = cols[5] || '';
       const brokerTerm = cols[6] || '';
       const policyEff = cols[7] || '';
       const policyTerm = cols[8] || '';
@@ -144,13 +152,15 @@ export function getCarrierPaymentStatus(record: any, todayStr?: string): Carrier
     }
 
     const enrichmentStatus = rawData.payment_enrichment_status;
-    const detailPaidThroughDate = rawData.paid_through_date_detail || null;
+    const detailPaidThroughDate = typeof rawData.paid_through_date_detail === 'string'
+      ? rawData.paid_through_date_detail
+      : null;
     const delinquencyStatus = normalizeAmbetterDelinquencyStatus(rawData.delinquency_status);
     const currentAmount = typeof rawData.payment_current_amount === 'number' && Number.isFinite(rawData.payment_current_amount)
       ? rawData.payment_current_amount
       : null;
 
-    if (rawData.last_payment_date) {
+    if (typeof rawData.last_payment_date === 'string' && rawData.last_payment_date) {
       lastPaymentDate = rawData.last_payment_date;
     }
 

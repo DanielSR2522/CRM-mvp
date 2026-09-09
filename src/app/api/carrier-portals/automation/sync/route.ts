@@ -6,7 +6,7 @@ import { runAutomatedSync } from '@/lib/carrier-portals/automation/oscar-adapter
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: Request) {
+export async function POST() {
   try {
     const cookieStore = await cookies();
     const supabase = createServerClient(

@@ -16,10 +16,8 @@ interface ConnectionsTabProps {
 }
 
 export default function ConnectionsTab({
-  connection,
   allConnections = [],
   onConnectCarrier,
-  onValidateSession,
   onSyncNow,
   onToggleAutomation,
   onOpenImportModal,

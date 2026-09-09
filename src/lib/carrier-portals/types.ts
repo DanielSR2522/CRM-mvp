@@ -72,7 +72,7 @@ export interface NormalizedCarrierRecord {
   estimated_fpl?: string | null;
   verification_needed?: string | null;
   verification_completed?: string | null;
-  raw_data: Record<string, any>;
+  raw_data: Record<string, unknown>;
 }
 
 export interface CarrierRecordDB extends NormalizedCarrierRecord {
@@ -121,7 +121,7 @@ export interface CarrierPolicySnapshotDB {
   coverage_start_date?: string | null;
   coverage_end_date?: string | null;
   autopay?: boolean | null;
-  snapshot_data: Record<string, any>;
+  snapshot_data: Record<string, unknown>;
   captured_at: string;
 }
 
@@ -134,8 +134,8 @@ export interface CarrierEventDB {
   sync_run_id: string;
   event_type: CarrierEventType;
   severity: EventSeverityType;
-  previous_value?: any;
-  current_value?: any;
+  previous_value?: unknown;
+  current_value?: unknown;
   created_at: string;
   acknowledged_at?: string | null;
 }

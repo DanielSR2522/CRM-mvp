@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { chromium, Browser, BrowserContext } from 'playwright';
+import { chromium, BrowserContext } from 'playwright';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { OSCAR_URLS, OSCAR_SELECTORS } from './oscar-selectors';
 import { SessionValidationStatus, AutomatedSyncResult } from './types';
@@ -99,7 +99,7 @@ export async function startInteractiveLogin(agentId: string, maxWaitMs = 900000)
             }
           }
         }
-      } catch (loopErr: any) {
+      } catch {
         console.log('[Oscar Automation] Navigation in progress, retrying authentication check...');
       }
 
@@ -150,8 +150,6 @@ export async function validateSession(agentId: string): Promise<SessionValidatio
     await page.waitForTimeout(3000);
 
     const finalUrl = page.url();
-    const bodyText = await page.evaluate(() => document.body.innerText || '').catch(() => '');
-
     if (finalUrl.includes('/login') || finalUrl.includes('/signin')) {
       console.log('[Oscar Automation] Session redirected to login URL.');
       return 'reauthentication_required';
@@ -330,7 +328,7 @@ export async function runAutomatedSync(
     // 2. Download CSV via Playwright
     const downloadRes = await downloadBookCsv(agentId);
     downloadedFilePath = downloadRes.downloadPath;
-    const csvContent = fs.readFileSync(downloadedFilePath, 'utf8');
+    const csvContent = fs.readFileSync(/* turbopackIgnore: true */ downloadedFilePath, 'utf8');
 
     if (!csvContent || !csvContent.trim()) {
       throw new Error('Downloaded Oscar CSV is empty.');
@@ -391,11 +389,11 @@ export async function runAutomatedSync(
     };
   } finally {
     // Clean up temporary download file
-    if (downloadedFilePath && fs.existsSync(downloadedFilePath)) {
+    if (downloadedFilePath && fs.existsSync(/* turbopackIgnore: true */ downloadedFilePath)) {
       try {
         fs.unlinkSync(downloadedFilePath);
         console.log(`[Oscar Automation] Temporary CSV file ${downloadedFilePath} deleted.`);
-      } catch (e) {}
+      } catch {}
     }
   }
 }

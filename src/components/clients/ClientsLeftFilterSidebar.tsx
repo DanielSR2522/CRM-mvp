@@ -135,7 +135,7 @@ export default function ClientsLeftFilterSidebar({
 
   const handleSelectDiscoveredField = (def: AvailableFieldDefinition) => {
     onAddRule({
-      id: Math.random().toString(36).substring(2, 9),
+      id: globalThis.crypto.randomUUID(),
       group: def.group,
       field: def.fieldId,
       operator: 'contains',

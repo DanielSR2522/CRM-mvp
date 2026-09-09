@@ -1,4 +1,4 @@
-import { NormalizedCarrierRecord, CarrierRecordDB, CarrierEventDB, EventSeverityType, CarrierEventType, CarrierType } from './types';
+import { NormalizedCarrierRecord, CarrierRecordDB, CarrierEventDB, CarrierType } from './types';
 
 export interface DetectChangesInput {
   isBaseline: boolean;

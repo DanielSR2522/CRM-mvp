@@ -1821,7 +1821,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
       const companyRels = (relData || []).filter((r: any) => r.personal_client_id === clientId || r.company_client_id === clientId);
 
-      let targetCompanyIds: string[] = [];
+      const targetCompanyIds: string[] = [];
       let targetPersonalClientId: string | null = null;
 
       companyRels.forEach((r: any) => {
@@ -1839,7 +1839,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
         .select('commercial_policy_id, personal_client_id')
         .eq('personal_client_id', clientId);
 
-      let legacyPolicyIds: string[] = (legacyLinks || []).map((l: any) => l.commercial_policy_id).filter(Boolean);
+      const legacyPolicyIds: string[] = (legacyLinks || []).map((l: any) => l.commercial_policy_id).filter(Boolean);
 
       // If Personal Client: load linked company profiles & commercial policies
       if (targetCompanyIds.length > 0 || legacyPolicyIds.length > 0) {
@@ -1856,7 +1856,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
         }
 
         let loadedPolicies: any[] = [];
-        let orConditions: string[] = [];
+        const orConditions: string[] = [];
         if (targetCompanyIds.length > 0) {
           orConditions.push(`client_id.in.(${targetCompanyIds.join(',')})`);
         }

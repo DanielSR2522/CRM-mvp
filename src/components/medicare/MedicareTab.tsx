@@ -424,7 +424,11 @@ export default function MedicareTab({
               <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 text-xs">
                 <div className="flex items-center justify-between font-bold">
                   <span className="text-slate-900">Medicare Profile Activity</span>
-                  <span className="text-slate-500 font-medium">{new Date(medicareInfo.updated_at || Date.now()).toLocaleDateString()}</span>
+                  <span className="text-slate-500 font-medium">
+                    {medicareInfo.updated_at
+                      ? new Date(medicareInfo.updated_at).toLocaleDateString()
+                      : 'No update date'}
+                  </span>
                 </div>
                 <p className="text-slate-600 font-medium">
                   MBI: <strong>{medicareInfo.mbi || 'Not specified'}</strong> | Carrier: <strong>{medicareInfo.company || 'Not specified'}</strong> | Status: <strong>{medicareInfo.renewal_status || 'Active'}</strong>

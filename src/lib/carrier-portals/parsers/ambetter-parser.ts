@@ -99,7 +99,7 @@ export function parseAmbetterCsv(csvContent: string): NormalizedCarrierRecord[] 
     const rawAutopay = colAutopay !== -1 ? row[colAutopay]?.toLowerCase() || '' : '';
     const autopay = rawAutopay === 'yes' || rawAutopay === 'true' || rawAutopay === '1' || rawAutopay === 'on';
 
-    const rawData: Record<string, any> = { rowLine: lines[i] };
+    const rawData: Record<string, string | number | null> = { rowLine: lines[i] };
     const detailCurrentAmount = colPaymentCurrentAmountDetail !== -1 ? parseOptionalCurrency(row[colPaymentCurrentAmountDetail]) : null;
     const detailPaidThrough = getOptionalCell(row, colPaidThroughDateDetail);
     const detailDelinquencyStatus = normalizeDelinquencyStatusDetail(getOptionalCell(row, colDelinquencyStatusDetail));
