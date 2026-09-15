@@ -30,7 +30,7 @@ interface ClientIncomeInformationSectionProps {
 export default function ClientIncomeInformationSection({
   clientId,
   onIncomeChanged,
-  containerClassName = 'bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative font-sans'
+  containerClassName = 'relative font-sans space-y-4'
 }: ClientIncomeInformationSectionProps) {
   const [incomeList, setIncomeList] = useState<ClientIncomeInformation[]>([]);
   const [loadingIncome, setLoadingIncome] = useState(true);
@@ -163,7 +163,7 @@ export default function ClientIncomeInformationSection({
 
   return (
     <div className={containerClassName}>
-      <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+      <div className="flex items-center justify-between pb-4">
         <div>
           <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider font-sans">Income Information</h4>
           <p className="text-xs text-slate-400 mt-0.5 font-sans">Manage client annual income sources (Shared canonical records)</p>

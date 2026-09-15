@@ -13,7 +13,7 @@ interface Props {
 
 export default function MedicareDetailsForm({ data, onChange, onSave, saving = false }: Props) {
   return (
-    <div className="bg-white border border-slate-200/70 rounded-xl p-5 shadow-2xs space-y-4 font-sans text-sm">
+    <div className="space-y-4 font-sans text-sm">
       <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
         <div>
           <h4 className="text-[16px] font-bold text-slate-950 tracking-tight">
@@ -40,8 +40,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
         {/* Left Column */}
         <div className="space-y-3">
           {/* MBI */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-sm font-semibold text-slate-500 leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">
               MBI (Medicare Beneficiary Identifier)
             </label>
             <input
@@ -55,8 +55,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
           </div>
 
           {/* Part A Effective Date */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-sm font-semibold text-slate-500 leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">
               Hospital (Part A) Effective Date
             </label>
             <DatePicker
@@ -69,8 +69,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
           </div>
 
           {/* Part B Effective Date */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-slate-500 font-medium leading-snug break-words text-right">
               Medical (Part B) Effective Date
             </label>
             <DatePicker
@@ -83,8 +83,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
           </div>
 
           {/* Part C Subtype */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-slate-500 font-medium leading-snug break-words text-right">
               Advantage Plan Subtype (Part C)
             </label>
             <select
@@ -105,8 +105,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
           </div>
 
           {/* Medicaid Level */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-slate-500 font-medium leading-snug break-words text-right">
               Medicaid Level
             </label>
             <select
@@ -128,8 +128,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
           </div>
 
           {/* Medicaid ID */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-slate-500 font-medium leading-snug break-words text-right">
               Medicaid ID
             </label>
             <input
@@ -146,8 +146,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
         {/* Right Column */}
         <div className="space-y-3">
           {/* Medicare Renewal Status */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-slate-500 font-medium leading-snug break-words text-right">
               Medicare Renewal Status
             </label>
             <select
@@ -166,8 +166,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
           </div>
 
           {/* Medicare Company */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-slate-500 font-medium leading-snug break-words text-right">
               Medicare Company / Carrier
             </label>
             <input
@@ -181,8 +181,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
           </div>
 
           {/* Plan Name */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-slate-500 font-medium leading-snug break-words text-right">
               Plan Name
             </label>
             <input
@@ -196,8 +196,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
           </div>
 
           {/* Plan ID */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-slate-500 font-medium leading-snug break-words text-right">
               Plan ID
             </label>
             <input
@@ -211,8 +211,8 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
           </div>
 
           {/* Plan Effective Date */}
-          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words">
+          <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
+            <label className="text-slate-500 font-medium leading-snug break-words text-right">
               Plan Effective Date
             </label>
             <DatePicker

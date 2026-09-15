@@ -123,7 +123,7 @@ export default function HealthLeftRail({
   ];
 
   return (
-    <CollapsibleSidebar title="Health" variant="pane">
+    <CollapsibleSidebar title="Health" variant="pane" className="lg:border-r-0">
       {/* 1. Contextual Navigation Rail */}
       <div className="space-y-1">
         <span className="block text-xs font-semibold text-slate-400 px-2 mb-2">

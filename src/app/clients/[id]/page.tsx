@@ -7,7 +7,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import ClientConsentsTab from '@/components/consents/ClientConsentsTab';
 import CollapsibleSidebar from '@/components/common/CollapsibleSidebar';
-import HealthClientHeader from '@/components/health/HealthClientHeader';
+import HealthClientHeader, { ClientProfileNavTabs } from '@/components/health/HealthClientHeader';
 import HealthPolicyTab from '@/components/health/HealthPolicyTab';
 import MedicareTab from '@/components/medicare/MedicareTab';
 import SupplementalTab from '@/components/supplemental/SupplementalTab';
@@ -2765,7 +2765,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   return (
     <DashboardLayout>
-      {['overview', 'personal-info', 'documents', 'notes', 'timeline', 'policies', 'health', 'medicare', 'supplemental', 'life', 'consents'].includes(activeTab) && client && (
+      {['overview', 'personal-info', 'documents', 'notes', 'timeline', 'policies', 'consents'].includes(activeTab) && client && (
         <HealthClientHeader
           clientId={clientId}
           clientName={personalForm.full_name || client.full_name || 'Client Profile'}
@@ -2785,9 +2785,10 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           activeSection={
             activeTab === 'personal-info' ? 'personal-information' : (activeTab as any)
           }
+          hideNavStrip={true}
         />
       )}
-      <CrmPageContainer className={isModuleWorkspace ? 'p-0 bg-white space-y-0 font-sans' : 'pl-0 pr-4 md:pr-6 py-3 font-sans'}>
+      <CrmPageContainer className="p-0 bg-white space-y-0 font-sans flex-1 flex flex-col min-h-screen">
         {/* Navigation Breadcrumb */}
         {!isModernClientWorkspace && (
           <div className="flex items-center gap-2 text-sm text-slate-500 pl-4">
@@ -2805,23 +2806,25 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             </svg>
           </div>
         ) : (
-          <div className="flex flex-col lg:flex-row gap-3 items-start w-full">
+          <div className="flex flex-col lg:flex-row items-stretch w-full flex-1 min-h-[calc(100vh-120px)] bg-white">
             
             {/* Left Sidebar Summary */}
             {!isOperationalWorkspace && (
-              <CollapsibleSidebar title="Client Profile">
-                <div className="flex items-start justify-between">
+              <CollapsibleSidebar title="Client Profile" variant="pane" className="lg:border-r-0">
+                {/* Top Rail Header Row aligned with profile nav tabs height */}
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100 pr-6">
+                  <span className="text-xs font-semibold text-slate-400">
+                    {isCompanyClient ? 'Company profile' : 'Client profile'}
+                  </span>
+                </div>
+
+                {/* Rail Body Content starting below top header row */}
+                <div className="pt-3 space-y-4">
                   <div>
-                    <span className="text-xs font-medium text-slate-400">
-                      {isCompanyClient ? 'Company profile' : 'Client profile'}
-                    </span>
-                    <h2 className="text-2xl font-extrabold text-slate-900 mt-1 truncate">
+                    <h2 className="text-xl font-extrabold text-slate-900 max-w-full whitespace-normal break-words leading-tight">
                       {loadingClient ? 'Loading...' : (client?.full_name || personalInfo?.full_name || '-')}
                     </h2>
                   </div>
-                </div>
-
-              <div className="border-t border-slate-100 pt-5 space-y-4">
                 {isCompanyClient && (
                   <div>
                     <span className="block text-xs font-medium text-slate-400">Contact person</span>
@@ -3062,8 +3065,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 {/* DOCUMENT SUMMARY Card (Rendered ONLY for activeTab === 'documents') */}
                 {activeTab === 'documents' && (
                   <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
-                    <span className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      Document Summary
+                    <span className="text-xs font-bold text-slate-800 block">
+                      Document summary
                     </span>
                     <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 space-y-2 text-xs">
                       <div className="flex items-center justify-between text-slate-600 font-semibold">
@@ -3093,7 +3096,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         </div>
                       )}
                       <div className="border-t border-slate-200/80 pt-2 flex items-center justify-between font-extrabold text-slate-900 text-xs">
-                        <span>TOTAL</span>
+                        <span>Total</span>
                         <span className="text-blue-600">{clientDocsList.length}</span>
                       </div>
                     </div>
@@ -3103,8 +3106,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 {/* NOTES SUMMARY Card (Rendered ONLY for activeTab === 'notes') */}
                 {activeTab === 'notes' && (
                   <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
-                    <span className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                      Notes Summary
+                    <span className="text-xs font-bold text-slate-800 block">
+                      Notes summary
                     </span>
                     <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 space-y-2 text-xs">
                       <div className="flex items-center justify-between text-slate-600 font-semibold">
@@ -3134,7 +3137,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         </div>
                       )}
                       <div className="border-t border-slate-200/80 pt-2 flex items-center justify-between font-extrabold text-slate-900 text-xs">
-                        <span>TOTAL</span>
+                        <span>Total</span>
                         <span className="text-blue-600">{notesSummaryList.length}</span>
                       </div>
                     </div>
@@ -3144,7 +3147,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 {/* Persistent LINKED PERSONAL CONTACT Card in Sidebar (for Company Profiles) */}
                 {isCompanyClient && (
                   <div className="border-t border-slate-100 pt-4 space-y-3">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Linked Personal Contact</span>
+                    <span className="text-xs font-bold text-slate-800 block">Linked personal contact</span>
                     {linkedPersonalContact ? (
                       <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 space-y-2">
                         <div className="font-extrabold text-slate-900 text-sm truncate">{linkedPersonalContact.full_name}</div>
@@ -3184,7 +3187,23 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             </CollapsibleSidebar>
           )}
 
-            <div className="flex-1 w-full space-y-6">
+            {/* Soft-Gray Vertical Strip (8px wide, #F1F5F9 / bg-slate-100) */}
+            {!isOperationalWorkspace && (
+              <div className="hidden lg:block w-2 shrink-0 bg-slate-100 self-stretch" />
+            )}
+
+            <div className="flex-1 w-full min-w-0 bg-white flex flex-col flex-1 min-h-full">
+              {/* Profile Navigation Strip aligned at main content boundary (starting at vertical divider) */}
+              {!isOperationalWorkspace && (
+                <ClientProfileNavTabs
+                  clientId={clientId}
+                  activeSection={activeTab === 'personal-info' ? 'personal-information' : (activeTab as any)}
+                  isCompanyClient={isCompanyClient}
+                />
+              )}
+
+              {/* Main Content Area starting directly below tabs */}
+              <div className={isOperationalWorkspace ? "flex-1 w-full min-w-0 bg-white flex flex-col min-h-full" : "p-6 flex-1 bg-white space-y-6 min-h-full"}>
                         {/* Tabs and Actions bar */}
               {!isModernClientWorkspace && (
                 <div className="crm-card p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -3329,9 +3348,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
               {/* OVERVIEW TAB CONTENT (Concise Read-only Dashboard) */}
               {activeTab === 'overview' && (
-                <div className="space-y-6">
+                <div className="w-full space-y-6 font-sans">
                   {loadingPolicies ? (
-                    <div className="flex justify-center items-center py-20 bg-white border border-slate-100 rounded-2xl shadow-sm">
+                    <div className="flex justify-center items-center py-20 bg-white">
                       <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
@@ -3340,41 +3359,41 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                   ) : (
                     <>
                       {/* Summary Cards */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         {/* Active Policies Card */}
-                        <div className="bg-gradient-to-br from-emerald-50 to-white border border-emerald-100 rounded-2xl p-6 shadow-sm flex items-center justify-between">
+                        <div className="bg-emerald-50/60 border border-emerald-100/80 rounded-xl p-4 flex items-center justify-between">
                           <div>
                             <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Active Policies</span>
-                            <span className="block text-3xl font-extrabold text-emerald-800 mt-2">{activeCount}</span>
+                            <span className="block text-2xl font-extrabold text-emerald-800 mt-1">{activeCount}</span>
                           </div>
-                          <div className="p-3 bg-emerald-100/50 rounded-xl text-emerald-600">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <div className="p-2.5 bg-emerald-100/50 rounded-xl text-emerald-600">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                             </svg>
                           </div>
                         </div>
 
                         {/* Expiring Soon Card */}
-                        <div className="bg-gradient-to-br from-amber-50 to-white border border-amber-100 rounded-2xl p-6 shadow-sm flex items-center justify-between">
+                        <div className="bg-amber-50/60 border border-amber-100/80 rounded-xl p-4 flex items-center justify-between">
                           <div>
                             <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">Expiring Soon (60d)</span>
-                            <span className="block text-3xl font-extrabold text-amber-800 mt-2">{expiringSoonCount}</span>
+                            <span className="block text-2xl font-extrabold text-amber-800 mt-1">{expiringSoonCount}</span>
                           </div>
-                          <div className="p-3 bg-amber-100/50 rounded-xl text-amber-600">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <div className="p-2.5 bg-amber-100/50 rounded-xl text-amber-600">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                           </div>
                         </div>
 
                         {/* Pending Policies Card */}
-                        <div className="bg-gradient-to-br from-blue-50 to-white border border-blue-100 rounded-2xl p-6 shadow-sm flex items-center justify-between">
+                        <div className="bg-blue-50/60 border border-blue-100/80 rounded-xl p-4 flex items-center justify-between">
                           <div>
                             <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">Pending Policies</span>
-                            <span className="block text-3xl font-extrabold text-blue-800 mt-2">{pendingCount}</span>
+                            <span className="block text-2xl font-extrabold text-blue-800 mt-1">{pendingCount}</span>
                           </div>
-                          <div className="p-3 bg-blue-100/50 rounded-xl text-blue-600">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <div className="p-2.5 bg-blue-100/50 rounded-xl text-blue-600">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                           </div>
@@ -3382,8 +3401,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       </div>
 
                       {/* Consolidated Overview Policies Section */}
-                      <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4 font-sans">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                      <div className="space-y-4 font-sans">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                           <div>
                             <h4 className="text-base font-extrabold text-slate-900">Active Client Policies</h4>
                             <p className="text-xs text-slate-400">Consolidated policies across Health, Property & Casualty, and Life Insurance</p>
@@ -3440,7 +3459,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                       <div>
                                         Premium: <strong className="text-emerald-600 font-semibold">{formatCurrency(card.premium)}</strong>
                                       </div>
-)}
+                                    )}
                                     <div>
                                       Policy Address: <strong className="text-slate-800 font-semibold">{card.effectiveAddress}</strong>
                                     </div>
@@ -3479,7 +3498,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       </div>
 
                       {linkedCompanyPolicies.length > 0 && (
-                        <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4">
+                        <div className="space-y-4 font-sans">
                           <div className="flex items-center justify-between border-b border-slate-50 pb-4">
                             <div className="flex items-center gap-2">
                               <h4 className="text-base font-extrabold text-slate-900">Linked Company Policies</h4>
@@ -3574,7 +3593,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                     <p className="text-sm text-slate-300">The <strong>Property & Casualty</strong> module is disabled for your agent profile.</p>
                   </div>
                 ) : (
-                <div className="space-y-6">
+                <div className="w-full space-y-6 bg-white font-sans">
 
                   {/* Policies Search and Filter Section */}
                   <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between shadow-sm">
@@ -4706,54 +4725,58 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
               {/* UNIFIED CRM DOCUMENTS CENTER */}
               {activeTab === 'documents' && (
-                <ModuleDocumentsManager
-                  clientId={clientId}
-                  moduleType="all"
-                  policiesList={[
-                    ...(policies || []).map((p: any) => ({
-                      id: p.id,
-                      isHealth: false,
-                      policy_type: p.policy_type || 'P&C Policy',
-                      policy_number: p.policy_number || null,
-                      writing_company: p.writing_company || p.company_name || null,
-                      company_name: p.writing_company || p.company_name || null
-                    })),
-                    ...(healthPoliciesOverview || []).map((h: any) => ({
-                      id: h.id,
-                      isHealth: true,
-                      policy_type: h.plan_name || 'Health Plan',
-                      policy_number: h.plan_id || h.application_number || null,
-                      writing_company: h.company_2026 || 'Marketplace Health',
-                      company_name: h.company_2026 || 'Marketplace Health'
-                    }))
-                  ]}
-                />
+                <div className="w-full bg-white border border-slate-100 rounded-2xl p-6 shadow-sm font-sans space-y-6">
+                  <ModuleDocumentsManager
+                    clientId={clientId}
+                    moduleType="all"
+                    policiesList={[
+                      ...(policies || []).map((p: any) => ({
+                        id: p.id,
+                        isHealth: false,
+                        policy_type: p.policy_type || 'P&C Policy',
+                        policy_number: p.policy_number || null,
+                        writing_company: p.writing_company || p.company_name || null,
+                        company_name: p.writing_company || p.company_name || null
+                      })),
+                      ...(healthPoliciesOverview || []).map((h: any) => ({
+                        id: h.id,
+                        isHealth: true,
+                        policy_type: h.plan_name || 'Health Plan',
+                        policy_number: h.plan_id || h.application_number || null,
+                        writing_company: h.company_2026 || 'Marketplace Health',
+                        company_name: h.company_2026 || 'Marketplace Health'
+                      }))
+                    ]}
+                  />
+                </div>
               )}
 
               {/* UNIFIED CRM NOTES CENTER */}
               {activeTab === 'notes' && (
-                <UnifiedNotesManager
-                  clientId={clientId}
-                  policiesList={[
-                    ...(policies || []).map((p: any) => ({
-                      id: p.id,
-                      isHealth: false,
-                      policy_type: p.policy_type || 'P&C Policy',
-                      policy_number: p.policy_number || null,
-                      writing_company: p.writing_company || p.company_name || null,
-                      company_name: p.writing_company || p.company_name || null
-                    })),
-                    ...(healthPoliciesOverview || []).map((h: any) => ({
-                      id: h.id,
-                      isHealth: true,
-                      policy_type: h.plan_name || 'Health Plan',
-                      policy_number: h.plan_id || h.application_number || null,
-                      writing_company: h.company_2026 || 'Marketplace Health',
-                      company_name: h.company_2026 || 'Marketplace Health'
-                    }))
-                  ]}
-                  currentUserId={currentUserId}
-                />
+                <div className="w-full bg-white border border-slate-100 rounded-2xl p-6 shadow-sm font-sans space-y-6">
+                  <UnifiedNotesManager
+                    clientId={clientId}
+                    policiesList={[
+                      ...(policies || []).map((p: any) => ({
+                        id: p.id,
+                        isHealth: false,
+                        policy_type: p.policy_type || 'P&C Policy',
+                        policy_number: p.policy_number || null,
+                        writing_company: p.writing_company || p.company_name || null,
+                        company_name: p.writing_company || p.company_name || null
+                      })),
+                      ...(healthPoliciesOverview || []).map((h: any) => ({
+                        id: h.id,
+                        isHealth: true,
+                        policy_type: h.plan_name || 'Health Plan',
+                        policy_number: h.plan_id || h.application_number || null,
+                        writing_company: h.company_2026 || 'Marketplace Health',
+                        company_name: h.company_2026 || 'Marketplace Health'
+                      }))
+                    ]}
+                    currentUserId={currentUserId}
+                  />
+                </div>
               )}
 
               {/*
@@ -4761,7 +4784,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 gains a mount point rather than another inline section.
               */}
               {activeTab === 'consents' && client && (
-                <ClientConsentsTab clientId={clientId} clientName={client.full_name} />
+                <div className="w-full bg-white border border-slate-100 rounded-2xl p-6 shadow-sm font-sans space-y-6">
+                  <ClientConsentsTab clientId={clientId} clientName={client.full_name} />
+                </div>
               )}
 
               {activeTab === 'timeline' && (() => {
@@ -5068,8 +5093,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               )}
             </div>
           </div>
-        )}
-      </CrmPageContainer>
+        </div>
+      )}
+    </CrmPageContainer>
 
       {/* POLICY MODALS REMOVED */}
 

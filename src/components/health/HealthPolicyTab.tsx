@@ -7,7 +7,7 @@ import HealthPolicyForm from './HealthPolicyForm';
 import HealthDocuments from './HealthDocuments';
 import HealthNotes from './HealthNotes';
 import HealthTimeline from './HealthTimeline';
-import HealthClientHeader from './HealthClientHeader';
+import HealthClientHeader, { ClientProfileNavTabs } from './HealthClientHeader';
 import HealthLeftRail from './HealthLeftRail';
 import MarketplaceSearchWorkspace from './MarketplaceSearchWorkspace';
 import HealthMedicalWorkspace from './HealthMedicalWorkspace';
@@ -94,10 +94,24 @@ export default function HealthPolicyTab({
   }
 
   return (
-    <div className="space-y-4 font-sans">
-      {/* Toast Notification Header Banner */}
+    <div className="flex flex-col w-full font-sans min-h-screen bg-white">
+      {/* 1. White Client Identity Header Bar */}
+      <HealthClientHeader
+        clientId={clientId}
+        clientName={clientName}
+        photoUrl={photoUrl}
+        lastUpdated={lastUpdated}
+        onSendEmail={onSendEmail}
+        onConsent={onConsent}
+        onDeleteProfile={onDeleteProfile}
+        isCompanyClient={isCompanyClient}
+        activeSection="health"
+        hideNavStrip={true}
+      />
+
+      {/* Toast Notification Header Banner if present */}
       {toast && (
-        <div className={`p-4 rounded-xl border text-xs font-semibold shadow-xs animate-fadeIn ${
+        <div className={`mx-6 mt-4 p-4 rounded-xl border text-xs font-semibold shadow-xs animate-fadeIn ${
           toast.type === 'success'
             ? 'bg-emerald-50 border-emerald-100 text-emerald-800'
             : toast.type === 'error'
@@ -109,9 +123,9 @@ export default function HealthPolicyTab({
         </div>
       )}
 
-      {/* Main Workspace Layout */}
-      <div className="flex flex-col lg:flex-row items-start gap-3 w-full">
-        {/* Left Context Rail */}
+      {/* 2. Main Workspace Layout */}
+      <div className="flex flex-col lg:flex-row items-stretch w-full flex-1 min-h-0">
+        {/* Left Context Rail (White, extends full height to bottom) */}
         <HealthLeftRail
           clientId={clientId}
           activeSubTab={activeSubTab}
@@ -120,104 +134,117 @@ export default function HealthPolicyTab({
           marketplaceContextInfo={marketplaceContextInfo}
         />
 
+        {/* Soft-Gray Vertical Strip (8px wide, #F1F5F9 / bg-slate-100) */}
+        <div className="hidden lg:block w-2 shrink-0 bg-slate-100 self-stretch" />
+
         {/* Right Main Content Workspace (Full Width) */}
-        <div className="flex-1 w-full min-w-0">
-          {activeSubTab === 'marketplace' ? (
-            <MarketplaceSearchWorkspace
-              healthPolicyId={healthPolicy?.id}
-              context={marketplaceContextInfo?.context || {
-                coverageYear: 2026,
-                zipCode: null,
-                state: null,
-                countyName: null,
-                countyFips: null,
-                householdIncome: null,
-                householdSize: 1,
-                coveredApplicants: 1,
-                people: [],
-                validationErrors: [],
-              }}
-              onApplyPlan={async (plan) => {
-                if (marketplaceContextInfo?.onApplyPlan) {
-                  const res = await marketplaceContextInfo.onApplyPlan(plan);
-                  await loadPolicy();
-                  return res;
-                }
-              }}
-              onUnlinkPlan={async () => {
-                if (healthPolicy?.id) {
-                  const { unlinkMarketplacePlan } = await import('@/lib/marketplace/snapshot-service');
-                  const res = await unlinkMarketplacePlan(healthPolicy.id);
-                  if (res.success) {
-                    setMarketplacePlan(null);
+        <div className="flex-1 w-full min-w-0 bg-white flex flex-col">
+          {/* Profile Navigation Strip aligned at main content boundary (starting at vertical divider) */}
+          <ClientProfileNavTabs
+            clientId={clientId}
+            activeSection="health"
+            isCompanyClient={isCompanyClient}
+          />
+
+          {/* Main Content Area starting directly below tabs */}
+          <div className="p-6 flex-1 bg-white space-y-6">
+            {activeSubTab === 'marketplace' ? (
+              <MarketplaceSearchWorkspace
+                healthPolicyId={healthPolicy?.id}
+                context={marketplaceContextInfo?.context || {
+                  coverageYear: 2026,
+                  zipCode: null,
+                  state: null,
+                  countyName: null,
+                  countyFips: null,
+                  householdIncome: null,
+                  householdSize: 1,
+                  coveredApplicants: 1,
+                  people: [],
+                  validationErrors: [],
+                }}
+                onApplyPlan={async (plan) => {
+                  if (marketplaceContextInfo?.onApplyPlan) {
+                    const res = await marketplaceContextInfo.onApplyPlan(plan);
                     await loadPolicy();
+                    return res;
                   }
-                  return res;
-                }
-                return { success: false, error: 'No policy ID' };
-              }}
-              appliedPlan={marketplaceContextInfo?.appliedPlan || null}
-              addToast={addToast}
-              onReturnToSummary={() => setActiveSubTab('summary')}
-            />
-          ) : activeSubTab === 'medical' && healthPolicy ? (
-            <HealthMedicalWorkspace
-              healthPolicyId={healthPolicy.id}
-              clientId={clientId}
-              addToast={addToast}
-              onReturnToSummary={() => setActiveSubTab('summary')}
-            />
-          ) : !healthPolicy && !isEditing ? (
-            <div className="bg-white border border-slate-100 rounded-2xl p-12 text-center shadow-sm space-y-6">
-              <div className="max-w-md mx-auto space-y-2">
-                <h3 className="text-lg font-extrabold text-slate-800">No Health Policy Registered</h3>
-                <p className="text-slate-400 text-sm">
-                  This client does not have a health policy registered yet. You can create one below.
-                </p>
+                }}
+                onUnlinkPlan={async () => {
+                  if (healthPolicy?.id) {
+                    const { unlinkMarketplacePlan } = await import('@/lib/marketplace/snapshot-service');
+                    const res = await unlinkMarketplacePlan(healthPolicy.id);
+                    if (res.success) {
+                      setMarketplacePlan(null);
+                      await loadPolicy();
+                    }
+                    return res;
+                  }
+                  return { success: false, error: 'No policy ID' };
+                }}
+                appliedPlan={marketplaceContextInfo?.appliedPlan || null}
+                addToast={addToast}
+                onReturnToSummary={() => setActiveSubTab('summary')}
+              />
+            ) : activeSubTab === 'medical' && healthPolicy ? (
+              <HealthMedicalWorkspace
+                healthPolicyId={healthPolicy.id}
+                clientId={clientId}
+                addToast={addToast}
+                onReturnToSummary={() => setActiveSubTab('summary')}
+              />
+            ) : !healthPolicy && !isEditing ? (
+              <div className="py-12 text-center space-y-6 font-sans">
+                <div className="max-w-md mx-auto space-y-2">
+                  <h3 className="text-lg font-extrabold text-slate-900">No Health Policy Registered</h3>
+                  <p className="text-slate-500 text-sm">
+                    This client does not have a health policy registered yet. You can create one below.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(true)}
+                  className="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all shadow-md shadow-blue-500/10"
+                >
+                  Create Health Policy
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsEditing(true)}
-                className="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all shadow-md shadow-blue-500/10"
-              >
-                Create Health Policy
-              </button>
-            </div>
-          ) : activeSubTab === 'summary' || isEditing ? (
-            <HealthPolicyForm
-              clientId={clientId}
-              agentName={agentName}
-              initialPolicy={healthPolicy}
-              isEditing={isEditing}
-              setIsEditing={setIsEditing}
-              onSaved={(p) => {
-                setHealthPolicy(p);
-                loadPolicy();
-              }}
-              onMarketplacePlanLoaded={setMarketplacePlan}
-              onMarketplaceContextUpdated={setMarketplaceContextInfo}
-              addToast={addToast}
-            />
-          ) : activeSubTab === 'documents' && healthPolicy ? (
-            <HealthDocuments
-              clientId={clientId}
-              healthPolicyId={healthPolicy.id}
-              addToast={addToast}
-            />
-          ) : activeSubTab === 'notes' && healthPolicy ? (
-            <HealthNotes
-              clientId={clientId}
-              healthPolicyId={healthPolicy.id}
-              currentUserId={currentUserId}
-              addToast={addToast}
-            />
-          ) : activeSubTab === 'timeline' && healthPolicy ? (
-            <HealthTimeline
-              clientId={clientId}
-              healthPolicyId={healthPolicy.id}
-              addToast={addToast}
-            />
-          ) : null}
+            ) : activeSubTab === 'summary' || isEditing ? (
+              <HealthPolicyForm
+                clientId={clientId}
+                agentName={agentName}
+                initialPolicy={healthPolicy}
+                isEditing={isEditing}
+                setIsEditing={setIsEditing}
+                onSaved={(p) => {
+                  setHealthPolicy(p);
+                  loadPolicy();
+                }}
+                onMarketplacePlanLoaded={setMarketplacePlan}
+                onMarketplaceContextUpdated={setMarketplaceContextInfo}
+                addToast={addToast}
+              />
+            ) : activeSubTab === 'documents' && healthPolicy ? (
+              <HealthDocuments
+                clientId={clientId}
+                healthPolicyId={healthPolicy.id}
+                addToast={addToast}
+              />
+            ) : activeSubTab === 'notes' && healthPolicy ? (
+              <HealthNotes
+                clientId={clientId}
+                healthPolicyId={healthPolicy.id}
+                currentUserId={currentUserId}
+                addToast={addToast}
+              />
+            ) : activeSubTab === 'timeline' && healthPolicy ? (
+              <HealthTimeline
+                clientId={clientId}
+                healthPolicyId={healthPolicy.id}
+                addToast={addToast}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import HealthClientHeader from '@/components/health/HealthClientHeader';
+import HealthClientHeader, { ClientProfileNavTabs } from '@/components/health/HealthClientHeader';
 import LifeLeftRail from './LifeLeftRail';
 import LifePolicyCard, { LifePolicy } from './LifePolicyCard';
 import ModuleDocumentsManager from '@/components/documents/ModuleDocumentsManager';
@@ -114,18 +114,44 @@ export default function LifePolicyTab({
   }
 
   return (
-    <div className="space-y-4 font-sans">
-      {/* Main Workspace Layout */}
-      <div className="flex flex-col lg:flex-row items-start gap-3 w-full">
-        {/* Left Context Rail (Includes Client Life Profile box placed directly after Links) */}
+    <div className="flex flex-col w-full font-sans min-h-screen bg-white">
+      {/* 1. White Client Identity Header Bar */}
+      <HealthClientHeader
+        clientId={clientId}
+        clientName={clientName}
+        photoUrl={photoUrl}
+        lastUpdated={lastUpdated}
+        onSendEmail={onSendEmail}
+        onConsent={onConsent}
+        onDeleteProfile={onDeleteProfile}
+        isCompanyClient={isCompanyClient}
+        activeSection="life"
+        hideNavStrip={true}
+      />
+
+      {/* 2. Main Workspace Layout */}
+      <div className="flex flex-col lg:flex-row items-stretch w-full flex-1 min-h-0">
+        {/* Left Context Rail */}
         <LifeLeftRail
           clientId={clientId}
           activeSubTab={activeSubtab}
           setActiveSubTab={setActiveSubtab}
         />
 
+        {/* Soft-Gray Vertical Strip (8px wide, bg-slate-100) */}
+        <div className="hidden lg:block w-2 shrink-0 bg-slate-100 self-stretch" />
+
         {/* Right Main Content Workspace */}
-        <div className="flex-1 w-full min-w-0 space-y-4">
+        <div className="flex-1 w-full min-w-0 bg-white flex flex-col">
+          {/* Profile Navigation Strip */}
+          <ClientProfileNavTabs
+            clientId={clientId}
+            activeSection="life"
+            isCompanyClient={isCompanyClient}
+          />
+
+          {/* Main Content Area starting directly below tabs */}
+          <div className="p-6 flex-1 bg-white space-y-6 font-sans">
           {/* SUBTAB 1: SUMMARY */}
           {activeSubtab === 'summary' && (
             <div className="space-y-4 animate-in fade-in duration-150">
@@ -265,6 +291,7 @@ export default function LifePolicyTab({
           )}
         </div>
       </div>
+    </div>
     </div>
   );
 }

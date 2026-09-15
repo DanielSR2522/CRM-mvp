@@ -14,10 +14,12 @@ interface NewClientWizardModalProps {
   currentUserId: string;
 }
 
-export type PolicyType = 'property_casualty' | 'health' | 'life';
+export type PolicyType = 'property_casualty' | 'health' | 'life' | 'medicare' | 'supplemental';
 export type PcClientType = 'individual' | 'company';
 export type HealthEnrollmentType = 'new_enrollment' | 'renewal';
 export type LifeProductType = 'Term' | 'IUL' | 'Whole Life' | 'VUL' | 'Term - Disability' | 'Costumer Whole Life';
+export type MedicareType = 'Medicare Advantage' | 'Supplement' | 'Part D';
+export type SupplementalType = 'Accident' | 'Critical Illness' | 'Hospital Indemnity';
 
 export default function NewClientWizardModal({
   isOpen,
@@ -34,6 +36,8 @@ export default function NewClientWizardModal({
   const [pcClientType, setPcClientType] = useState<PcClientType | ''>('');
   const [healthEnrollmentType, setHealthEnrollmentType] = useState<HealthEnrollmentType | ''>('');
   const [lifeProductType, setLifeProductType] = useState<LifeProductType | ''>('');
+  const [medicareType, setMedicareType] = useState<MedicareType | ''>('');
+  const [supplementalType, setSupplementalType] = useState<SupplementalType | ''>('');
 
   // Form Fields
   const [fullName, setFullName] = useState('');
@@ -106,6 +110,8 @@ export default function NewClientWizardModal({
     setPcClientType('');
     setHealthEnrollmentType('');
     setLifeProductType('');
+    setMedicareType('');
+    setSupplementalType('');
     setFullName('');
     setCompanyName('');
     setEin('');
@@ -133,7 +139,9 @@ export default function NewClientWizardModal({
   const canContinueStep2 =
     (policyType === 'property_casualty' && pcClientType !== '') ||
     (policyType === 'health' && healthEnrollmentType !== '') ||
-    (policyType === 'life' && lifeProductType !== '');
+    (policyType === 'life' && lifeProductType !== '') ||
+    (policyType === 'medicare' && medicareType !== '') ||
+    (policyType === 'supplemental' && supplementalType !== '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -287,6 +295,10 @@ export default function NewClientWizardModal({
         }
 
         redirectUrl = `/clients/${clientId}?tab=life`;
+      } else if (policyType === 'medicare') {
+        redirectUrl = `/clients/${clientId}?tab=medicare`;
+      } else if (policyType === 'supplemental') {
+        redirectUrl = `/clients/${clientId}?tab=supplemental`;
       }
 
       // Reset modal and perform smooth router push without full page reload
@@ -301,7 +313,7 @@ export default function NewClientWizardModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in font-sans overflow-hidden">
-      <div className="w-full max-w-2xl bg-white border border-slate-100 rounded-2xl shadow-2xl animate-scale-up max-h-[90vh] flex flex-col overflow-hidden">
+      <div className="w-full max-w-3xl bg-white border border-slate-100 rounded-2xl shadow-2xl animate-scale-up max-h-[90vh] flex flex-col overflow-hidden">
         
         {/* Header (flex-shrink-0) */}
         <div className="p-6 md:p-8 pb-4 flex-shrink-0 border-b border-slate-100">
@@ -346,41 +358,68 @@ export default function NewClientWizardModal({
 
           {/* STEP 1: POLICY TYPE */}
           {step === 1 && (
-            <div className="space-y-6">
-              <div className="text-center md:text-left">
+            <div className="space-y-5">
+              <div className="text-left">
                 <h4 className="text-lg font-bold text-slate-800">What type of policy are you creating?</h4>
-                <p className="text-sm text-slate-500 mt-1">Select the main insurance line for this new client.</p>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  A client can have multiple insurance products. Choose the product that starts this profile; additional policies can be added later.
+                </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {[
                   {
-                    id: 'property_casualty' as const,
-                    title: 'Property & Casualty',
-                    desc: 'Auto, Home, Commercial & Liability',
+                    id: 'health' as const,
+                    title: 'Health',
+                    desc: 'Individual & Family health plans, ACA marketplace enrollments, and medical/dental coverage.',
+                    chips: ['ACA Marketplace', 'Medical', 'Dental'],
                     icon: (
-                      <svg className="w-7 h-7 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5m3 0h4M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                      <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                       </svg>
                     )
                   },
                   {
-                    id: 'health' as const,
-                    title: 'Health',
-                    desc: 'ACA Marketplace, Medical & Dental',
+                    id: 'medicare' as const,
+                    title: 'Medicare',
+                    desc: 'Senior health coverage, Advantage plans, prescription Part D, and Medigap supplement policies.',
+                    chips: ['Medicare Advantage', 'Supplement', 'Part D'],
                     icon: (
-                      <svg className="w-7 h-7 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                      <svg className="w-6 h-6 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                    )
+                  },
+                  {
+                    id: 'supplemental' as const,
+                    title: 'Supplemental',
+                    desc: 'Voluntary gap protection including accident, critical illness, and hospital indemnity plans.',
+                    chips: ['Accident', 'Critical Illness', 'Hospital Indemnity'],
+                    icon: (
+                      <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     )
                   },
                   {
                     id: 'life' as const,
                     title: 'Life',
-                    desc: 'Term, IUL, Whole Life & Annuities',
+                    desc: 'Financial protection policies including term life, index universal life (IUL), whole life, and annuities.',
+                    chips: ['Term', 'IUL', 'Whole Life', 'Annuities'],
                     icon: (
-                      <svg className="w-7 h-7 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                    )
+                  },
+                  {
+                    id: 'property_casualty' as const,
+                    title: 'Property & Casualty',
+                    desc: 'Personal lines auto and homeowners insurance alongside commercial business liability policies.',
+                    chips: ['Auto', 'Home', 'Commercial', 'Liability'],
+                    icon: (
+                      <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5m3 0h4M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                       </svg>
                     )
                   }
@@ -392,16 +431,33 @@ export default function NewClientWizardModal({
                       setPolicyType(opt.id);
                       setFormError(null);
                     }}
-                    className={`p-5 rounded-2xl border-2 text-left transition-all flex flex-col justify-between space-y-3 ${
+                    className={`p-5 rounded-2xl border text-left transition-all flex flex-col justify-between space-y-3 cursor-pointer ${
                       policyType === opt.id
-                        ? 'border-blue-600 bg-blue-50/50 shadow-md ring-2 ring-blue-500/20'
-                        : 'border-slate-100 bg-slate-50/50 hover:border-slate-200 hover:bg-slate-100/50'
+                        ? 'border-blue-600 bg-blue-50/40 shadow-md ring-2 ring-blue-500/20'
+                        : 'border-slate-200/80 bg-white hover:border-slate-300 hover:shadow-sm'
                     }`}
                   >
-                    <div>{opt.icon}</div>
+                    <div className="flex items-center justify-between">
+                      <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">{opt.icon}</div>
+                      {policyType === opt.id && (
+                        <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">
+                          ✓
+                        </span>
+                      )}
+                    </div>
                     <div>
-                      <h5 className="font-bold text-slate-800 text-sm">{opt.title}</h5>
-                      <p className="text-xs text-slate-400 mt-1 leading-relaxed">{opt.desc}</p>
+                      <h5 className="font-bold text-slate-900 text-sm">{opt.title}</h5>
+                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">{opt.desc}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {opt.chips.map(chip => (
+                        <span
+                          key={chip}
+                          className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px] font-medium"
+                        >
+                          {chip}
+                        </span>
+                      ))}
                     </div>
                   </button>
                 ))}
@@ -502,6 +558,60 @@ export default function NewClientWizardModal({
                         }`}
                       >
                         <span className="text-xs">{pType}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {policyType === 'medicare' && (
+                <div className="space-y-4">
+                  <h4 className="text-lg font-bold text-slate-800">Select Medicare Policy Type</h4>
+                  <p className="text-sm text-slate-500">Choose the initial Medicare category for this client profile.</p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                    {(['Medicare Advantage', 'Supplement', 'Part D'] as MedicareType[]).map((mType) => (
+                      <button
+                        key={mType}
+                        type="button"
+                        onClick={() => {
+                          setMedicareType(mType);
+                          setFormError(null);
+                        }}
+                        className={`p-4 rounded-xl border-2 text-center transition-all ${
+                          medicareType === mType
+                            ? 'border-sky-600 bg-sky-50/50 font-extrabold text-sky-900 shadow-md'
+                            : 'border-slate-100 bg-slate-50/50 hover:border-slate-200 font-semibold text-slate-700'
+                        }`}
+                      >
+                        <span className="text-xs">{mType}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {policyType === 'supplemental' && (
+                <div className="space-y-4">
+                  <h4 className="text-lg font-bold text-slate-800">Select Supplemental Product Category</h4>
+                  <p className="text-sm text-slate-500">Choose the initial Supplemental coverage category for this client profile.</p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                    {(['Accident', 'Critical Illness', 'Hospital Indemnity'] as SupplementalType[]).map((sType) => (
+                      <button
+                        key={sType}
+                        type="button"
+                        onClick={() => {
+                          setSupplementalType(sType);
+                          setFormError(null);
+                        }}
+                        className={`p-4 rounded-xl border-2 text-center transition-all ${
+                          supplementalType === sType
+                            ? 'border-amber-600 bg-amber-50/50 font-extrabold text-amber-900 shadow-md'
+                            : 'border-slate-100 bg-slate-50/50 hover:border-slate-200 font-semibold text-slate-700'
+                        }`}
+                      >
+                        <span className="text-xs">{sType}</span>
                       </button>
                     ))}
                   </div>

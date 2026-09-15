@@ -64,7 +64,7 @@ export default function CollapsibleSidebar({
     }
 
     return (
-      <aside className={`w-full lg:w-[260px] lg:min-w-[260px] lg:max-w-[260px] shrink-0 bg-white border-r border-slate-200 min-h-full p-4 space-y-4 relative transition-all ${className}`}>
+      <aside className={`w-full lg:w-[260px] lg:min-w-[260px] lg:max-w-[260px] shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-slate-200 min-h-full p-4 space-y-4 relative transition-all ${className}`}>
         <div className="absolute top-3.5 right-3 z-10">
           <button
             type="button"

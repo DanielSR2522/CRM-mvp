@@ -993,10 +993,10 @@ export default function HealthPolicyForm({
       )}
 
       {/* PARENT FULL-WIDTH PAGE LAYOUT STARTING AT AGENCY INFORMATION */}
-      <div className="w-full space-y-6">
+      <div className="w-full space-y-6 font-sans">
         {/* SECTION 1 — Agency Information */}
-        <div className="bg-white border border-slate-200/70 rounded-xl p-5 shadow-2xs space-y-4 font-sans">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+        <div className="space-y-4 font-sans">
+            <div className="flex items-center justify-between pb-2.5">
               <h4 className="text-base font-bold text-slate-900 tracking-tight">
                 Agency Information
               </h4>
@@ -1007,10 +1007,10 @@ export default function HealthPolicyForm({
 
         <div className="grid grid-cols-1 md:grid-cols-2 max-w-[850px] gap-x-12 gap-y-1 text-sm font-sans">
           {/* LEFT COLUMN */}
-          <div className="space-y-0 divide-y divide-slate-100/70">
+          <div className="space-y-0">
             {/* 1. Enrolled */}
-            <div className="py-2 grid grid-cols-[170px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-sm font-semibold text-slate-500 leading-snug break-words">Enrolled</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">Enrolled</span>
               {editingAgencyField === 'active' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -1061,8 +1061,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 2. Renovation Year 2026 */}
-            <div className="py-2 grid grid-cols-[170px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-sm font-semibold text-slate-500 leading-snug break-words">Renovation Year 2026</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">Renovation Year 2026</span>
               {editingAgencyField === 'yearRenovation' ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -1111,16 +1111,16 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 3. Notes */}
-            <div className="py-2 grid grid-cols-[170px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-sm font-semibold text-slate-500 leading-snug break-words">Notes</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">Notes</span>
               <span className="text-[15px] font-semibold text-slate-950 select-none">
                 {notesCount}
               </span>
             </div>
 
             {/* 4. Documents */}
-            <div className="py-2 grid grid-cols-[170px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-sm font-semibold text-slate-500 leading-snug break-words">Documents</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">Documents</span>
               <span className="text-[15px] font-semibold text-slate-950 select-none">
                 {documentsCount}
               </span>
@@ -1128,10 +1128,10 @@ export default function HealthPolicyForm({
           </div>
 
           {/* RIGHT COLUMN */}
-          <div className="space-y-0 divide-y divide-slate-100/70">
+          <div className="space-y-0">
             {/* 1. Policy Status */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Policy Status</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Policy Status</span>
               {editingAgencyField === 'policyStatus' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -1183,8 +1183,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 2. Action Pending */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Action Pending</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Action Pending</span>
               {editingAgencyField === 'actionPending' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -1237,8 +1237,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 3. Renovation Status */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Renovation Status</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Renovation Status</span>
               {editingAgencyField === 'renovationStatus' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -1290,16 +1290,16 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 4. Agent */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Agent</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Agent</span>
               <span className="text-slate-900 font-semibold select-none">
                 {agentName || '—'}
               </span>
             </div>
 
             {/* 5. NPN */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">NPN</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">NPN</span>
               {editingAgencyField === 'npn' ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -1348,8 +1348,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 6. Consent Ready */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Consent Ready</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Consent Ready</span>
               <span className="text-slate-900 font-semibold select-none">
                 {isConsentReady ? 'Yes' : 'No'}
               </span>
@@ -1359,8 +1359,8 @@ export default function HealthPolicyForm({
       </div>
 
         {/* SECTION 2 — Health Information 2026 */}
-        <div className="bg-white border border-slate-200/70 rounded-xl p-5 shadow-2xs space-y-4 font-sans">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+        <div className="space-y-4 font-sans">
+          <div className="flex items-center justify-between pb-2.5">
             <h4 className="text-base font-bold text-slate-900 tracking-tight">
               Health Information 2026
             </h4>
@@ -1371,10 +1371,10 @@ export default function HealthPolicyForm({
 
           <div className="grid grid-cols-1 md:grid-cols-2 max-w-[850px] gap-x-12 gap-y-1 text-sm font-sans">
             {/* LEFT COLUMN */}
-            <div className="space-y-0 divide-y divide-slate-100/70">
+            <div className="space-y-0">
               {/* 1. Company 2026 */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Company 2026</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Company 2026</span>
                 {editingHealthField === 'company2026' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1424,8 +1424,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 2. Type Plan */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Type Plan</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Type Plan</span>
                 {editingHealthField === 'typePlan' ? (
                   <div className="flex items-center gap-2">
                     <select
@@ -1480,8 +1480,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 3. Plan ID */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Plan ID</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Plan ID</span>
                 {editingHealthField === 'planId' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1531,8 +1531,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 4. Plan Name */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Plan Name</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Plan Name</span>
                 {editingHealthField === 'planName' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1582,8 +1582,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 5. No. Membership */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">No. Membership</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">No. Membership</span>
                 {editingHealthField === 'noMembership' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1633,8 +1633,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 6. Plan Cost */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Plan Cost</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Plan Cost</span>
                 {editingHealthField === 'planCost' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1685,8 +1685,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 7. Tax Credit */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Tax Credit</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Tax Credit</span>
                 {editingHealthField === 'taxCredit' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1737,16 +1737,16 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 8. Monthly Premium */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Monthly Premium</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Monthly Premium</span>
                 <span className="text-slate-900 font-bold select-none">
                   ${monthlyPremium}
                 </span>
               </div>
 
               {/* 9. Effective Date */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Effective Date</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Effective Date</span>
                 {editingHealthField === 'effectiveDate' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1796,8 +1796,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 10. Coverage Members Count */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Coverage Members Count</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Coverage Members Count</span>
                 <span className="text-slate-900 font-semibold select-none">
                   {calculatedCoverageMembersCount}
                 </span>
@@ -1805,10 +1805,10 @@ export default function HealthPolicyForm({
             </div>
 
             {/* RIGHT COLUMN */}
-            <div className="space-y-0 divide-y divide-slate-100/70">
+            <div className="space-y-0">
               {/* 1. Application Number 2026 */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Application Number 2026</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Application Number 2026</span>
                 {editingHealthField === 'applicationNumber' ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1858,8 +1858,8 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 2. Marketplace Account */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Marketplace Account</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Marketplace Account</span>
                 {editingHealthField === 'marketplaceAccount' ? (
                   <div className="flex items-center gap-2">
                     <select
@@ -1941,8 +1941,8 @@ export default function HealthPolicyForm({
               )}
 
               {/* 4. Company Account Toggle */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words">Company Account</span>
+              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                <span className="text-slate-500 font-medium leading-snug break-words text-right">Company Account</span>
                 {editingHealthField === 'companyAccount' ? (
                   <div className="flex items-center gap-2">
                     <select
@@ -2016,8 +2016,8 @@ export default function HealthPolicyForm({
         </div>
 
       {/* SECTION: APPLICANT INFORMATION / TAX HOUSEHOLD MEMBER 1 */}
-      <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-6 font-sans">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-50 pb-4 gap-2">
+      <div className="space-y-6 font-sans">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 gap-2">
           <div>
             <h4 className="text-base font-bold text-slate-900 tracking-tight">
               Applicant Information
@@ -2033,10 +2033,10 @@ export default function HealthPolicyForm({
 
         <div className="grid grid-cols-1 md:grid-cols-2 max-w-[850px] gap-x-12 gap-y-1 text-sm font-sans">
           {/* LEFT COLUMN */}
-          <div className="space-y-0 divide-y divide-slate-100/70">
+          <div className="space-y-0">
             {/* 1. Coverage */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Coverage</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Coverage</span>
               {editingHealthField === 'applicantCoverage' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -2081,8 +2081,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 2. Applicant Name */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Applicant Name</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Applicant Name</span>
               {editingApplicantField === 'full_name' ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -2131,8 +2131,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 3. DOB */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">DOB</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">DOB</span>
               {editingApplicantField === 'date_of_birth' ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -2196,16 +2196,16 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 4. Age */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Age</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Age</span>
               <span className="text-slate-900 font-semibold select-none">
                 {primaryApplicant?.dateOfBirth ? calculateAgeFromDob(primaryApplicant.dateOfBirth) : '—'}
               </span>
             </div>
 
             {/* 5. SSN (Visible unmasked) */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">SSN</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">SSN</span>
               {editingApplicantField === 'ssn' ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -2255,8 +2255,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 6. Email */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Email</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Email</span>
               {editingApplicantField === 'email' ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -2306,8 +2306,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 7. Phone */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Phone</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Phone</span>
               {editingApplicantField === 'phone' ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -2357,8 +2357,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 8. Number of People on Tax Return */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Number of People on Tax Return</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Number of People on Tax Return</span>
               {editingApplicantField === 'tax_household_count' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -2422,18 +2422,18 @@ export default function HealthPolicyForm({
           </div>
 
           {/* RIGHT COLUMN */}
-          <div className="space-y-0 divide-y divide-slate-100/70">
+          <div className="space-y-0">
             {/* 1. Relationship */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Relationship</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Relationship</span>
               <span className="text-slate-900 font-semibold bg-slate-100 px-2 py-0.5 rounded text-[11px] w-fit">
                 Self
               </span>
             </div>
 
             {/* 2. Gender */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Gender</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Gender</span>
               {editingApplicantField === 'gender' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -2485,8 +2485,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 3. Marital Status */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Marital Status</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Marital Status</span>
               {editingApplicantField === 'marital_status' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -2541,8 +2541,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 4. U.S. Citizen */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">U.S. Citizen</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">U.S. Citizen</span>
               {editingApplicantField === 'us_citizen' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -2595,8 +2595,8 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 5. Immigration Status */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words">Immigration Status</span>
+            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+              <span className="text-slate-500 font-medium leading-snug break-words text-right">Immigration Status</span>
               {editingApplicantField === 'immigration_status' ? (
                 <div className="flex items-center gap-2">
                   <select
@@ -2652,8 +2652,8 @@ export default function HealthPolicyForm({
             {/* CONDITIONAL IMMIGRATION FIELDS: Work Permit */}
             {primaryApplicant?.immigrationStatus === 'Work Permit' && (
               <>
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words">Card Number</span>
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Card Number</span>
                   {editingApplicantField === 'card_number' ? (
                     <div className="flex items-center gap-2">
                       <input
@@ -2700,8 +2700,8 @@ export default function HealthPolicyForm({
                   )}
                 </div>
 
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words">USCIS Number</span>
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words text-right">USCIS Number</span>
                   {editingApplicantField === 'uscis_number' ? (
                     <div className="flex items-center gap-2">
                       <input
@@ -2748,8 +2748,8 @@ export default function HealthPolicyForm({
                   )}
                 </div>
 
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words">Category</span>
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Category</span>
                   {editingApplicantField === 'immigration_category' ? (
                     <div className="flex items-center gap-2">
                       <input
@@ -2796,8 +2796,8 @@ export default function HealthPolicyForm({
                   )}
                 </div>
 
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words">Expiration Date</span>
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Expiration Date</span>
                   {editingApplicantField === 'immigration_expiration_date' ? (
                     <div className="flex items-center gap-2">
                       <input
@@ -2855,8 +2855,8 @@ export default function HealthPolicyForm({
             {/* CONDITIONAL IMMIGRATION FIELDS: Resident */}
             {(primaryApplicant?.immigrationStatus === 'Resident' || primaryApplicant?.immigrationStatus === 'Permanent Resident') && (
               <>
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words">Alien Number</span>
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Alien Number</span>
                   {editingApplicantField === 'alien_number' ? (
                     <div className="flex items-center gap-2">
                       <input
@@ -2903,8 +2903,8 @@ export default function HealthPolicyForm({
                   )}
                 </div>
 
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words">Card Number</span>
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Card Number</span>
                   {editingApplicantField === 'card_number' ? (
                     <div className="flex items-center gap-2">
                       <input
@@ -2951,8 +2951,8 @@ export default function HealthPolicyForm({
                   )}
                 </div>
 
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words">Expiration Date</span>
+                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Expiration Date</span>
                   {editingApplicantField === 'immigration_expiration_date' ? (
                     <div className="flex items-center gap-2">
                       <input
@@ -3074,8 +3074,8 @@ export default function HealthPolicyForm({
               };
 
                 return (
-                  <div key={memberNumber} className="bg-white border border-slate-200/70 rounded-xl p-5 shadow-2xs space-y-4 font-sans">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <div key={memberNumber} className="space-y-4 font-sans">
+                    <div className="flex items-center justify-between pb-2.5">
                       <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                         Tax Household Member {memberNumber}
                       </h4>
@@ -3086,10 +3086,10 @@ export default function HealthPolicyForm({
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-sm font-sans">
                       {/* LEFT COLUMN */}
-                      <div className="space-y-0 divide-y divide-slate-100/70">
+                      <div className="space-y-0">
                         {/* 1. Coverage */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words">Coverage</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words text-right">Coverage</span>
                           {editingTaxMemberField === `m_${memberNumber}_coverage` ? (
                             <div className="flex items-center gap-2">
                               <select
@@ -3144,8 +3144,8 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 2. Full Name */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words">Full Name</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words text-right">Full Name</span>
                           {editingTaxMemberField === `m_${memberNumber}_fullName` ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -3199,8 +3199,8 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 3. DOB */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words">DOB</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words text-right">DOB</span>
                           {editingTaxMemberField === `m_${memberNumber}_dob` ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -3265,15 +3265,15 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 4. Age (Calculated read-only) */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words">Age</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words text-right">Age</span>
                           <span className="text-slate-900 font-semibold select-none">
                             {calculateAgeFromDob(member.date_of_birth) !== null ? calculateAgeFromDob(member.date_of_birth) : '—'}
                           </span>
                         </div>
 
                         {/* 5. SSN (Sensitive Field) */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
                           <TaxMemberSensitiveField
                             label="SSN"
                             healthPolicyId={initialPolicy?.id}
@@ -3289,10 +3289,10 @@ export default function HealthPolicyForm({
                       </div>
 
                       {/* RIGHT COLUMN */}
-                      <div className="space-y-0 divide-y divide-slate-100/70">
+                      <div className="space-y-0">
                         {/* 1. Relationship to Applicant */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words">Relationship to Applicant</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words text-right">Relationship to Applicant</span>
                           {editingTaxMemberField === `m_${memberNumber}_relationship` ? (
                             <div className="flex items-center gap-2">
                               <select
@@ -3348,8 +3348,8 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 2. U.S. Citizen */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words">U.S. Citizen</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words text-right">U.S. Citizen</span>
                           {editingTaxMemberField === `m_${memberNumber}_usCitizen` ? (
                             <div className="flex items-center gap-2">
                               <select
@@ -3404,8 +3404,8 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 3. Immigration Status */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words">Immigration Status</span>
+                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                          <span className="text-slate-500 font-medium leading-snug break-words text-right">Immigration Status</span>
                           {editingTaxMemberField === `m_${memberNumber}_immigrationStatus` ? (
                             <div className="flex items-center gap-2">
                               <select
@@ -3711,8 +3711,8 @@ export default function HealthPolicyForm({
         )}
 
       {/* SECTION 5 — Residence Information */}
-      <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm space-y-4 font-sans">
-        <div className="border-b border-slate-50 pb-3">
+      <div className="space-y-4 font-sans">
+        <div className="pb-3">
           <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
             Residence Information
           </h4>
@@ -3720,10 +3720,10 @@ export default function HealthPolicyForm({
             Primary applicant residence address (Click value to edit)
           </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans font-sans divide-y divide-slate-100/70">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
           {/* 1. Street Address */}
-          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[32px]">
-            <span className="text-slate-500 font-medium leading-snug break-words">Street Address</span>
+          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[32px]">
+            <span className="text-slate-500 font-medium leading-snug break-words text-right">Street Address</span>
             {editingResidenceField === 'address' ? (
               <div className="flex items-center gap-2">
                 <input
@@ -3773,8 +3773,8 @@ export default function HealthPolicyForm({
           </div>
 
           {/* 2. City */}
-          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[32px]">
-            <span className="text-slate-500 font-medium leading-snug break-words">City</span>
+          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[32px]">
+            <span className="text-slate-500 font-medium leading-snug break-words text-right">City</span>
             {editingResidenceField === 'city' ? (
               <div className="flex items-center gap-2">
                 <input
@@ -3824,8 +3824,8 @@ export default function HealthPolicyForm({
           </div>
 
           {/* 3. State */}
-          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[32px]">
-            <span className="text-slate-500 font-medium leading-snug break-words">State</span>
+          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[32px]">
+            <span className="text-slate-500 font-medium leading-snug break-words text-right">State</span>
             {editingResidenceField === 'state' ? (
               <div className="flex items-center gap-2">
                 <input
@@ -3875,8 +3875,8 @@ export default function HealthPolicyForm({
           </div>
 
           {/* 4. Zip Code */}
-          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[32px]">
-            <span className="text-slate-500 font-medium leading-snug break-words">Zip Code</span>
+          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[32px]">
+            <span className="text-slate-500 font-medium leading-snug break-words text-right">Zip Code</span>
             {editingResidenceField === 'zip_code' ? (
               <div className="flex items-center gap-2">
                 <input
@@ -3926,8 +3926,8 @@ export default function HealthPolicyForm({
           </div>
 
           {/* 5. County */}
-          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-3 min-h-[32px]">
-            <span className="text-slate-500 font-medium leading-snug break-words">County</span>
+          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[32px]">
+            <span className="text-slate-500 font-medium leading-snug break-words text-right">County</span>
             {editingResidenceField === 'county' ? (
               <div className="flex items-center gap-2">
                 <input
@@ -3980,6 +3980,7 @@ export default function HealthPolicyForm({
 
       {/* SECTION 6 — Income Information */}
       <ClientIncomeInformationSection clientId={clientId} />
+    </div>
 
       {/* Editing Form controls */}
       {isEditing && (
@@ -4007,7 +4008,6 @@ export default function HealthPolicyForm({
           </button>
         </div>
       )}
-      </div>
 
       {/* CONFIRMATION MODAL FOR TAX MEMBER COUNT REDUCTION */}
       {pendingCountReduction && (

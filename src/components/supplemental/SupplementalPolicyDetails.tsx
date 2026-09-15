@@ -22,8 +22,7 @@ export default function SupplementalPolicyDetails({
 
   return (
     <div className="space-y-6 font-sans">
-      {/* Full-Width Supplemental Policy Details Card */}
-      <div className="crm-card p-6 space-y-5">
+      <div className="space-y-5">
         {/* Card Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E8ECF2] pb-4">
           <div>

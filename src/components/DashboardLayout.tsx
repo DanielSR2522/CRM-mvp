@@ -259,6 +259,8 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
     pathname === '/agent-information' ||
     pathname.startsWith('/agent-information/');
 
+  const isFlushWorkspace = pathname.startsWith('/clients/');
+
   const isNavItemActive = (item: typeof navItems[0]) => {
     if (item.href === '/dashboard') {
       return pathname === '/dashboard';
@@ -557,7 +559,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
         )}
 
         {/* Page Content */}
-        <main className={`flex-1 overflow-y-auto ${isTopNavWorkspace ? 'p-0' : 'px-4 py-6 md:px-8 md:py-8'}`}>
+        <main className={`flex-1 overflow-y-auto ${isTopNavWorkspace || isFlushWorkspace ? 'p-0' : 'px-4 py-6 md:px-8 md:py-8'}`}>
           {children}
         </main>
       </div>

@@ -17,6 +17,51 @@ interface HealthClientHeaderProps {
   onPhotoUpdated?: (newPhotoUrl: string | null) => void;
   isCompanyClient?: boolean;
   activeSection?: 'overview' | 'personal-information' | 'health' | 'medicare' | 'supplemental' | 'life' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline';
+  hideNavStrip?: boolean;
+}
+
+export function ClientProfileNavTabs({
+  clientId,
+  activeSection,
+  isCompanyClient = false,
+}: {
+  clientId: string;
+  activeSection: string;
+  isCompanyClient?: boolean;
+}) {
+  const router = useRouter();
+  const { isLineEnabled } = useBusinessLines();
+
+  const navTab = (label: string, section: string, isActive: boolean) => (
+    <button
+      key={section}
+      type="button"
+      onClick={() => router.push(`/clients/${clientId}?section=${section}`)}
+      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+        isActive
+          ? 'bg-blue-50 text-blue-700 border border-blue-100 font-extrabold shadow-2xs'
+          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="bg-[#F3F6FB] border-b border-slate-200/80 px-6 py-1.5 flex items-center gap-1 font-sans overflow-x-auto min-h-[57px] h-[57px]">
+      {navTab('Overview', 'overview', activeSection === 'overview')}
+      {navTab(isCompanyClient ? 'Company Information' : 'Personal Info', 'personal-information', activeSection === 'personal-information')}
+      {isLineEnabled('health') && navTab('Health', 'health', activeSection === 'health')}
+      {isLineEnabled('medicare') && navTab('Medicare', 'medicare', activeSection === 'medicare')}
+      {isLineEnabled('supplemental') && navTab('Supplemental', 'supplemental', activeSection === 'supplemental')}
+      {!isCompanyClient && isLineEnabled('life') && navTab('Life', 'life', activeSection === 'life')}
+      {isLineEnabled('property_casualty') && navTab('Property & Casualty', 'policies', activeSection === 'policies')}
+      {navTab('Documents', 'documents', activeSection === 'documents')}
+      {navTab('Notes', 'notes', activeSection === 'notes')}
+      {navTab('Consents', 'consents', activeSection === 'consents')}
+      {navTab('Timeline', 'timeline', activeSection === 'timeline')}
+    </div>
+  );
 }
 
 export default function HealthClientHeader({
@@ -30,6 +75,7 @@ export default function HealthClientHeader({
   onPhotoUpdated,
   isCompanyClient = false,
   activeSection = 'health',
+  hideNavStrip = false,
 }: HealthClientHeaderProps) {
   const router = useRouter();
   const { isLineEnabled } = useBusinessLines();
@@ -294,19 +340,21 @@ export default function HealthClientHeader({
         </div>
 
         {/* Level 1 Dynamic Navigation beside Client Profile identity */}
-        <nav className="flex flex-wrap items-center gap-1 border-l border-slate-200 pl-4 py-0.5 font-sans">
-          {navTab('Overview', 'overview', activeSection === 'overview')}
-          {navTab(isCompanyClient ? 'Company Information' : 'Personal Info', 'personal-information', activeSection === 'personal-information')}
-          {isLineEnabled('health') && navTab('Health', 'health', activeSection === 'health')}
-          {isLineEnabled('medicare') && navTab('Medicare', 'medicare', activeSection === 'medicare')}
-          {isLineEnabled('supplemental') && navTab('Supplemental', 'supplemental', activeSection === 'supplemental')}
-          {!isCompanyClient && isLineEnabled('life') && navTab('Life', 'life', activeSection === 'life')}
-          {isLineEnabled('property_casualty') && navTab('Property & Casualty', 'policies', activeSection === 'policies')}
-          {navTab('Documents', 'documents', activeSection === 'documents')}
-          {navTab('Notes', 'notes', activeSection === 'notes')}
-          {navTab('Consents', 'consents', activeSection === 'consents')}
-          {navTab('Timeline', 'timeline', activeSection === 'timeline')}
-        </nav>
+        {!hideNavStrip && (
+          <nav className="flex flex-wrap items-center gap-1 border-l border-slate-200 pl-4 py-0.5 font-sans">
+            {navTab('Overview', 'overview', activeSection === 'overview')}
+            {navTab(isCompanyClient ? 'Company Information' : 'Personal Info', 'personal-information', activeSection === 'personal-information')}
+            {isLineEnabled('health') && navTab('Health', 'health', activeSection === 'health')}
+            {isLineEnabled('medicare') && navTab('Medicare', 'medicare', activeSection === 'medicare')}
+            {isLineEnabled('supplemental') && navTab('Supplemental', 'supplemental', activeSection === 'supplemental')}
+            {!isCompanyClient && isLineEnabled('life') && navTab('Life', 'life', activeSection === 'life')}
+            {isLineEnabled('property_casualty') && navTab('Property & Casualty', 'policies', activeSection === 'policies')}
+            {navTab('Documents', 'documents', activeSection === 'documents')}
+            {navTab('Notes', 'notes', activeSection === 'notes')}
+            {navTab('Consents', 'consents', activeSection === 'consents')}
+            {navTab('Timeline', 'timeline', activeSection === 'timeline')}
+          </nav>
+        )}
       </div>
 
       {/* Right side: Action Buttons */}
