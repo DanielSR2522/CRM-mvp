@@ -234,8 +234,7 @@ export async function performFocusedMemberIdOcr(
       .normalize()
       .toBuffer();
 
-    const workerPath = path.join(process.cwd(), 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js');
-    const worker = await createWorker('eng', 1, { workerPath });
+    const worker = await createWorker('eng', 1);
 
     await worker.setParameters({
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-',
@@ -275,14 +274,9 @@ interface TesseractRecognizeData {
 
 async function runOcrOnBuffer(buffer: Buffer): Promise<{ rawText: string; words: Array<{ text: string; bbox: TokenBbox }> }> {
   console.log('[OCR Fallback] Started');
+  console.log('[OCR Fallback] Initializing Tesseract worker...');
 
-  // Compute absolute path on disk to avoid Turbopack require.resolve virtual module rewriting
-  const workerPath = path.join(process.cwd(), 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js');
-  console.log(`[OCR Fallback] Initializing Tesseract worker (workerPath: ${workerPath})...`);
-
-  const worker = await createWorker('eng', 1, {
-    workerPath,
-  });
+  const worker = await createWorker('eng', 1);
   console.log('[OCR Fallback] Worker ready');
 
   console.log('[OCR Fallback] Recognizing buffer image text with bounding boxes...');
@@ -398,8 +392,8 @@ export async function extractCommissionDocument(
       rawText = ocrData.rawText;
       words = ocrData.words;
     } catch (ocrErr: unknown) {
-      console.error('[OCR Fallback Image Error]:', ocrErr);
-      document_warnings.push('Could not complete local OCR processing on image.');
+      console.error('[OCR Engine Diagnostic Error]:', ocrErr);
+      throw new Error('OCR engine unavailable');
     }
   }
 
