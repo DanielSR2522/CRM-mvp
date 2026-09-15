@@ -1,5 +1,5 @@
 import * as pdfParseModule from 'pdf-parse';
-import { createWorker } from 'tesseract.js';
+import { createWorker, PSM } from 'tesseract.js';
 import path from 'path';
 import sharp from 'sharp';
 import { ExtractedCommissionRow, StructuredExtractionResult } from '@/types/commissions';
@@ -240,7 +240,7 @@ export async function performFocusedMemberIdOcr(
 
     await worker.setParameters({
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-',
-      tessedit_pageseg_mode: '7' as unknown as Record<string, string>['tessedit_pageseg_mode'],
+      tessedit_pageseg_mode: PSM.SINGLE_LINE,
     });
 
     const result = await worker.recognize(processedCropBuffer);
