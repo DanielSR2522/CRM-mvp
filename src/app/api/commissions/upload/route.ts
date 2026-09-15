@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveAuthenticatedAgent } from '@/lib/marketing/auth-guard';
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
-import { extractCommissionsFromFile } from '@/lib/commissions/extraction-service';
+import { extractCommissionDocument } from '@/lib/commissions/extraction-service';
 import { matchExtractedRowsToCRM } from '@/lib/commissions/matching-service';
 
 export async function POST(req: NextRequest) {
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
     const storagePath = `${authAgent.agentId}/commissions/${Date.now()}_${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
     console.log(`[Commission Upload API] Uploading file to storage path: ${storagePath}`);
-    const { data: uploadData, error: uploadErr } = await admin.storage
+    const { error: uploadErr } = await admin.storage
       .from('crm-documents')
       .upload(storagePath, buffer, {
         contentType: file.type || 'application/octet-stream',
@@ -58,27 +58,49 @@ export async function POST(req: NextRequest) {
       documentUrl = publicUrlData?.publicUrl || `/api/documents/preview?path=${encodeURIComponent(storagePath)}`;
     }
 
-    // 2. Extract raw text & rows
+    // 2. Extract using Hybrid Multimodal Document Extractor
     console.log('[Commission Upload API] Starting document extraction...');
-    const { rawText, rows, ocrWarning } = await extractCommissionsFromFile(buffer, file.type, filename);
-    console.log(`[Commission Upload API] Extraction completed. Extracted ${rows.length} rows. Warning: ${ocrWarning || 'None'}`);
+    const extractionResult = await extractCommissionDocument(buffer, file.type, filename);
+    console.log(`[Commission Upload API] Extraction completed (${extractionResult.extraction_method}). Extracted ${extractionResult.rows.length} rows.`);
 
-    // 3. Match against real CRM policies owned by agent
+    // 3. Match against real CRM policies owned by agent (deterministic Carrier + Policy # matching)
     console.log('[Commission Upload API] Matching extracted rows against CRM policies...');
-    const matchedRows = await matchExtractedRowsToCRM(rows, authAgent.agentId, admin);
+    let isPrivileged = false;
+    try {
+      const { data: profile } = await admin
+        .from('profiles')
+        .select('role')
+        .eq('id', authAgent.agentId)
+        .maybeSingle();
+
+      if (profile) {
+        const role = (profile.role || 'AGENT').toUpperCase();
+        if (['ADMIN', 'SUPERVISOR', 'MANAGER', 'OWNER'].includes(role)) {
+          isPrivileged = true;
+        }
+      }
+    } catch {
+      // Ignore auth check error
+    }
+
+    const matchedRows = await matchExtractedRowsToCRM(extractionResult.rows, authAgent.agentId, admin, isPrivileged, buffer);
+    console.log('[OCR Fallback] Matching complete');
     console.log('[Commission Upload API] Matching completed. Returning response.');
 
     return NextResponse.json({
       success: true,
       document_url: documentUrl,
-      raw_text: rawText,
+      document_type: extractionResult.document_type,
+      extraction_method: extractionResult.extraction_method,
       rows: matchedRows,
-      warning: ocrWarning,
+      warning: extractionResult.document_warnings[0] || null,
+      document_warnings: extractionResult.document_warnings,
     });
-  } catch (err: any) {
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'Could not process this evidence. Please try again.';
     console.error('[Commission Upload API] Exception:', err);
     return NextResponse.json(
-      { error: err?.message || 'Could not process this evidence. Please try again.' },
+      { error: errorMsg },
       { status: 500 }
     );
   }
