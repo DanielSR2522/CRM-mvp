@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { ExtractedCommissionRow } from '@/types/commissions';
 import { performFocusedMemberIdOcr } from './extraction-service';
+import { getPcSharedAgentIds } from './commission-service';
 
 export function normalizePolicyNumber(val?: string | null): string {
   if (!val) return '';
@@ -107,11 +108,12 @@ export async function matchExtractedRowsToCRM(
     return rows;
   }
 
-  // AGENT SCOPING: Restrict candidate policies to the authenticated agent's own assigned book unless privileged role
+  // AGENT SCOPING: Restrict candidate policies to the authenticated agent's own or P&C shared assigned book unless privileged role
+  const authorizedAgentIds = isPrivileged ? [] : await getPcSharedAgentIds(agentId, supabase);
   const scopedPolicies = rawPolicies.filter((p) => {
     if (isPrivileged || !agentId) return true;
     const policyAgentId = p.agent_id || p.clients?.agent_id || null;
-    return policyAgentId === agentId;
+    return policyAgentId && authorizedAgentIds.includes(policyAgentId);
   });
 
   if (scopedPolicies.length === 0) {

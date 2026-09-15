@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveAuthenticatedAgent } from '@/lib/marketing/auth-guard';
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { getPcSharedAgentIds } from '@/lib/commissions/commission-service';
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,8 +19,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    const authorizedAgentIds = await getPcSharedAgentIds(authAgent.agentId, admin);
+
     const agentPolicies = (policies || [])
-      .filter((p: any) => p.clients?.agent_id === authAgent.agentId)
+      .filter((p: any) => p.clients?.agent_id && authorizedAgentIds.includes(p.clients.agent_id))
       .map((p: any) => ({
         policy_id: p.id,
         policy_number: p.policy_number,

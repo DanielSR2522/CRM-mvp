@@ -288,15 +288,45 @@ export async function updateCommissionLedgerRecord(
   return { success: true, payment: updatedRecord };
 }
 
+export async function getPcSharedAgentIds(
+  agentId: string,
+  supabase: SupabaseClient
+): Promise<string[]> {
+  const ids = new Set<string>([agentId]);
+  if (!agentId) return Array.from(ids);
+  try {
+    const { data } = await supabase
+      .from('agent_shared_access')
+      .select('agent_id, shared_agent_id')
+      .or(`agent_id.eq.${agentId},shared_agent_id.eq.${agentId}`)
+      .eq('scope', 'property_casualty');
+
+    if (data) {
+      data.forEach((row: any) => {
+        if (row.agent_id === agentId && row.shared_agent_id) ids.add(row.shared_agent_id);
+        if (row.shared_agent_id === agentId && row.agent_id) ids.add(row.agent_id);
+      });
+    }
+  } catch (e) {
+    console.warn('[getPcSharedAgentIds] Warning querying shared access:', e);
+  }
+  return Array.from(ids);
+}
+
 export async function fetchAgentCommissionPayments(
   agentId: string,
   supabase: SupabaseClient,
   isPrivileged: boolean = false
 ): Promise<CommissionPayment[]> {
   const dbClient = supabase || getSupabaseAdmin();
+  const authorizedAgentIds = isPrivileged ? [] : await getPcSharedAgentIds(agentId, dbClient);
+
   const memoryAgentPayments = inMemoryPayments.filter((p) => {
     if (isPrivileged) return true;
-    return p.agent_id === agentId || p.created_by === agentId;
+    return (
+      authorizedAgentIds.includes(p.agent_id) ||
+      (p.created_by && authorizedAgentIds.includes(p.created_by))
+    );
   });
 
   try {
@@ -318,8 +348,8 @@ export async function fetchAgentCommissionPayments(
         )
       `);
 
-    if (!isPrivileged && agentId) {
-      query = query.eq('agent_id', agentId);
+    if (!isPrivileged && authorizedAgentIds.length > 0) {
+      query = query.in('agent_id', authorizedAgentIds);
     }
 
     const { data: dbData } = await query.order('payment_date', { ascending: false });
@@ -382,6 +412,7 @@ export async function fetchPendingPolicies(
   isPrivileged: boolean = false
 ): Promise<PendingPolicy[]> {
   const dbClient = supabase || getSupabaseAdmin();
+  const authorizedAgentIds = isPrivileged ? [] : await getPcSharedAgentIds(agentId, dbClient);
   const confirmedPayments = await fetchAgentCommissionPayments(agentId, dbClient, isPrivileged);
   
   const paidPolicyIds = new Set(
@@ -398,7 +429,7 @@ export async function fetchPendingPolicies(
 
   let rawPolicies: any[] = [];
   try {
-    const { data: pcPolicies, error: pcErr } = await dbClient
+    let pcQuery = dbClient
       .from('pc_policies')
       .select(`
         id,
@@ -410,6 +441,12 @@ export async function fetchPendingPolicies(
         clients ( id, full_name, agent_id ),
         profiles ( id, name, first_name, last_name, email )
       `);
+
+    if (!isPrivileged && authorizedAgentIds.length > 0) {
+      pcQuery = pcQuery.in('agent_id', authorizedAgentIds);
+    }
+
+    const { data: pcPolicies, error: pcErr } = await pcQuery;
 
     if (!pcErr && pcPolicies && pcPolicies.length > 0) {
       rawPolicies = pcPolicies;
@@ -438,10 +475,10 @@ export async function fetchPendingPolicies(
   const seenPendingKeys = new Set<string>();
 
   rawPolicies.forEach((p) => {
-    // Ownership check: policy belongs to agent if policy.agent_id === agentId OR clients.agent_id === agentId
+    // Ownership check: policy belongs to agent or connected P&C shared agent
     const policyAgentId = p.agent_id || (p.clients as any)?.agent_id || null;
-    if (!isPrivileged && agentId && policyAgentId !== agentId) {
-      return; // Not owned by this agent
+    if (!isPrivileged && agentId && (!policyAgentId || !authorizedAgentIds.includes(policyAgentId))) {
+      return; // Not owned by an authorized agent
     }
 
     const normPol = (p.policy_number || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();

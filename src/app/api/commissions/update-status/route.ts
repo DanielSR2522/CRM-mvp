@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveAuthenticatedAgent } from '@/lib/marketing/auth-guard';
-import { updateCommissionLedgerRecord } from '@/lib/commissions/commission-service';
+import { getPcSharedAgentIds, updateCommissionLedgerRecord } from '@/lib/commissions/commission-service';
 import { LedgerStatus } from '@/types/commissions';
 
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
@@ -36,8 +36,12 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
 
       if (existingPayment) {
-        const isOwner = existingPayment.agent_id === authAgent.agentId || existingPayment.created_by === authAgent.agentId;
-        if (!isOwner) {
+        const authorizedAgentIds = await getPcSharedAgentIds(authAgent.agentId, admin);
+        const isAuthorized =
+          authorizedAgentIds.includes(existingPayment.agent_id) ||
+          (existingPayment.created_by && authorizedAgentIds.includes(existingPayment.created_by));
+
+        if (!isAuthorized) {
           return NextResponse.json({ error: '403 Forbidden: You are not authorized to modify this commission record.' }, { status: 403 });
         }
       }
