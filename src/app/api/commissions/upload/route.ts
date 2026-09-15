@@ -4,6 +4,9 @@ import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 import { extractCommissionDocument } from '@/lib/commissions/extraction-service';
 import { matchExtractedRowsToCRM } from '@/lib/commissions/matching-service';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
   console.log('[Commission Upload API] Request received');
   try {

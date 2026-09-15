@@ -1,4 +1,3 @@
-import * as pdfParseModule from 'pdf-parse';
 import { createWorker, PSM } from 'tesseract.js';
 import path from 'path';
 import sharp from 'sharp';
@@ -371,10 +370,23 @@ export async function extractCommissionDocument(
 
   if (isPdf) {
     try {
-      type PdfParseFn = (b: Buffer) => Promise<PdfParseResult>;
-      const parseFn: PdfParseFn = typeof pdfParseModule === 'function' ? (pdfParseModule as unknown as PdfParseFn) : ((pdfParseModule as unknown as { default: PdfParseFn }).default);
-      const pdfData = await withTimeout(parseFn(fileBuffer), 10000, 'PDF text extraction timed out after 10s.');
-      rawText = (pdfData?.text || '').trim();
+      const pdfParseModule = await import('pdf-parse');
+      if (typeof (pdfParseModule as any).PDFParse === 'function') {
+        const parser = new (pdfParseModule as any).PDFParse({ data: fileBuffer });
+        const textResult = (await withTimeout(parser.getText(), 10000, 'PDF text extraction timed out after 10s.')) as PdfParseResult;
+        rawText = (textResult?.text || '').trim();
+      } else {
+        type PdfParseFn = (b: Buffer) => Promise<PdfParseResult>;
+        const parseFn: PdfParseFn = (
+          typeof pdfParseModule === 'function'
+            ? pdfParseModule
+            : (pdfParseModule as unknown as { default: PdfParseFn }).default
+        ) as unknown as PdfParseFn;
+        if (typeof parseFn === 'function') {
+          const pdfData = await withTimeout(parseFn(fileBuffer), 10000, 'PDF text extraction timed out after 10s.');
+          rawText = (pdfData?.text || '').trim();
+        }
+      }
     } catch (pdfErr: unknown) {
       const msg = pdfErr instanceof Error ? pdfErr.message : String(pdfErr);
       console.error('[OCR Fallback PDF Error]:', pdfErr);
