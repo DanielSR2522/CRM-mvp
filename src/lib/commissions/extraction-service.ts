@@ -204,6 +204,30 @@ export interface TokenBbox {
 }
 
 /**
+ * Resolves the absolute disk path to the Tesseract worker script at runtime.
+ * Prevents Next.js / Turbopack build-time path rewriting from introducing invalid /ROOT paths in Vercel.
+ */
+function getTesseractWorkerPath(): string {
+  try {
+    const resolvedPath = require.resolve('tesseract.js/src/worker-script/node/index.js');
+    console.log(`[Tesseract Worker Path] Resolved via require.resolve: ${resolvedPath}`);
+    return resolvedPath;
+  } catch {
+    try {
+      const pkgPath = require.resolve('tesseract.js/package.json');
+      const pkgDir = path.dirname(pkgPath);
+      const fallbackPath = path.join(pkgDir, 'src', 'worker-script', 'node', 'index.js');
+      console.log(`[Tesseract Worker Path] Resolved via package.json: ${fallbackPath}`);
+      return fallbackPath;
+    } catch {
+      const cwdPath = path.join(process.cwd(), 'node_modules', 'tesseract.js', 'src', 'worker-script', 'node', 'index.js');
+      console.log(`[Tesseract Worker Path] Resolved via cwd fallback: ${cwdPath}`);
+      return cwdPath;
+    }
+  }
+}
+
+/**
  * Focused Second OCR Pass on Member ID Region/Cell
  * Upscales the region significantly with Sharp, enhances contrast/sharpness,
  * and recognizes using Tesseract token mode with alphanumeric character whitelist.
@@ -234,7 +258,8 @@ export async function performFocusedMemberIdOcr(
       .normalize()
       .toBuffer();
 
-    const worker = await createWorker('eng', 1);
+    const workerPath = getTesseractWorkerPath();
+    const worker = await createWorker('eng', 1, { workerPath });
 
     await worker.setParameters({
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-',
@@ -274,9 +299,10 @@ interface TesseractRecognizeData {
 
 async function runOcrOnBuffer(buffer: Buffer): Promise<{ rawText: string; words: Array<{ text: string; bbox: TokenBbox }> }> {
   console.log('[OCR Fallback] Started');
-  console.log('[OCR Fallback] Initializing Tesseract worker...');
+  const workerPath = getTesseractWorkerPath();
+  console.log(`[OCR Fallback] Initializing Tesseract worker (workerPath: ${workerPath})...`);
 
-  const worker = await createWorker('eng', 1);
+  const worker = await createWorker('eng', 1, { workerPath });
   console.log('[OCR Fallback] Worker ready');
 
   console.log('[OCR Fallback] Recognizing buffer image text with bounding boxes...');
