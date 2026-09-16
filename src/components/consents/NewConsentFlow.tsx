@@ -159,6 +159,10 @@ export default function NewConsentFlow({
   useEffect(() => {
     let cancelled = false;
 
+    // Immediately reset policy selection and list when client changes
+    setPolicyId('');
+    setPolicies([]);
+
     (async () => {
       setOptionsLoading(true);
       setOptionsError(null);
@@ -294,6 +298,14 @@ export default function NewConsentFlow({
   // Run Merge Document
   const runMerge = useCallback(async () => {
     if (!template) return;
+
+    if (policyId) {
+      const matched = policies.find((p) => p.id === policyId);
+      if (!matched) {
+        setMergeError('The selected policy does not belong to the selected client.');
+        return;
+      }
+    }
 
     setMerging(true);
     setMergeError(null);

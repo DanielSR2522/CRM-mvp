@@ -433,10 +433,13 @@ export async function createConsentDraft(input: CreateDraftInput): Promise<Creat
       supabase.from('health_policies').select('id').eq('id', input.policyId).eq('client_id', input.clientId).maybeSingle(),
       supabase.from('life_policies').select('id').eq('id', input.policyId).eq('client_id', input.clientId).maybeSingle(),
     ]);
-    if (pcCheck.data || hpCheck.data || lpCheck.data) {
+    if (!pcCheck.data && !hpCheck.data && !lpCheck.data) {
+      throw new RequestServiceError('The selected policy does not belong to the selected client.');
+    }
+    if (pcCheck.data) {
       validatedPolicyId = input.policyId;
     } else {
-      validatedPolicyId = null; // General consent / foreign policy -> FORCE NULL!
+      validatedPolicyId = null;
     }
   }
 
@@ -607,7 +610,23 @@ export async function updateConsentDraft(input: UpdateDraftInput): Promise<void>
     if (!/^[a-f0-9]{64}$/.test(input.regenerated.originalDocumentHash)) {
       throw new RequestServiceError('Internal error: the document hash is malformed.');
     }
-    patch.policy_id = input.regenerated.policyId;
+    let validatedPolicyId: string | null = null;
+    if (input.regenerated.policyId) {
+      const [pcCheck, hpCheck, lpCheck] = await Promise.all([
+        supabase.from('policies').select('id').eq('id', input.regenerated.policyId).eq('client_id', existing.client_id).maybeSingle(),
+        supabase.from('health_policies').select('id').eq('id', input.regenerated.policyId).eq('client_id', existing.client_id).maybeSingle(),
+        supabase.from('life_policies').select('id').eq('id', input.regenerated.policyId).eq('client_id', existing.client_id).maybeSingle(),
+      ]);
+      if (!pcCheck.data && !hpCheck.data && !lpCheck.data) {
+        throw new RequestServiceError('The selected policy does not belong to the selected client.');
+      }
+      if (pcCheck.data) {
+        validatedPolicyId = input.regenerated.policyId;
+      } else {
+        validatedPolicyId = null;
+      }
+    }
+    patch.policy_id = validatedPolicyId;
     patch.rendered_content = input.regenerated.renderedContent;
     patch.merge_data_snapshot = input.regenerated.mergeSnapshot;
     patch.original_document_hash = input.regenerated.originalDocumentHash;
