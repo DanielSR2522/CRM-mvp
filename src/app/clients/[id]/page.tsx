@@ -38,6 +38,8 @@ import { formatEIN } from '@/lib/formatters/ein';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 import { deleteClientSecure, getClientDeletionSummaryAction, type ClientDeletionSummary } from '@/app/actions/deleteClientAction';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
+import TicketFormModal from '@/components/tickets/TicketFormModal';
+import type { TicketPriority, TicketStatus, PolicySource } from '@/components/tickets/types';
 
 declare global {
   interface Window {
@@ -205,15 +207,15 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   // Section mapping & URL-driven tab state
   const rawSection = searchParams.get('section') || searchParams.get('tab');
-  const validSections = ['overview', 'personal-information', 'personal-info', 'policies', 'documents', 'notes', 'consents', 'timeline', 'health', 'life', 'medicare', 'supplemental'];
+  const validSections = ['overview', 'personal-information', 'personal-info', 'policies', 'documents', 'notes', 'consents', 'timeline', 'health', 'life', 'medicare', 'supplemental', 'tickets'];
   const normalizedSection = validSections.includes(rawSection || '')
     ? (rawSection === 'personal-info' ? 'personal-information' : rawSection!)
     : 'overview';
 
-  const activeTab = (normalizedSection === 'personal-information' ? 'personal-info' : normalizedSection) as 'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health' | 'life' | 'medicare' | 'supplemental';
+  const activeTab = (normalizedSection === 'personal-information' ? 'personal-info' : normalizedSection) as 'overview' | 'personal-info' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'health' | 'life' | 'medicare' | 'supplemental' | 'tickets';
 
   const isModuleWorkspace = activeTab === 'health' || activeTab === 'medicare' || activeTab === 'supplemental' || activeTab === 'life';
-  const isCoreWorkspace = activeTab === 'overview' || activeTab === 'personal-info' || activeTab === 'documents' || activeTab === 'notes' || activeTab === 'consents' || activeTab === 'timeline' || activeTab === 'policies';
+  const isCoreWorkspace = activeTab === 'overview' || activeTab === 'personal-info' || activeTab === 'documents' || activeTab === 'notes' || activeTab === 'consents' || activeTab === 'timeline' || activeTab === 'policies' || activeTab === 'tickets';
   const isModernClientWorkspace = isModuleWorkspace || isCoreWorkspace;
   const isOperationalWorkspace = isModuleWorkspace;
 
@@ -299,6 +301,79 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('Agent');
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [agentProfile, setAgentProfile] = useState<AgentProfile | null>(null);
+
+  // Client Related Tickets State
+  const [clientTickets, setClientTickets] = useState<any[]>([]);
+  const [loadingClientTickets, setLoadingClientTickets] = useState<boolean>(false);
+  const [clientTicketsError, setClientTicketsError] = useState<string | null>(null);
+  const [isClientTicketModalOpen, setIsClientTicketModalOpen] = useState<boolean>(false);
+  const [clientTicketModalPolicyId, setClientTicketModalPolicyId] = useState<string | null>(null);
+  const [clientTicketModalPolicySource, setClientTicketModalPolicySource] = useState<PolicySource | null>(null);
+
+  const fetchClientTickets = useCallback(async () => {
+    if (!clientId || !isValidUuid(clientId)) return;
+    setLoadingClientTickets(true);
+    setClientTicketsError(null);
+    try {
+      const res = await fetch(`/api/tickets?clientId=${clientId}`, { cache: 'no-store' });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setClientTicketsError(errData.error || 'Error al cargar tickets del cliente.');
+        return;
+      }
+      const data = await res.json();
+      if (data.success && Array.isArray(data.tickets)) {
+        setClientTickets(data.tickets);
+      } else {
+        setClientTicketsError(data.error || 'No se pudieron obtener los tickets.');
+      }
+    } catch (err: any) {
+      setClientTicketsError('Error de red al consultar los tickets.');
+    } finally {
+      setLoadingClientTickets(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (clientId && isValidUuid(clientId)) {
+      fetchClientTickets();
+    }
+  }, [clientId, fetchClientTickets]);
+
+  const handleCreateClientTicket = async (newTicketData: {
+    title: string;
+    description?: string;
+    priority: TicketPriority;
+    status: TicketStatus;
+    assignedTo?: string | null;
+    dueAt?: string | null;
+    tags: string[];
+    clientId?: string | null;
+    policyId?: string | null;
+    policySource?: PolicySource | null;
+  }) => {
+    const res = await fetch('/api/tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...newTicketData,
+        clientId: clientId,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Error al crear el ticket para el cliente.');
+    }
+
+    await fetchClientTickets();
+  };
+
+  const openCreateTicketModal = (policyId?: string | null, policySource?: PolicySource | null) => {
+    setClientTicketModalPolicyId(policyId || null);
+    setClientTicketModalPolicySource(policySource || null);
+    setIsClientTicketModalOpen(true);
+  };
 
   // Linked Company Policies & Relationship state
   const [linkedCompanyPolicies, setLinkedCompanyPolicies] = useState<any[]>([]);
@@ -3467,7 +3542,14 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                 </div>
 
                                 {/* Actions */}
-                                <div className="flex items-center gap-3 justify-end flex-shrink-0">
+                                <div className="flex items-center gap-2 justify-end flex-shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => openCreateTicketModal(card.id, (card as any).source || (card.targetTab === 'policies' ? 'pc' : card.targetTab as any))}
+                                    className="text-xs font-bold text-slate-700 hover:text-indigo-600 bg-white border border-slate-200 hover:border-indigo-200 px-3.5 py-2 rounded-xl shadow-xs transition-all flex items-center gap-1"
+                                  >
+                                    + Ticket
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -5091,11 +5173,141 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                   onPolicyDeleted={() => fetchOverviewPolicies()}
                 />
               )}
+
+              {activeTab === 'tickets' && client && (
+                <div className="w-full space-y-6 font-sans bg-white p-6 rounded-xl border border-slate-200/80 shadow-2xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                    <div>
+                      <h3 className="text-lg font-extrabold text-slate-900">Tickets Relacionados</h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Historial y solicitudes operativas registradas para este cliente
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openCreateTicketModal()}
+                      className="crm-btn-primary text-xs px-4 py-2 flex items-center gap-1.5 shrink-0"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+                      </svg>
+                      Crear Ticket
+                    </button>
+                  </div>
+
+                  {loadingClientTickets ? (
+                    <div className="flex justify-center items-center py-16 bg-white">
+                      <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    </div>
+                  ) : clientTicketsError ? (
+                    <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-6 text-center text-xs text-rose-700">
+                      {clientTicketsError}
+                    </div>
+                  ) : clientTickets.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-12 text-center">
+                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 mb-3">
+                        <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                        </svg>
+                      </div>
+                      <p className="text-xs font-semibold text-slate-700">No hay tickets relacionados con este cliente.</p>
+                      <p className="text-[11px] text-slate-400 mt-1">Cree una nueva solicitud o tarea operativa para hacerle seguimiento.</p>
+                      <button
+                        type="button"
+                        onClick={() => openCreateTicketModal()}
+                        className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors shadow-xs"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+                        </svg>
+                        Crear Ticket
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                            <th className="py-3 px-4">Ticket #</th>
+                            <th className="py-3 px-4">Título</th>
+                            <th className="py-3 px-4">Estado</th>
+                            <th className="py-3 px-4">Prioridad</th>
+                            <th className="py-3 px-4">Asignado a</th>
+                            <th className="py-3 px-4">Vencimiento</th>
+                            <th className="py-3 px-4">Creación</th>
+                            <th className="py-3 px-4 text-right">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-150 text-xs">
+                          {clientTickets.map((ticket: any) => (
+                            <tr key={ticket.id} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="py-3 px-4 font-mono font-bold text-indigo-600">
+                                {ticket.code || `#${ticket.number || '---'}`}
+                              </td>
+                              <td className="py-3 px-4 font-semibold text-slate-900">
+                                {ticket.title}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-100 text-slate-700 border border-slate-200">
+                                  {ticket.status === 'new' ? 'Nuevo' : ticket.status === 'in_progress' ? 'En Progreso' : ticket.status === 'waiting_client' ? 'Esp. Cliente' : ticket.status === 'waiting_carrier' ? 'Esp. Aseguradora' : ticket.status === 'completed' || ticket.status === 'closed' || ticket.status === 'resolved' ? 'Completado' : ticket.status}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${ticket.priority === 'urgent' ? 'bg-rose-50 text-rose-700 border border-rose-100' : ticket.priority === 'high' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 'bg-blue-50 text-blue-700 border border-blue-100'}`}>
+                                  {ticket.priority === 'low' ? 'Baja' : ticket.priority === 'high' ? 'Alta' : ticket.priority === 'urgent' ? 'Urgente' : 'Media'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 font-medium text-slate-700">
+                                {ticket.assignedToName || 'Sin Asignar'}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600">
+                                {ticket.dueAt ? isoDateToMMDDYYYY(ticket.dueAt) : '---'}
+                              </td>
+                              <td className="py-3 px-4 text-slate-500">
+                                {ticket.createdAt ? isoDateToMMDDYYYY(ticket.createdAt) : '---'}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => router.push(`/tickets?id=${ticket.id}&fromClient=${clientId}`)}
+                                  className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100/80 px-3 py-1 rounded-lg transition-colors"
+                                >
+                                  Abrir Ticket
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                                  </svg>
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
     </CrmPageContainer>
+
+      {client && (
+        <TicketFormModal
+          isOpen={isClientTicketModalOpen}
+          onClose={() => setIsClientTicketModalOpen(false)}
+          onCreateTicket={handleCreateClientTicket}
+          appUsers={[]}
+          initialClientId={client.id}
+          initialClientName={client.full_name}
+          initialPolicyId={clientTicketModalPolicyId}
+          initialPolicySource={clientTicketModalPolicySource}
+          isClientLocked={true}
+        />
+      )}
 
       {/* POLICY MODALS REMOVED */}
 

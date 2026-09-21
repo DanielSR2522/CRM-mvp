@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { AMANDA_UUID, LAURA_UUID } from '@/lib/auth/agentDisplay';
 
 export interface ClientAccessResult {
   authorized: boolean;
@@ -8,7 +9,8 @@ export interface ClientAccessResult {
     full_name: string | null;
     email: string | null;
     phone: string | null;
-    city: string | null;
+    address: string | null;
+    city?: string | null;
     agent_id: string | null;
   };
 }
@@ -16,7 +18,7 @@ export interface ClientAccessResult {
 /**
  * Validates whether actorWinterfellProfileId is authorized to access clientId
  * according to Winterfell's canonical rules:
- * 1. Admin profile role
+ * 1. Admin profile role or Agency Owner UUID (Amanda/Laura)
  * 2. Directly assigned agent (clients.agent_id === actorWinterfellProfileId)
  * 3. Shared agent access via public.agent_shared_access pair link
  */
@@ -25,21 +27,25 @@ export async function authorizeClientAccess(
   actorWinterfellProfileId: string,
   clientId: string
 ): Promise<ClientAccessResult> {
-  // 1. Verify actor profile
+  // 1. Verify actor profile or agency owner/admin status
+  const isOwner = actorWinterfellProfileId === AMANDA_UUID || actorWinterfellProfileId === LAURA_UUID;
+
   const { data: profile } = await adminDb
     .from('profiles')
     .select('id, role')
     .eq('id', actorWinterfellProfileId)
     .maybeSingle();
 
-  if (!profile) {
+  if (!isOwner && !profile) {
     return { authorized: false, reason: 'actor_not_found' };
   }
 
-  // 2. Fetch client record
+  const isAdmin = isOwner || profile?.role === 'admin';
+
+  // 2. Fetch client record using valid schema columns (address instead of non-existent city)
   const { data: client, error: clientErr } = await adminDb
     .from('clients')
-    .select('id, full_name, email, phone, city, agent_id')
+    .select('id, full_name, email, phone, address, agent_id')
     .eq('id', clientId)
     .maybeSingle();
 
@@ -48,7 +54,7 @@ export async function authorizeClientAccess(
   }
 
   // 3. Admin access
-  if (profile.role === 'admin') {
+  if (isAdmin) {
     return { authorized: true, client };
   }
 

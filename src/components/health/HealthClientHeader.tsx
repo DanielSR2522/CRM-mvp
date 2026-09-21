@@ -16,7 +16,7 @@ interface HealthClientHeaderProps {
   onDeleteProfile?: () => void;
   onPhotoUpdated?: (newPhotoUrl: string | null) => void;
   isCompanyClient?: boolean;
-  activeSection?: 'overview' | 'personal-information' | 'health' | 'medicare' | 'supplemental' | 'life' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline';
+  activeSection?: 'overview' | 'personal-information' | 'health' | 'medicare' | 'supplemental' | 'life' | 'policies' | 'documents' | 'notes' | 'consents' | 'timeline' | 'tickets';
   hideNavStrip?: boolean;
 }
 
@@ -60,6 +60,7 @@ export function ClientProfileNavTabs({
       {navTab('Notes', 'notes', activeSection === 'notes')}
       {navTab('Consents', 'consents', activeSection === 'consents')}
       {navTab('Timeline', 'timeline', activeSection === 'timeline')}
+      {navTab('Tickets', 'tickets', activeSection === 'tickets')}
     </div>
   );
 }

@@ -51,6 +51,7 @@ interface AgentProfileForm {
 
   preferred_contact_method: string;
   secondary_phone: string;
+  whatsapp_phone: string;
 
   timezone: string;
   language: string;
@@ -155,6 +156,7 @@ export default function AgentInformationPage() {
     country: 'United States',
     preferred_contact_method: 'Email',
     secondary_phone: '',
+    whatsapp_phone: '',
     timezone: 'America/New_York',
     language: 'English',
   });
@@ -224,6 +226,7 @@ export default function AgentInformationPage() {
             country: data.country || 'United States',
             preferred_contact_method: data.preferred_contact_method || 'Email',
             secondary_phone: data.secondary_phone || '',
+            whatsapp_phone: data.whatsapp_phone || '',
             timezone: data.timezone || 'America/New_York',
             language: data.language || 'English',
           });
@@ -608,6 +611,30 @@ export default function AgentInformationPage() {
     }
   };
 
+  // WHATSAPP FOR TICKETS SAVE & SYNC
+  const handleSaveWhatsAppPhone = async (val: string) => {
+    setErrorMsg(null);
+    try {
+      const res = await fetch('/api/profile/whatsapp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ whatsappPhone: val }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'No se pudo actualizar el número de WhatsApp.');
+      }
+
+      const data = await res.json();
+      setForm(prev => ({ ...prev, whatsapp_phone: data.whatsappPhone || '' }));
+      flashSuccess('Número de WhatsApp para Tickets actualizado correctamente.');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Error al guardar el número de WhatsApp.');
+      throw err;
+    }
+  };
+
   return (
     <DashboardLayout>
       <CrmPageContainer className="pb-10">
@@ -791,6 +818,20 @@ export default function AgentInformationPage() {
                       label="Secondary Phone"
                       value={form.secondary_phone}
                       onSave={val => saveProfileField('secondary_phone', val)}
+                    />
+                  </div>
+
+                  <div className="pt-3 border-t border-[#E8ECF2] space-y-1">
+                    <div className="flex flex-col mb-1">
+                      <span className="text-xs font-semibold text-[#172033]">WhatsApp para Tickets</span>
+                      <p className="text-[11px] text-[#556176]">
+                        Este número se utilizará para identificarte cuando uses Tickets por WhatsApp.
+                      </p>
+                    </div>
+                    <InlineEditablePhone
+                      label=""
+                      value={form.whatsapp_phone}
+                      onSave={val => handleSaveWhatsAppPhone(val)}
                     />
                   </div>
                 </div>

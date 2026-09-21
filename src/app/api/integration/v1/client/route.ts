@@ -61,7 +61,7 @@ export async function POST(request: Request) {
         name: client.full_name ? client.full_name.trim() : '',
         phone_last4: phoneLast4,
         email_masked: maskEmail(client.email),
-        city: client.city ? client.city.trim() : '',
+        city: client.address ? client.address.trim() : (client.city || ''),
         assigned_agent_ids: client.agent_id ? [client.agent_id] : [],
       },
     });
