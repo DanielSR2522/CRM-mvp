@@ -32,7 +32,7 @@ export async function authorizeClientAccess(
 
   const { data: profile } = await adminDb
     .from('profiles')
-    .select('id, role')
+    .select('id')
     .eq('id', actorWinterfellProfileId)
     .maybeSingle();
 
@@ -40,7 +40,7 @@ export async function authorizeClientAccess(
     return { authorized: false, reason: 'actor_not_found' };
   }
 
-  const isAdmin = isOwner || profile?.role === 'admin';
+  const isAdmin = isOwner;
 
   // 2. Fetch client record using valid schema columns (address instead of non-existent city)
   const { data: client, error: clientErr } = await adminDb

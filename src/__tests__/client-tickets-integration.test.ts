@@ -97,7 +97,7 @@ test("Phase 1 Auth Rule B: Shared client through canonical agent_shared_access i
 });
 
 test("Phase 1 Auth Rule C: Admin access is ALLOWED", async () => {
-  const res = await authorizeClientAccess(mockDb, "admin-uuid", "client-100-owner");
+  const res = await authorizeClientAccess(mockDb, "b8c07e53-9f4e-4093-9959-d7d062d4d89f", "client-100-owner");
   assert.equal(res.authorized, true);
 });
 

@@ -46,9 +46,9 @@ export async function GET(request: Request) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, email, full_name, role')
+      .select('id, email, full_name')
       .eq('id', user.id)
-      .maybeSingle();
+      .maybeSingle<{ id: string; email: string; full_name: string; role?: string }>();
 
     const secret = process.env.WINTERFELL_INTEGRATION_SECRET || '';
     const lanzaUrl = `${getLanzaBaseUrl()}/api/integration/v1/tickets`;
@@ -143,9 +143,9 @@ export async function POST(request: Request) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, email, full_name, role')
+      .select('id, email, full_name')
       .eq('id', user.id)
-      .maybeSingle();
+      .maybeSingle<{ id: string; email: string; full_name: string; role?: string }>();
 
     const body = await request.json();
     const action = body.action || 'create';
