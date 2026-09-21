@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
+import { authorizeClientAccess } from '@/lib/integration/authorization';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,17 +45,6 @@ export async function POST(request: Request) {
     }
 
     const adminDb = getSupabaseAdmin();
-
-    // Check actor profile
-    const { data: profile } = await adminDb
-      .from('profiles')
-      .select('id, role')
-      .eq('id', actorWinterfellProfileId)
-      .maybeSingle();
-
-    if (!profile) {
-      return NextResponse.json({ error: 'Actor profile not found.' }, { status: 403 });
-    }
 
     let policyRecord: { id: string; client_id: string; carrier?: string; policy_number?: string } | null = null;
 
@@ -134,17 +124,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Policy not found.' }, { status: 404 });
     }
 
-    // Authorization check: fetch client ownership
-    const { data: client } = await adminDb
-      .from('clients')
-      .select('id, agent_id')
-      .eq('id', policyRecord.client_id)
-      .maybeSingle();
+    // Authorize client access (admin, assigned agent, or shared agent)
+    const authResult = await authorizeClientAccess(adminDb, actorWinterfellProfileId, policyRecord.client_id);
 
-    const isAdmin = profile.role === 'admin';
-    const isAssignedAgent = client ? client.agent_id === actorWinterfellProfileId : false;
-
-    if (!isAdmin && !isAssignedAgent) {
+    if (!authResult.authorized) {
       return NextResponse.json({ error: 'Actor is not authorized to access this policy.' }, { status: 403 });
     }
 
