@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { POST as clientPost } from "../app/api/integration/v1/client/route";
 import { POST as policyPost } from "../app/api/integration/v1/policy/route";
 import { authorizeClientAccess } from "../lib/integration/authorization";
+import { AMANDA_UUID } from "../lib/auth/agentDisplay";
 
 test("Winterfell Integration API - Client Route rejects unauthorized secret", async () => {
   process.env.WINTERFELL_INTEGRATION_SECRET = "secret-12345678901234567890";
@@ -147,7 +148,7 @@ test("Winterfell Integration Authorization - Assigned agent, Admin, Shared agent
   assert.equal(assignedRes.client?.id, "client-uuid-1");
 
   // 2. Admin test -> allowed
-  const adminRes = await authorizeClientAccess(mockDb, "admin-uuid", "client-uuid-1");
+  const adminRes = await authorizeClientAccess(mockDb, AMANDA_UUID, "client-uuid-1");
   assert.equal(adminRes.authorized, true);
 
   // 3. Shared agent test -> allowed
