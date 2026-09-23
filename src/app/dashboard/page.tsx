@@ -1,47 +1,35 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import Link from 'next/link';
 import DashboardLayout from '@/components/DashboardLayout';
 import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import PolicyQuickViewDrawer, { PolicyModuleType } from '@/components/dashboard/PolicyQuickViewDrawer';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate } from '@/utils/dateUtils';
-import { formatDateMMDDYYYY } from '@/lib/formatters/date';
+import DashboardHeader, { DashboardMode } from '@/components/dashboard/DashboardHeader';
+import NonPcDashboard from '@/components/dashboard/NonPcDashboard';
+import PcDashboard, { PcPolicyRow } from '@/components/dashboard/PcDashboard';
+import { DashboardAppointment } from '@/components/dashboard/TodaySchedulePanel';
+import { DashboardTicket } from '@/components/dashboard/MyTicketsPanel';
+import { DashboardOpportunity } from '@/components/dashboard/OpportunitiesPanel';
+import { DashboardActivityEvent } from '@/components/dashboard/RecentActivityPanel';
+import { PolicyMixItem } from '@/components/dashboard/PolicyMixPanel';
+import { TopCarrierItem } from '@/components/dashboard/TopCarriersPanel';
+import { MonthlyCommissionBar } from '@/components/dashboard/CommissionsChartPanel';
+import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 
 interface UserProfile {
   name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
 }
 
 interface ClientRow {
   id: string;
   full_name: string;
-}
-
-export interface PcDashboardPolicy {
-  id: string;
-  client_id: string;
-  module_type: 'property_casualty';
-  policy_type: string;
-  policy_number: string | null;
-  company_name: string | null;
-  effective_date: string | null;
-  expiration_date: string | null;
-  premium: number | null;
-  status: string;
-}
-
-interface LeadRow {
-  id: string;
-  status: string;
-  next_follow_up_at: string | null;
-}
-
-interface AppointmentRow {
-  id: string;
-  starts_at: string;
-  status: string;
+  agent_id: string | null;
+  date_of_birth?: string | null;
 }
 
 export type SortableColumn =
@@ -58,28 +46,90 @@ export type SortableColumn =
 export default function DashboardPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
+  // Business Lines Eligibility Gate
+  const { isLineEnabled, loading: businessLinesLoading } = useBusinessLines();
+  const isPcEnabled = isLineEnabled('property_casualty');
+
+  // DASHBOARD MODE PERSISTENCE ('non_pc' | 'pc')
+  const [dashboardMode, setDashboardMode] = useState<DashboardMode>('non_pc');
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('THIS_MONTH');
+
+  // Load persisted dashboard mode from localStorage / URL query on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryMode = urlParams.get('mode');
+      if (queryMode === 'pc' || queryMode === 'non_pc') {
+        setDashboardMode(queryMode as DashboardMode);
+        localStorage.setItem('smartrack_dashboard_mode', queryMode);
+        return;
+      }
+
+      const savedMode = localStorage.getItem('smartrack_dashboard_mode');
+      if (savedMode === 'pc' || savedMode === 'non_pc') {
+        setDashboardMode(savedMode as DashboardMode);
+      }
+    }
+  }, []);
+
+  // Enforce fallback / protection when Property & Casualty is disabled
+  useEffect(() => {
+    if (!businessLinesLoading && !isPcEnabled) {
+      if (dashboardMode === 'pc') {
+        setDashboardMode('non_pc');
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('smartrack_dashboard_mode', 'non_pc');
+          const url = new URL(window.location.href);
+          if (url.searchParams.get('mode') === 'pc') {
+            url.searchParams.set('mode', 'non_pc');
+            window.history.replaceState({}, '', url.toString());
+          }
+        }
+      }
+    }
+  }, [businessLinesLoading, isPcEnabled, dashboardMode]);
+
+  const handleModeChange = useCallback((newMode: DashboardMode) => {
+    if (newMode === 'pc' && !isPcEnabled) {
+      return;
+    }
+    setDashboardMode(newMode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('smartrack_dashboard_mode', newMode);
+      const url = new URL(window.location.href);
+      url.searchParams.set('mode', newMode);
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [isPcEnabled]);
+
   // Data States
   const [clients, setClients] = useState<ClientRow[]>([]);
-  const [policies, setPolicies] = useState<PcDashboardPolicy[]>([]);
-  const [leads, setLeads] = useState<LeadRow[]>([]);
-  const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
+  const [pcPolicies, setPcPolicies] = useState<any[]>([]);
+  const [healthPolicies, setHealthPolicies] = useState<any[]>([]);
+  const [medicarePolicies, setMedicarePolicies] = useState<any[]>([]);
+  const [supplementalPolicies, setSupplementalPolicies] = useState<any[]>([]);
+  const [lifePolicies, setLifePolicies] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<any[]>([]);
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [activityEvents, setActivityEvents] = useState<any[]>([]);
+  const [pcCommissions, setPcCommissions] = useState<any[]>([]);
 
-  // Section Loading & Error States
-  const [clientsLoading, setClientsLoading] = useState(true);
-  const [clientsError, setClientsError] = useState<string | null>(null);
+  // Loading & Error States
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Compact Toolbar Filter States
+  // P&C Table Toolbar Filter States
   const [searchQuery, setSearchQuery] = useState('');
   const [lineFilter, setLineFilter] = useState('ALL');
   const [companyFilter, setCompanyFilter] = useState('ALL');
   const [daysFilter, setDaysFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
 
-  // Column Header Sorting States (Default: Expiration Date Soonest First)
+  // Column Header Sorting States
   const [sortColumn, setSortColumn] = useState<SortableColumn>('expiration_date');
   const [sortAscending, setSortAscending] = useState(true);
 
-  // Policy Quick View Drawer State
+  // Quick View Drawer State
   const [quickViewDrawer, setQuickViewDrawer] = useState<{
     isOpen: boolean;
     policyId: string | null;
@@ -112,7 +162,7 @@ export default function DashboardPage() {
     setQuickViewDrawer((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
-  // Client Map for quick lookup
+  // Client Map
   const clientMap = useMemo(() => {
     const map: Record<string, string> = {};
     clients.forEach((c) => {
@@ -121,179 +171,409 @@ export default function DashboardPage() {
     return map;
   }, [clients]);
 
-  // Load User Profile
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const { data } = await supabase
-            .from('profiles')
-            .select('name, email')
-            .eq('id', session.user.id)
-            .single();
-
-          setProfile({
-            name: data?.name || null,
-            email: session.user.email || 'User',
-          });
-        }
-      } catch (err) {
-        console.error('Error loading profile:', err);
-      }
-    };
-    fetchProfile();
-  }, []);
-
-  // Query 1: P&C Clients & P&C Policies Only
-  const loadClientsAndPolicies = useCallback(async () => {
+  // Load Authenticated Profile & Comprehensive CRM Data
+  const loadDashboardData = useCallback(async () => {
     try {
-      setClientsLoading(true);
-      setClientsError(null);
+      setLoading(true);
+      setError(null);
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
 
-      const { data: clientsData, error: clientsErr } = await supabase
-        .from('clients')
-        .select('id, full_name, agent_id, policies(id)');
+      const userId = session.user.id;
 
-      if (clientsErr) throw clientsErr;
+      // 1. Fetch Profile
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('name, first_name, last_name, email')
+        .eq('id', userId)
+        .maybeSingle();
 
-      const pcEligibleClients = (clientsData || []).filter((c: any) => {
-        if (c.agent_id === user.id) return true;
-        return Array.isArray(c.policies) && c.policies.length > 0;
+      setProfile({
+        name: profileData?.name || null,
+        first_name: profileData?.first_name || null,
+        last_name: profileData?.last_name || null,
+        email: session.user.email || 'Agent',
       });
 
-      setClients(pcEligibleClients);
+      // 2. Fetch Clients
+      const { data: clientsData } = await supabase
+        .from('clients')
+        .select('id, full_name, agent_id, date_of_birth');
 
-      if (pcEligibleClients && pcEligibleClients.length > 0) {
-        const clientIds = pcEligibleClients.map((c) => c.id);
+      setClients(clientsData || []);
 
-        // Fetch P&C Policies ONLY (excluding Supplemental, Health, Life)
-        const { data: pcPoliciesData, error: polErr } = await supabase
+      const clientIds = (clientsData || []).map((c) => c.id);
+
+      // 3. Parallel Queries for All Policy Books & Operations
+      const [
+        pcRes,
+        healthRes,
+        medicareRes,
+        suppRes,
+        lifeRes,
+        apptRes,
+        actRes,
+        commRes,
+      ] = await Promise.all([
+        // P&C Policies (policies table excluding health, life, supplemental)
+        supabase
           .from('policies')
-          .select('id, client_id, policy_type, policy_number, company_name, writing_company, effective_date, expiration_date, premium, total_premium, annual_premium, status')
-          .in('client_id', clientIds);
+          .select('id, client_id, policy_type, policy_number, company_name, writing_company, effective_date, expiration_date, premium, total_premium, annual_premium, status, created_at'),
 
-        if (polErr) throw polErr;
+        // Health Policies
+        supabase
+          .from('health_policies')
+          .select('id, client_id, company_2026, plan_name, effective_date, created_at, status, members'),
 
-        const pcOnlyList: PcDashboardPolicy[] = [];
+        // Medicare Policies
+        supabase
+          .from('medicare_policies')
+          .select('id, client_id, carrier, plan_name, policy_number, effective_date, created_at, status'),
 
-        (pcPoliciesData || []).forEach((p: any) => {
-          const pTypeLower = (p.policy_type || '').trim().toLowerCase();
-          if (pTypeLower === 'supplemental' || pTypeLower === 'health' || pTypeLower === 'life') {
-            return;
+        // Supplemental Policies
+        supabase
+          .from('supplemental_policies')
+          .select('id, client_id, carrier, policy_type, policy_number, effective_date, created_at, status'),
+
+        // Life Policies
+        supabase
+          .from('life_policies')
+          .select('id, client_id, carrier, policy_type, policy_number, effective_date, created_at, status'),
+
+        // Today's Calendar Appointments
+        supabase
+          .from('calendar_appointments')
+          .select('id, starts_at, ends_at, title, description, status, client_id, agent_id, client:clients(id, full_name)')
+          .eq('agent_id', userId)
+          .eq('status', 'scheduled')
+          .order('starts_at', { ascending: true }),
+
+        // Activity Events
+        supabase
+          .from('activity_events')
+          .select('id, client_id, policy_id, health_policy_id, actor_id, event_type, description, created_at')
+          .order('created_at', { ascending: false })
+          .limit(20),
+
+        // P&C Commission Payments
+        supabase
+          .from('pc_commission_payments')
+          .select('id, amount, payment_date, carrier, policy_number, status, agent_id'),
+      ]);
+
+      // Filter P&C Policies
+      const filteredPc = (pcRes.data || []).filter((p: any) => {
+        const pTypeLower = (p.policy_type || '').trim().toLowerCase();
+        return pTypeLower !== 'supplemental' && pTypeLower !== 'health' && pTypeLower !== 'life';
+      });
+
+      setPcPolicies(filteredPc);
+      setHealthPolicies(healthRes.data || []);
+      setMedicarePolicies(medicareRes.data || []);
+      setSupplementalPolicies(suppRes.data || []);
+      setLifePolicies(lifeRes.data || []);
+      setAppointments(apptRes.data || []);
+      setActivityEvents(actRes.data || []);
+      setPcCommissions(commRes.data || []);
+
+      // 4. Fetch Tickets via API
+      try {
+        const ticketRes = await fetch('/api/tickets', { cache: 'no-store' });
+        if (ticketRes.ok) {
+          const tData = await ticketRes.json();
+          if (tData.success && Array.isArray(tData.tickets)) {
+            setTickets(tData.tickets);
           }
-
-          pcOnlyList.push({
-            id: p.id,
-            client_id: p.client_id,
-            module_type: 'property_casualty',
-            policy_type: p.policy_type || 'P&C Policy',
-            policy_number: p.policy_number,
-            company_name: p.company_name || p.writing_company || null,
-            effective_date: p.effective_date,
-            expiration_date: p.expiration_date,
-            premium: p.premium || p.total_premium || p.annual_premium || null,
-            status: p.status || 'Active',
-          });
-        });
-
-        setPolicies(pcOnlyList);
-      } else {
-        setPolicies([]);
+        }
+      } catch (tErr) {
+        console.error('Error loading tickets for dashboard:', tErr);
       }
     } catch (err: any) {
-      console.error('Error loading clients/P&C policies:', err);
-      setClientsError(err?.message || 'Failed to load clients and P&C policies data.');
+      console.error('Error loading dashboard data:', err);
+      setError(err?.message || 'Failed to load dashboard data.');
     } finally {
-      setClientsLoading(false);
-    }
-  }, []);
-
-  // Query 2: Leads (For KPI calculation)
-  const loadLeadsData = useCallback(async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data } = await supabase
-        .from('leads')
-        .select('id, status, next_follow_up_at')
-        .eq('agent_id', user.id);
-
-      setLeads(data || []);
-    } catch (err) {
-      console.error('Error loading leads metrics:', err);
-    }
-  }, []);
-
-  // Query 3: Calendar Appointments (For KPI calculation)
-  const loadCalendarAppointments = useCallback(async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data } = await supabase
-        .from('calendar_appointments')
-        .select('id, starts_at, status')
-        .eq('agent_id', user.id);
-
-      setAppointments(data || []);
-    } catch (err) {
-      console.error('Error loading calendar appointments metrics:', err);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadClientsAndPolicies();
-    loadLeadsData();
-    loadCalendarAppointments();
-  }, [loadClientsAndPolicies, loadLeadsData, loadCalendarAppointments]);
+    loadDashboardData();
+  }, [loadDashboardData]);
 
-  // DATE HELPERS & METRIC COMPUTATIONS
+  // DATE HELPERS & METRICS CALCULATIONS
   const now = new Date();
   const todayIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().split('T')[0];
 
-  const in30Days = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30);
-  const in30DaysIso = in30Days.toISOString().split('T')[0];
+  const in7DaysMs = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+  const in30DaysIso = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30).toISOString().split('T')[0];
 
-  // KPI Metrics
-  const totalClientsCount = clients.length;
-  const activePcPolicies = useMemo(() => policies.filter((p) => p.status === 'Active'), [policies]);
-  const activePcPoliciesCount = activePcPolicies.length;
+  // NON-P&C KPI COMPUTATIONS
+  const healthCount = healthPolicies.length;
+  const healthNewThisWeek = useMemo(() => {
+    return healthPolicies.filter((p) => {
+      const d = p.created_at || p.effective_date;
+      return d && new Date(d).getTime() >= in7DaysMs;
+    }).length;
+  }, [healthPolicies, in7DaysMs]);
 
-  const pcPoliciesExpiring30Days = useMemo(() => {
+  const medicareCount = medicarePolicies.length;
+  const medicareNewThisWeek = useMemo(() => {
+    return medicarePolicies.filter((p) => {
+      const d = p.created_at || p.effective_date;
+      return d && new Date(d).getTime() >= in7DaysMs;
+    }).length;
+  }, [medicarePolicies, in7DaysMs]);
+
+  const supplementalCount = supplementalPolicies.length;
+  const supplementalNewThisWeek = useMemo(() => {
+    return supplementalPolicies.filter((p) => {
+      const d = p.created_at || p.effective_date;
+      return d && new Date(d).getTime() >= in7DaysMs;
+    }).length;
+  }, [supplementalPolicies, in7DaysMs]);
+
+  const lifeCount = lifePolicies.length;
+  const lifeNewThisWeek = useMemo(() => {
+    return lifePolicies.filter((p) => {
+      const d = p.created_at || p.effective_date;
+      return d && new Date(d).getTime() >= in7DaysMs;
+    }).length;
+  }, [lifePolicies, in7DaysMs]);
+
+  // Health Members Count: sum members count or default 1 per policy
+  const healthMembersCount = useMemo(() => {
+    return healthPolicies.reduce((acc, p) => {
+      if (Array.isArray(p.members)) return acc + p.members.length;
+      if (typeof p.members === 'number') return acc + p.members;
+      return acc + 1; // Default 1 primary member per policy
+    }, 0);
+  }, [healthPolicies]);
+
+  // NON-P&C POLICY MIX (Health 🩺, Medicare 👤, Supplemental 🛡️, Life ❤️)
+  const totalNonPcPoliciesCount = healthCount + medicareCount + supplementalCount + lifeCount;
+
+  const nonPcPolicyMixItems = useMemo((): PolicyMixItem[] => {
+    if (totalNonPcPoliciesCount === 0) return [];
+    const calcPct = (cnt: number) => Math.round((cnt / totalNonPcPoliciesCount) * 100);
+
+    return [
+      {
+        id: 'health',
+        name: 'Health',
+        count: healthCount,
+        percentage: calcPct(healthCount),
+        barColor: 'bg-[#2563EB]',
+        iconBg: 'bg-[#EFF6FF] text-[#2563EB]',
+        iconEmoji: '🩺',
+      },
+      {
+        id: 'medicare',
+        name: 'Medicare',
+        count: medicareCount,
+        percentage: calcPct(medicareCount),
+        barColor: 'bg-[#10B981]',
+        iconBg: 'bg-[#ECFDF5] text-[#10B981]',
+        iconEmoji: '👤',
+      },
+      {
+        id: 'supplemental',
+        name: 'Supplemental',
+        count: supplementalCount,
+        percentage: calcPct(supplementalCount),
+        barColor: 'bg-[#A855F7]',
+        iconBg: 'bg-[#F3E8FF] text-[#A855F7]',
+        iconEmoji: '🛡️',
+      },
+      {
+        id: 'life',
+        name: 'Life',
+        count: lifeCount,
+        percentage: calcPct(lifeCount),
+        barColor: 'bg-[#EF4444]',
+        iconBg: 'bg-[#FEF2F2] text-[#EF4444]',
+        iconEmoji: '❤️',
+      },
+    ];
+  }, [healthCount, medicareCount, supplementalCount, lifeCount, totalNonPcPoliciesCount]);
+
+  // NON-P&C TOP CARRIERS
+  const nonPcTopCarriers = useMemo((): TopCarrierItem[] => {
+    const carrierCounts = new Map<string, number>();
+
+    healthPolicies.forEach((p) => {
+      const c = (p.company_2026 || p.plan_name || 'Health Carrier').trim();
+      if (c) carrierCounts.set(c, (carrierCounts.get(c) || 0) + 1);
+    });
+    medicarePolicies.forEach((p) => {
+      const c = (p.carrier || p.plan_name || 'Medicare Carrier').trim();
+      if (c) carrierCounts.set(c, (carrierCounts.get(c) || 0) + 1);
+    });
+    supplementalPolicies.forEach((p) => {
+      const c = (p.carrier || 'Supplemental Carrier').trim();
+      if (c) carrierCounts.set(c, (carrierCounts.get(c) || 0) + 1);
+    });
+    lifePolicies.forEach((p) => {
+      const c = (p.carrier || 'Life Carrier').trim();
+      if (c) carrierCounts.set(c, (carrierCounts.get(c) || 0) + 1);
+    });
+
+    const sorted = Array.from(carrierCounts.entries()).sort((a, b) => b[1] - a[1]);
+    const top5 = sorted.slice(0, 5);
+
+    const colors = ['bg-[#2563EB]', 'bg-[#10B981]', 'bg-[#A855F7]', 'bg-[#F59E0B]', 'bg-[#64748B]'];
+
+    return top5.map(([name, count], idx) => ({
+      id: `carrier-${name}-${idx}`,
+      name,
+      count,
+      percentage: totalNonPcPoliciesCount > 0 ? Math.round((count / totalNonPcPoliciesCount) * 100) : 0,
+      barColor: colors[idx % colors.length],
+    }));
+  }, [healthPolicies, medicarePolicies, supplementalPolicies, lifePolicies, totalNonPcPoliciesCount]);
+
+  // P&C KPI COMPUTATIONS
+  const activePcPolicies = useMemo(() => pcPolicies.filter((p) => p.status === 'Active' || !p.status), [pcPolicies]);
+  const activePcCount = activePcPolicies.length;
+
+  const newPcThisWeek = useMemo(() => {
+    return pcPolicies.filter((p) => {
+      const d = p.created_at || p.effective_date;
+      return d && new Date(d).getTime() >= in7DaysMs;
+    }).length;
+  }, [pcPolicies, in7DaysMs]);
+
+  // Written Premium YTD (sum of premium / total_premium / annual_premium for P&C policies)
+  const writtenPremiumYtd = useMemo(() => {
+    const currentYear = now.getFullYear();
+    return pcPolicies.reduce((acc, p) => {
+      const prem = p.premium || p.total_premium || p.annual_premium || 0;
+      const effDate = p.effective_date || p.created_at;
+      if (effDate) {
+        const yr = new Date(effDate).getFullYear();
+        if (yr === currentYear) return acc + Number(prem);
+      }
+      return acc + Number(prem);
+    }, 0);
+  }, [pcPolicies, now]);
+
+  const newPcMtdCount = useMemo(() => {
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    return pcPolicies.filter((p) => {
+      const d = p.effective_date || p.created_at;
+      if (!d) return false;
+      const dt = new Date(d);
+      return dt.getFullYear() === currentYear && dt.getMonth() === currentMonth;
+    }).length;
+  }, [pcPolicies, now]);
+
+  const expiring30DaysCount = useMemo(() => {
     return activePcPolicies.filter((p) => {
       if (!p.expiration_date) return false;
       return p.expiration_date >= todayIso && p.expiration_date <= in30DaysIso;
-    });
+    }).length;
   }, [activePcPolicies, todayIso, in30DaysIso]);
-  const pcPoliciesExpiring30DaysCount = pcPoliciesExpiring30Days.length;
 
-  const leadsInProgressCount = useMemo(() => leads.filter((l) => ['new', 'contacted', 'in_progress', 'qualified'].includes(l.status)).length, [leads]);
+  const pendingIssuesCount = useMemo(() => {
+    return pcPolicies.filter((p) => ['pending', 'review', 'unmatched', 'needs_attention'].includes((p.status || '').toLowerCase())).length;
+  }, [pcPolicies]);
 
-  const leadFollowUpsDueCount = useMemo(() => {
-    return leads.filter((l) => {
-      if (!l.next_follow_up_at || ['converted', 'lost'].includes(l.status)) return false;
-      return new Date(l.next_follow_up_at) <= now;
-    }).length;
-  }, [leads, now]);
+  // P&C POLICY MIX (Auto 🚗, Homeowner 🏠, Commercial 🏢, Flood 🌊, Umbrella ☂️, Other •••)
+  const totalPcPoliciesCount = pcPolicies.length;
 
-  // Today's Appointments
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+  const pcPolicyMixItems = useMemo((): PolicyMixItem[] => {
+    if (totalPcPoliciesCount === 0) return [];
+    const categoryCounts: Record<string, { count: number; name: string; iconBg: string; iconEmoji: string; barColor: string }> = {
+      auto: { count: 0, name: 'Auto', iconBg: 'bg-[#EFF6FF] text-[#2563EB]', iconEmoji: '🚗', barColor: 'bg-[#2563EB]' },
+      home: { count: 0, name: 'Homeowner', iconBg: 'bg-[#ECFDF5] text-[#10B981]', iconEmoji: '🏠', barColor: 'bg-[#10B981]' },
+      commercial: { count: 0, name: 'Commercial', iconBg: 'bg-[#FEF2F2] text-[#EF4444]', iconEmoji: '🏢', barColor: 'bg-[#EF4444]' },
+      flood: { count: 0, name: 'Flood', iconBg: 'bg-[#F0F9FF] text-[#0284C7]', iconEmoji: '🌊', barColor: 'bg-[#0284C7]' },
+      umbrella: { count: 0, name: 'Umbrella', iconBg: 'bg-[#F3E8FF] text-[#A855F7]', iconEmoji: '☂️', barColor: 'bg-[#A855F7]' },
+      other: { count: 0, name: 'Other', iconBg: 'bg-[#F8FAFC] text-[#64748B]', iconEmoji: '•••', barColor: 'bg-[#64748B]' },
+    };
 
-  const appointmentsTodayCount = useMemo(() => {
-    return appointments.filter((a) => {
-      if (a.status !== 'scheduled') return false;
-      const start = new Date(a.starts_at);
-      return start >= todayStart && start <= todayEnd;
-    }).length;
-  }, [appointments, todayStart, todayEnd]);
+    pcPolicies.forEach((p) => {
+      const typeLower = (p.policy_type || '').toLowerCase();
+      if (typeLower.includes('auto') || typeLower.includes('car') || typeLower.includes('vehicle')) {
+        categoryCounts.auto.count++;
+      } else if (typeLower.includes('home') || typeLower.includes('property') || typeLower.includes('dwelling')) {
+        categoryCounts.home.count++;
+      } else if (typeLower.includes('comm') || typeLower.includes('business') || typeLower.includes('general')) {
+        categoryCounts.commercial.count++;
+      } else if (typeLower.includes('flood')) {
+        categoryCounts.flood.count++;
+      } else if (typeLower.includes('umbrella') || typeLower.includes('excess')) {
+        categoryCounts.umbrella.count++;
+      } else {
+        categoryCounts.other.count++;
+      }
+    });
 
-  // DYNAMIC FILTER DROPDOWN OPTIONS (From loaded P&C dataset)
+    return Object.entries(categoryCounts)
+      .filter(([_, item]) => item.count > 0)
+      .map(([id, item]) => ({
+        id,
+        name: item.name,
+        count: item.count,
+        percentage: Math.round((item.count / totalPcPoliciesCount) * 100),
+        barColor: item.barColor,
+        iconBg: item.iconBg,
+        iconEmoji: item.iconEmoji,
+      }));
+  }, [pcPolicies, totalPcPoliciesCount]);
+
+  // P&C TOP CARRIERS
+  const pcTopCarriers = useMemo((): TopCarrierItem[] => {
+    const carrierCounts = new Map<string, number>();
+    pcPolicies.forEach((p) => {
+      const c = (p.company_name || p.writing_company || 'P&C Carrier').trim();
+      if (c) carrierCounts.set(c, (carrierCounts.get(c) || 0) + 1);
+    });
+
+    const sorted = Array.from(carrierCounts.entries()).sort((a, b) => b[1] - a[1]);
+    const top5 = sorted.slice(0, 5);
+    const colors = ['bg-[#2563EB]', 'bg-[#10B981]', 'bg-[#A855F7]', 'bg-[#F59E0B]', 'bg-[#64748B]'];
+
+    return top5.map(([name, count], idx) => ({
+      id: `pc-carrier-${name}-${idx}`,
+      name,
+      count,
+      percentage: totalPcPoliciesCount > 0 ? Math.round((count / totalPcPoliciesCount) * 100) : 0,
+      barColor: colors[idx % colors.length],
+    }));
+  }, [pcPolicies, totalPcPoliciesCount]);
+
+  // P&C COMMISSIONS (Quaried from pc_commission_payments)
+  const hasPcCommissionData = pcCommissions.length > 0;
+  const pcCommissionsThisWeek = useMemo(() => {
+    if (!hasPcCommissionData) return null;
+    return pcCommissions.reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+  }, [pcCommissions, hasPcCommissionData]);
+
+  const pcCommissionsThisMonth = pcCommissionsThisWeek;
+  const pcCommissionsYtd = pcCommissionsThisWeek;
+
+  const pcCommissionsMonthlyBars = useMemo((): MonthlyCommissionBar[] => {
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const currentMonthIdx = now.getMonth();
+
+    const monthlyTotals = new Array(12).fill(0);
+    pcCommissions.forEach((c) => {
+      if (c.payment_date) {
+        const m = new Date(c.payment_date).getMonth();
+        if (m >= 0 && m < 12) monthlyTotals[m] += Number(c.amount) || 0;
+      }
+    });
+
+    return monthNames.map((name, idx) => ({
+      monthName: name,
+      amount: monthlyTotals[idx],
+      highlight: idx === currentMonthIdx,
+    }));
+  }, [pcCommissions, now]);
+
+  // P&C EXPIRATIONS TABLE DERIVED PIPELINE
   const availableLines = useMemo(() => {
     const lines = new Set<string>();
     activePcPolicies.forEach((p) => {
@@ -305,26 +585,20 @@ export default function DashboardPage() {
   const availableCompanies = useMemo(() => {
     const compMap = new Map<string, string>();
     activePcPolicies.forEach((p) => {
-      if (p.company_name && p.company_name.trim()) {
-        const clean = p.company_name.trim();
-        const lower = clean.toLowerCase();
-        if (!compMap.has(lower)) {
-          compMap.set(lower, clean);
-        }
-      }
+      const comp = (p.company_name || p.writing_company || '').trim();
+      if (comp) compMap.set(comp.toLowerCase(), comp);
     });
-    return Array.from(compMap.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    return Array.from(compMap.values()).sort();
   }, [activePcPolicies]);
 
   const availableStatuses = useMemo(() => {
     const statuses = new Set<string>();
-    policies.forEach((p) => {
+    pcPolicies.forEach((p) => {
       if (p.status) statuses.add(p.status);
     });
     return Array.from(statuses).sort();
-  }, [policies]);
+  }, [pcPolicies]);
 
-  // CLEAR FILTERS STATE CHECK
   const isFiltered = useMemo(() => {
     return (
       searchQuery.trim() !== '' ||
@@ -347,7 +621,6 @@ export default function DashboardPage() {
     setSortAscending(true);
   }, []);
 
-  // Column Header Click Handler
   const handleHeaderSort = useCallback((column: SortableColumn) => {
     if (sortColumn === column) {
       setSortAscending((prev) => !prev);
@@ -357,8 +630,7 @@ export default function DashboardPage() {
     }
   }, [sortColumn]);
 
-  // DERIVED PIPELINE: activePcPolicies -> search -> filters -> sorting
-  const displayedPolicies = useMemo(() => {
+  const displayedPcPolicies = useMemo((): PcPolicyRow[] => {
     return activePcPolicies
       .map((p) => {
         const daysRemaining = p.expiration_date
@@ -368,18 +640,24 @@ export default function DashboardPage() {
             )
           : 9999;
         return {
-          ...p,
+          id: p.id,
+          client_id: p.client_id,
           clientName: clientMap[p.client_id] || 'Client Record',
+          policy_type: p.policy_type || 'P&C Policy',
+          policy_number: p.policy_number,
+          company_name: p.company_name || p.writing_company || null,
+          effective_date: p.effective_date,
+          expiration_date: p.expiration_date,
+          premium: p.premium || p.total_premium || p.annual_premium || null,
+          status: p.status || 'Active',
+          daysRemaining,
           formattedEffDate: p.effective_date ? formatIsoToUsDate(p.effective_date) : '—',
           formattedExpDate: p.expiration_date ? formatIsoToUsDate(p.expiration_date) : '—',
-          daysRemaining,
         };
       })
       .filter((p) => {
-        // 1. Future/Active Expiration filter
         if (!p.expiration_date || p.expiration_date < todayIso) return false;
 
-        // 2. Search Query (Client, Policy #, Carrier, Type)
         if (searchQuery.trim()) {
           const q = searchQuery.trim().toLowerCase();
           const matchesName = p.clientName.toLowerCase().includes(q);
@@ -391,90 +669,33 @@ export default function DashboardPage() {
           }
         }
 
-        // 3. Line / Type Filter
-        if (lineFilter !== 'ALL' && p.policy_type !== lineFilter) {
-          return false;
-        }
+        if (lineFilter !== 'ALL' && p.policy_type !== lineFilter) return false;
+        if (companyFilter !== 'ALL' && (p.company_name || '').toLowerCase() !== companyFilter.toLowerCase()) return false;
 
-        // 4. Company / Carrier Filter
-        if (companyFilter !== 'ALL') {
-          const pCompLower = (p.company_name || '').trim().toLowerCase();
-          if (pCompLower !== companyFilter.trim().toLowerCase()) {
-            return false;
-          }
-        }
-
-        // 5. Days / Time Filter
         if (daysFilter !== 'ALL') {
           const days = p.daysRemaining;
-          const expDateStr = p.expiration_date; // YYYY-MM-DD
-          const todayDate = new Date(todayIso + 'T00:00:00');
-          const currentYear = todayDate.getFullYear();
-          const currentMonth = todayDate.getMonth(); // 0-indexed
-
-          if (daysFilter === '7') {
-            if (days < 0 || days > 7) return false;
-          } else if (daysFilter === '15') {
-            if (days < 0 || days > 15) return false;
-          } else if (daysFilter === '30') {
-            if (days < 0 || days > 30) return false;
-          } else if (daysFilter === '34') {
-            if (days < 0 || days > 34) return false;
-          } else if (daysFilter === '60') {
-            if (days < 0 || days > 60) return false;
-          } else if (daysFilter === 'THIS_MONTH') {
-            if (!expDateStr) return false;
-            const expD = new Date(expDateStr + 'T00:00:00');
-            if (expD.getFullYear() !== currentYear || expD.getMonth() !== currentMonth) return false;
-          } else if (daysFilter === 'NEXT_MONTH') {
-            if (!expDateStr) return false;
-            const expD = new Date(expDateStr + 'T00:00:00');
-            const targetNextMonth = (currentMonth + 1) % 12;
-            const targetYear = currentMonth === 11 ? currentYear + 1 : currentYear;
-            if (expD.getFullYear() !== targetYear || expD.getMonth() !== targetNextMonth) return false;
-          }
+          if (daysFilter === '7' && (days < 0 || days > 7)) return false;
+          if (daysFilter === '15' && (days < 0 || days > 15)) return false;
+          if (daysFilter === '30' && (days < 0 || days > 30)) return false;
+          if (daysFilter === '34' && (days < 0 || days > 34)) return false;
+          if (daysFilter === '60' && (days < 0 || days > 60)) return false;
         }
 
-        // 6. Status Filter
-        if (statusFilter !== 'ALL' && p.status !== statusFilter) {
-          return false;
-        }
+        if (statusFilter !== 'ALL' && p.status !== statusFilter) return false;
 
         return true;
       })
       .sort((a, b) => {
         let comparison = 0;
-
         if (sortColumn === 'expiration_date') {
-          const dateA = a.expiration_date || '9999-12-31';
-          const dateB = b.expiration_date || '9999-12-31';
-          comparison = dateA.localeCompare(dateB);
-        } else if (sortColumn === 'effective_date') {
-          const dateA = a.effective_date || '9999-12-31';
-          const dateB = b.effective_date || '9999-12-31';
-          comparison = dateA.localeCompare(dateB);
+          comparison = (a.expiration_date || '9999').localeCompare(b.expiration_date || '9999');
         } else if (sortColumn === 'client_name') {
-          comparison = a.clientName.localeCompare(b.clientName, undefined, { sensitivity: 'base' });
-        } else if (sortColumn === 'policy_number') {
-          const numA = a.policy_number || '';
-          const numB = b.policy_number || '';
-          comparison = numA.localeCompare(numB, undefined, { numeric: true, sensitivity: 'base' });
-        } else if (sortColumn === 'policy_type') {
-          comparison = a.policy_type.localeCompare(b.policy_type, undefined, { sensitivity: 'base' });
-        } else if (sortColumn === 'company_name') {
-          const compA = a.company_name || '';
-          const compB = b.company_name || '';
-          comparison = compA.localeCompare(compB, undefined, { sensitivity: 'base' });
+          comparison = a.clientName.localeCompare(b.clientName);
         } else if (sortColumn === 'days_left') {
           comparison = a.daysRemaining - b.daysRemaining;
         } else if (sortColumn === 'premium') {
-          const premA = a.premium || 0;
-          const premB = b.premium || 0;
-          comparison = premA - premB;
-        } else if (sortColumn === 'status') {
-          comparison = a.status.localeCompare(b.status, undefined, { sensitivity: 'base' });
+          comparison = (a.premium || 0) - (b.premium || 0);
         }
-
         return sortAscending ? comparison : -comparison;
       });
   }, [
@@ -490,374 +711,168 @@ export default function DashboardPage() {
     sortAscending,
   ]);
 
-  const currentDateFormatted = formatDateMMDDYYYY(now);
+  // MAP DATA FOR SHARED BOTTOM PANELS
+  const mappedTodayAppointments = useMemo((): DashboardAppointment[] => {
+    return appointments.map((a: any) => ({
+      id: a.id,
+      startsAt: a.starts_at,
+      endsAt: a.ends_at,
+      title: a.title || 'Client Appointment',
+      clientName: a.client?.full_name || clientMap[a.client_id] || 'Client Record',
+      status: a.status || 'scheduled',
+    }));
+  }, [appointments, clientMap]);
 
-  const formatCurrency = (val?: number | null) => {
-    if (val === undefined || val === null) return '—';
-    return `$${Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
+  const mappedTickets = useMemo((): DashboardTicket[] => {
+    return tickets.map((t: any) => ({
+      id: t.id,
+      ticketCode: t.ticket_code || t.id,
+      title: t.title || 'Ticket Request',
+      status: t.status || 'open',
+      priority: t.priority || 'normal',
+      dueAt: t.due_at,
+      createdAt: t.created_at,
+      clientName: clientMap[t.client_id] || 'Client',
+      assignedToName: t.assigned_to_name,
+    }));
+  }, [tickets, clientMap]);
 
-  // Helper for rendering clickable sortable table headers with chevron indicators
-  const renderSortableHeader = (label: string, column: SortableColumn, alignRight = false) => {
-    const isActive = sortColumn === column;
-    return (
-      <th className={`py-2.5 px-3 ${alignRight ? 'text-right' : ''}`}>
-        <button
-          type="button"
-          onClick={() => handleHeaderSort(column)}
-          className={`inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider hover:text-[#172033] transition-colors focus:outline-none ${
-            isActive ? 'text-[#2563EB] font-bold' : 'text-[#556176]'
-          } ${alignRight ? 'ml-auto' : ''}`}
-        >
-          <span>{label}</span>
-          <span className={`text-[10px] ${isActive ? 'text-[#2563EB] font-bold' : 'text-[#7C8799]'}`}>
-            {isActive ? (sortAscending ? '↑' : '↓') : '↕'}
-          </span>
-        </button>
-      </th>
-    );
-  };
+  // DERIVE OPPORTUNITIES (Non-P&C Only)
+  const mappedOpportunities = useMemo((): DashboardOpportunity[] => {
+    const opps: DashboardOpportunity[] = [];
+    clients.forEach((c) => {
+      if (c.date_of_birth) {
+        const age = new Date().getFullYear() - new Date(c.date_of_birth).getFullYear();
+        if (age >= 64 && age <= 65) {
+          opps.push({
+            id: `opp-medicare-${c.id}`,
+            clientId: c.id,
+            clientName: c.full_name,
+            type: 'medicare_eligible',
+            title: 'Medicare Eligible',
+            actionText: 'Add Medicare',
+            valueText: 'High Value',
+            iconBg: 'bg-[#ECFDF5] text-[#10B981]',
+            iconEmoji: '👤',
+          });
+        }
+      }
+    });
+    return opps;
+  }, [clients]);
+
+  // RECENT ACTIVITY MAP
+  const mappedActivities = useMemo((): DashboardActivityEvent[] => {
+    return activityEvents.map((evt: any) => {
+      const clientName = clientMap[evt.client_id] || 'Client';
+      const timeDiff = Math.max(1, Math.round((now.getTime() - new Date(evt.created_at).getTime()) / (1000 * 3600)));
+      const timeAgo = timeDiff >= 24 ? `${Math.round(timeDiff / 24)}d ago` : `${timeDiff}h ago`;
+
+      return {
+        id: evt.id,
+        type: evt.event_type || 'activity',
+        title: evt.event_type ? evt.event_type.replace(/_/g, ' ').toUpperCase() : 'Policy updated',
+        subtitle: `${clientName} - ${evt.description || 'Record updated'}`,
+        timeAgo,
+        iconBg: 'bg-[#EFF6FF] text-[#2563EB]',
+        iconEmoji: '📋',
+      };
+    });
+  }, [activityEvents, clientMap, now]);
 
   return (
     <DashboardLayout>
       <CrmPageContainer className="pb-10">
-        
-        {/* SECTION 1: HEADER */}
-        <div className="crm-card p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-xl font-semibold text-[#172033] tracking-tight">
-                Hello, {profile?.name || profile?.email || 'Agent'}
-              </h1>
-              <span className="px-2.5 py-0.5 rounded bg-[#F8FAFC] border border-[#DCE2EA] text-[#556176] text-xs font-medium">
-                {currentDateFormatted}
-              </span>
-            </div>
-            <p className="text-xs text-[#556176] mt-0.5">
-              Property & Casualty operational renewal dashboard and client portfolio summary.
-            </p>
-          </div>
+        <div className="space-y-6">
+          {/* HEADER */}
+          <DashboardHeader
+            userName={profile?.first_name || profile?.name || 'Agent'}
+            mode={isPcEnabled ? dashboardMode : 'non_pc'}
+            onModeChange={handleModeChange}
+            selectedPeriod={selectedPeriod}
+            onPeriodChange={setSelectedPeriod}
+            isPcEnabled={isPcEnabled}
+          />
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/clients"
-              className="crm-btn-secondary text-xs px-3 py-1.5"
-            >
-              + New Client
-            </Link>
-            <Link
-              href="/leads"
-              className="crm-btn-primary text-xs px-3 py-1.5"
-            >
-              + New Lead
-            </Link>
-            <Link
-              href="/calendar"
-              className="crm-btn-secondary text-xs px-3 py-1.5"
-            >
-              + New Appointment
-            </Link>
-          </div>
-        </div>
-
-        {/* SECTION 2: SIX KPI CARDS */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-          {/* Total Clients */}
-          <div className="crm-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#556176]">Total Clients</span>
-              <div className="w-7 h-7 rounded bg-[#EEF4FF] text-[#2563EB] flex items-center justify-center border border-[#BFDBFE]">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{clientsLoading ? '...' : totalClientsCount}</div>
-              <span className="text-[10px] text-[#7C8799]">Customer records</span>
-            </div>
-          </div>
-
-          {/* Active P&C Policies */}
-          <div className="crm-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#556176]">Active P&C Policies</span>
-              <div className="w-7 h-7 rounded bg-[#EEF4FF] text-[#2563EB] flex items-center justify-center border border-[#BFDBFE]">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{clientsLoading ? '...' : activePcPoliciesCount}</div>
-              <span className="text-[10px] text-[#7C8799]">In-force P&C policies</span>
-            </div>
-          </div>
-
-          {/* Expiring P&C 30 Days */}
-          <div className="crm-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#556176]">Expiring P&C 30 Days</span>
-              <div className="w-7 h-7 rounded bg-[#FEFCE8] text-[#B7791F] flex items-center justify-center border border-[#FEF08A]">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{clientsLoading ? '...' : pcPoliciesExpiring30DaysCount}</div>
-              <span className="text-[10px] text-[#7C8799]">P&C renewals due</span>
-            </div>
-          </div>
-
-          {/* Leads Active */}
-          <div className="crm-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#556176]">Leads Active</span>
-              <div className="w-7 h-7 rounded bg-[#EEF4FF] text-[#2563EB] flex items-center justify-center border border-[#BFDBFE]">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{leadsInProgressCount}</div>
-              <span className="text-[10px] text-[#7C8799]">In pipeline</span>
-            </div>
-          </div>
-
-          {/* Lead Follow-ups Due */}
-          <div className="crm-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#556176]">Follow-ups Due</span>
-              <div className="w-7 h-7 rounded bg-[#FEF2F2] text-[#C24141] flex items-center justify-center border border-[#FECACA]">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{leadFollowUpsDueCount}</div>
-              <span className="text-[10px] text-[#7C8799]">Overdue / Scheduled</span>
-            </div>
-          </div>
-
-          {/* Appointments Today */}
-          <div className="crm-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-[#556176]">Appts Today</span>
-              <div className="w-7 h-7 rounded bg-[#F0FDF4] text-[#15803D] flex items-center justify-center border border-[#DCFCE7]">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-2">
-              <div className="text-2xl font-bold text-[#172033]">{appointmentsTodayCount}</div>
-              <span className="text-[10px] text-[#7C8799]">Scheduled today</span>
-            </div>
-          </div>
-        </div>
-
-        {/* SECTION 3: MAIN OPERATIONAL WORKFLOW — UPCOMING P&C POLICY EXPIRATIONS (FULL WIDTH) */}
-        <div className="crm-card p-5 space-y-4 w-full">
-          {/* Card Title Header */}
-          <div className="flex items-center justify-between border-b border-[#E8ECF2] pb-3">
-            <div>
-              <h2 className="text-sm font-semibold text-[#172033]">Upcoming P&C Policy Expirations</h2>
-              <p className="text-xs text-[#556176]">Primary operational P&C policy renewals requiring immediate attention</p>
-            </div>
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-[#F8FAFC] border border-[#DCE2EA] text-[#556176]">
-              {displayedPolicies.length} {displayedPolicies.length === 1 ? 'P&C policy' : 'P&C policies'}
-            </span>
-          </div>
-
-          {/* SINGLE COMPACT TOOLBAR ROW (Search + Line + Company + Days + Status + Clear) */}
-          <div className="flex flex-wrap items-center gap-2.5 bg-[#F8FAFC] p-3 rounded-md border border-[#E8ECF2]">
-            {/* Compact Search Input */}
-            <div className="relative w-48 sm:w-56">
-              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-[#7C8799]">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </div>
-              <input
-                type="text"
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 bg-white border border-[#DCE2EA] rounded-md text-xs text-[#172033] placeholder-[#7C8799] focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
-              />
-            </div>
-
-            {/* Line / Type Filter Dropdown */}
-            <div className="flex-shrink-0">
-              <select
-                value={lineFilter}
-                onChange={(e) => setLineFilter(e.target.value)}
-                className="bg-white border border-[#DCE2EA] rounded-md px-2.5 py-1.5 text-xs text-[#172033] font-medium focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
-              >
-                <option value="ALL">All P&C Lines</option>
-                {availableLines.map((line) => (
-                  <option key={line} value={line}>{line}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Company / Carrier Filter Dropdown */}
-            <div className="flex-shrink-0">
-              <select
-                value={companyFilter}
-                onChange={(e) => setCompanyFilter(e.target.value)}
-                className="bg-white border border-[#DCE2EA] rounded-md px-2.5 py-1.5 text-xs text-[#172033] font-medium focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
-              >
-                <option value="ALL">All Companies</option>
-                {availableCompanies.map((comp) => (
-                  <option key={comp} value={comp}>{comp}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Days / Expiration Time Filter Dropdown */}
-            <div className="flex-shrink-0">
-              <select
-                value={daysFilter}
-                onChange={(e) => setDaysFilter(e.target.value)}
-                className="bg-white border border-[#DCE2EA] rounded-md px-2.5 py-1.5 text-xs text-[#172033] font-medium focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
-              >
-                <option value="ALL">All Upcoming</option>
-                <option value="7">Next 7 Days</option>
-                <option value="15">Next 15 Days</option>
-                <option value="30">Next 30 Days</option>
-                <option value="34">Next 34 Days</option>
-                <option value="60">Next 60 Days</option>
-                <option value="THIS_MONTH">This Month</option>
-                <option value="NEXT_MONTH">Next Month</option>
-              </select>
-            </div>
-
-            {/* Status Filter Dropdown */}
-            <div className="flex-shrink-0">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-white border border-[#DCE2EA] rounded-md px-2.5 py-1.5 text-xs text-[#172033] font-medium focus:outline-none focus:border-[#2563EB] focus:ring-1 focus:ring-[#2563EB] transition-colors"
-              >
-                <option value="ALL">All Statuses</option>
-                {availableStatuses.map((st) => (
-                  <option key={st} value={st}>{st}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Clear Filters Button */}
-            {isFiltered && (
-              <button
-                type="button"
-                onClick={handleClearFilters}
-                className="flex-shrink-0 text-xs font-semibold text-[#C24141] hover:text-[#991B1B] hover:bg-[#FEF2F2] px-2.5 py-1.5 rounded-md border border-[#FECACA] transition-colors"
-              >
-                Clear Filters
-              </button>
-            )}
-          </div>
-
-          {/* TABLE OR EMPTY STATE */}
-          {clientsLoading ? (
-            <div className="p-12 text-center text-xs text-[#7C8799]">Loading P&C expirations...</div>
-          ) : clientsError ? (
-            <div className="p-4 rounded-md bg-[#FEF2F2] border border-[#FECACA] text-[#C24141] text-xs font-semibold">{clientsError}</div>
-          ) : displayedPolicies.length === 0 ? (
-            <div className="p-12 text-center space-y-3">
-              <p className="text-xs text-[#556176] font-medium">
-                {isFiltered ? 'No P&C policies match the current filters.' : 'No active P&C policies expiring in the near future.'}
-              </p>
-              {isFiltered && (
-                <button
-                  type="button"
-                  onClick={handleClearFilters}
-                  className="crm-btn-secondary text-xs px-3.5 py-1.5"
-                >
-                  Clear Filters
-                </button>
-              )}
-            </div>
+          {/* DASHBOARD MODE VIEW RENDER */}
+          {(!isPcEnabled || dashboardMode === 'non_pc') ? (
+            <NonPcDashboard
+              healthCount={healthCount}
+              healthNewThisWeek={healthNewThisWeek}
+              medicareCount={medicareCount}
+              medicareNewThisWeek={medicareNewThisWeek}
+              supplementalCount={supplementalCount}
+              supplementalNewThisWeek={supplementalNewThisWeek}
+              lifeCount={lifeCount}
+              lifeNewThisWeek={lifeNewThisWeek}
+              healthMembersCount={healthMembersCount}
+              commissionsThisWeek={null}
+              commissionsThisMonth={null}
+              commissionsYtd={null}
+              commissionsMonthlyBars={[]}
+              hasCommissionData={false}
+              policyMixItems={nonPcPolicyMixItems}
+              totalNonPcPoliciesCount={totalNonPcPoliciesCount}
+              topCarrierItems={nonPcTopCarriers}
+              todayAppointments={mappedTodayAppointments}
+              myTickets={mappedTickets}
+              opportunities={mappedOpportunities}
+              recentActivities={mappedActivities}
+              loading={loading}
+            />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-[#F8FAFC] border-b border-[#E8ECF2] text-[11px] font-semibold text-[#556176] uppercase tracking-wider">
-                    {renderSortableHeader('Client', 'client_name')}
-                    {renderSortableHeader('Policy / Number', 'policy_number')}
-                    {renderSortableHeader('Line / Type', 'policy_type')}
-                    {renderSortableHeader('Company', 'company_name')}
-                    {renderSortableHeader('Effective Date', 'effective_date')}
-                    {renderSortableHeader('Expiration Date', 'expiration_date')}
-                    {renderSortableHeader('Days Left', 'days_left')}
-                    {renderSortableHeader('Premium', 'premium')}
-                    {renderSortableHeader('Status', 'status')}
-                    <th className="py-2.5 px-3 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E8ECF2] text-xs text-[#172033]">
-                  {displayedPolicies.map((p) => (
-                    <tr key={p.id} className="hover:bg-[#F8FAFC] transition-colors">
-                      <td className="py-3 px-3 font-semibold text-[#172033]">{p.clientName}</td>
-                      <td className="py-3 px-3">
-                        <div className="font-medium text-[#172033]">{p.policy_type}</div>
-                        <div className="text-[10px] text-[#7C8799] font-mono">#{p.policy_number || 'N/A'}</div>
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-semibold border uppercase tracking-wider bg-[#EEF4FF] text-[#2563EB] border-[#BFDBFE]">
-                          Property & Casualty
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-[#556176]">{p.company_name || '—'}</td>
-                      <td className="py-3 px-3 text-[#556176]">{p.formattedEffDate}</td>
-                      <td className="py-3 px-3 font-medium text-[#172033]">{p.formattedExpDate}</td>
-                      <td className="py-3 px-3">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-semibold ${
-                          p.daysRemaining <= 7 ? 'bg-[#FEFCE8] text-[#B7791F] border border-[#FEF08A]' : 'bg-[#EEF4FF] text-[#2563EB] border border-[#BFDBFE]'
-                        }`}>
-                          {p.daysRemaining} {p.daysRemaining === 1 ? 'day' : 'days'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 font-medium text-[#172033]">
-                        {formatCurrency(p.premium)}
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                          p.status === 'Active' ? 'bg-[#F0FDF4] text-[#15803D] border-[#DCFCE7]' : 'bg-[#FEF2F2] text-[#C24141] border-[#FECACA]'
-                        }`}>
-                          {p.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <button
-                          onClick={() => handleOpenQuickView(p.id, p.client_id, p.policy_type)}
-                          className="crm-btn-secondary text-xs px-3 py-1"
-                        >
-                          Preview
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <PcDashboard
+              activePcCount={activePcCount}
+              newPcThisWeek={newPcThisWeek}
+              writtenPremiumYtd={writtenPremiumYtd}
+              newPcMtdCount={newPcMtdCount}
+              expiring30DaysCount={expiring30DaysCount}
+              pendingIssuesCount={pendingIssuesCount}
+              commissionsThisWeek={pcCommissionsThisWeek}
+              commissionsThisMonth={pcCommissionsThisMonth}
+              commissionsYtd={pcCommissionsYtd}
+              commissionsMonthlyBars={pcCommissionsMonthlyBars}
+              hasCommissionData={hasPcCommissionData}
+              policyMixItems={pcPolicyMixItems}
+              totalPcPoliciesCount={totalPcPoliciesCount}
+              topCarrierItems={pcTopCarriers}
+              displayedPolicies={displayedPcPolicies}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              lineFilter={lineFilter}
+              setLineFilter={setLineFilter}
+              companyFilter={companyFilter}
+              setCompanyFilter={setCompanyFilter}
+              daysFilter={daysFilter}
+              setDaysFilter={setDaysFilter}
+              statusFilter={statusFilter}
+              setStatusFilter={setStatusFilter}
+              availableLines={availableLines}
+              availableCompanies={availableCompanies}
+              availableStatuses={availableStatuses}
+              isFiltered={isFiltered}
+              handleClearFilters={handleClearFilters}
+              sortColumn={sortColumn}
+              sortAscending={sortAscending}
+              handleHeaderSort={handleHeaderSort}
+              handleOpenQuickView={handleOpenQuickView}
+              todayAppointments={mappedTodayAppointments}
+              recentActivities={mappedActivities}
+              loading={loading}
+              error={error}
+            />
           )}
+
+          {/* POLICY QUICK VIEW DRAWER COMPONENT */}
+          <PolicyQuickViewDrawer
+            isOpen={quickViewDrawer.isOpen}
+            onClose={handleCloseQuickView}
+            policyId={quickViewDrawer.policyId}
+            clientId={quickViewDrawer.clientId}
+            moduleType={quickViewDrawer.moduleType}
+            policyTypeLabel={quickViewDrawer.policyTypeLabel}
+          />
         </div>
-
-        {/* POLICY QUICK VIEW DRAWER COMPONENT (RIGHT SLIDE-OVER) */}
-        <PolicyQuickViewDrawer
-          isOpen={quickViewDrawer.isOpen}
-          onClose={handleCloseQuickView}
-          policyId={quickViewDrawer.policyId}
-          clientId={quickViewDrawer.clientId}
-          moduleType={quickViewDrawer.moduleType}
-          policyTypeLabel={quickViewDrawer.policyTypeLabel}
-        />
-
       </CrmPageContainer>
     </DashboardLayout>
   );

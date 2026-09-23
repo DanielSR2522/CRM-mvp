@@ -70,7 +70,7 @@ export default function InlineEditablePhone({
 
   return (
     <div className={`w-full font-sans ${className}`}>
-      {label && <span className="block text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">{label}</span>}
+      {label && <span className="block text-xs font-semibold text-slate-500 mb-1">{label}</span>}
 
       {isEditing ? (
         <div className="flex items-center gap-1.5 w-full" onKeyDown={handleKeyDown}>

@@ -74,7 +74,20 @@ export default function TicketTableView({ tickets, selectedId, onSelectTicket }:
           {tickets.map((ticket) => {
             const isSelected = selectedId === ticket.id;
             const formattedDue = ticket.dueAt
-              ? new Date(ticket.dueAt).toLocaleDateString('es-ES', { month: 'short', day: 'numeric' })
+              ? (() => {
+                  try {
+                    const d = new Date(ticket.dueAt);
+                    if (isNaN(d.getTime())) return ticket.dueAt;
+                    return new Intl.DateTimeFormat('en-US', {
+                      timeZone: 'America/New_York',
+                      month: '2-digit',
+                      day: '2-digit',
+                      year: 'numeric',
+                    }).format(d);
+                  } catch {
+                    return ticket.dueAt;
+                  }
+                })()
               : 'Sin fecha';
 
             return (

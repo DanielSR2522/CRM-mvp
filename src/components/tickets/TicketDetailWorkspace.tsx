@@ -14,6 +14,7 @@ interface TicketDetailWorkspaceProps {
   onBack: () => void;
   onTicketUpdated: () => void;
   appUsers: LanzaUser[];
+  currentUser?: { id: string; name: string; email: string; role: string } | null;
 }
 
 export default function TicketDetailWorkspace({
@@ -21,6 +22,7 @@ export default function TicketDetailWorkspace({
   onBack,
   onTicketUpdated,
   appUsers,
+  currentUser,
 }: TicketDetailWorkspaceProps) {
   const [ticket, setTicket] = useState<DetailedTicket | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -53,6 +55,11 @@ export default function TicketDetailWorkspace({
   // Attribute update states
   const [isUpdatingAttr, setIsUpdatingAttr] = useState(false);
   const [attrError, setAttrError] = useState<string | null>(null);
+
+  // Delete ticket states
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const loadTicketDetail = useCallback(async (id: string) => {
     setIsLoading(true);
@@ -444,7 +451,14 @@ export default function TicketDetailWorkspace({
     if (!dateStr) return 'Sin fecha';
     try {
       const d = new Date(dateStr);
-      return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      if (isNaN(d.getTime())) return dateStr;
+      const dateFmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      return dateFmt.format(d);
     } catch {
       return dateStr;
     }
@@ -454,17 +468,59 @@ export default function TicketDetailWorkspace({
     if (!dateStr) return '';
     try {
       const d = new Date(dateStr);
-      return d.toLocaleString('es-ES', {
-        day: '2-digit',
-        month: '2-digit',
+      if (isNaN(d.getTime())) return dateStr;
+      const dateFmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
         year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
+        month: '2-digit',
+        day: '2-digit',
       });
+      const timeFmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+      return `${dateFmt.format(d)}, ${timeFmt.format(d)}`;
     } catch {
       return dateStr;
     }
   };
+
+  const handleDeleteTicket = async () => {
+    if (!ticket) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch('/api/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_ticket', ticketId: ticket.id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setDeleteError(data.error || 'No se pudo eliminar el ticket.');
+        setIsDeleting(false);
+        return;
+      }
+      setIsDeleteModalOpen(false);
+      onTicketUpdated();
+      onBack();
+    } catch {
+      setDeleteError('Error de red al intentar eliminar el ticket.');
+      setIsDeleting(false);
+    }
+  };
+
+  const isUserAdmin = currentUser?.role === 'admin';
+  const isUserCreator = Boolean(
+    currentUser && (
+      (ticket?.createdById && ticket.createdById === currentUser.id) ||
+      (ticket?.createdByName && currentUser.name && ticket.createdByName.toLowerCase() === currentUser.name.toLowerCase()) ||
+      (ticket?.createdByName && currentUser.email && ticket.createdByName.toLowerCase() === currentUser.email.split('@')[0].toLowerCase())
+    )
+  );
+  const canDelete = !currentUser || isUserAdmin || isUserCreator;
 
   if (isLoading) {
     return (
@@ -1132,13 +1188,21 @@ export default function TicketDetailWorkspace({
 
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 uppercase mb-1">Fecha Límite</label>
-              <input
-                type="date"
-                value={ticket.dueAt ? ticket.dueAt.slice(0, 10) : ''}
-                disabled={isUpdatingAttr}
-                onChange={(e) => handleUpdateAttribute({ dueAt: e.target.value ? `${e.target.value}T23:59:59Z` : null })}
-                className="w-full rounded-lg border border-slate-300 bg-white py-1.5 px-2.5 text-xs font-medium text-slate-900 shadow-2xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
-              />
+              <div className="relative">
+                <div className="w-full rounded-lg border border-slate-300 bg-white py-1.5 px-2.5 text-xs font-medium text-slate-900 shadow-2xs flex items-center justify-between pointer-events-none">
+                  <span>{ticket.dueAt ? formatDate(ticket.dueAt) : 'MM/DD/YYYY'}</span>
+                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <input
+                  type="date"
+                  value={ticket.dueAt ? ticket.dueAt.slice(0, 10) : ''}
+                  disabled={isUpdatingAttr}
+                  onChange={(e) => handleUpdateAttribute({ dueAt: e.target.value ? `${e.target.value}T23:59:59Z` : null })}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full disabled:cursor-not-allowed"
+                />
+              </div>
             </div>
 
             {ticket.checklistTotal > 0 && (
@@ -1175,8 +1239,57 @@ export default function TicketDetailWorkspace({
             <p><strong>Creado:</strong> {formatDateTime(ticket.createdAt)}</p>
             <p><strong>Actualizado:</strong> {formatDateTime(ticket.updatedAt)}</p>
           </div>
+
+          {canDelete && (
+            <div className="border-t border-slate-200 pt-3 mt-4">
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(true)}
+                className="w-full rounded-lg bg-rose-50 border border-rose-200 py-2 px-3 text-xs font-semibold text-rose-700 hover:bg-rose-100 hover:text-rose-800 transition-colors flex items-center justify-center gap-1.5"
+              >
+                <svg className="w-4 h-4 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                <span>Eliminar Ticket</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+            <h3 className="text-sm font-bold text-slate-900">¿Eliminar este ticket?</h3>
+            <p className="mt-2 text-xs text-slate-600 leading-relaxed">
+              Esta acción eliminará permanentemente el ticket <strong className="font-mono text-slate-900">{ticket.code}</strong> y todo su historial de notas, checklist y archivos adjuntos. Esta acción no se puede deshacer.
+            </p>
+            {deleteError && (
+              <div className="mt-3 rounded-md bg-rose-50 p-2.5 text-xs text-rose-700 border border-rose-200">
+                {deleteError}
+              </div>
+            )}
+            <div className="mt-5 flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setIsDeleteModalOpen(false)}
+                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDeleteTicket}
+                className="rounded-md bg-rose-600 px-4 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-rose-700 disabled:opacity-50 transition-colors"
+              >
+                {isDeleting ? 'Eliminando...' : 'Eliminar Ticket'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -76,6 +76,15 @@ const mockDb = {
         }),
       };
     }
+    if (table === "agent_assistant_relationships") {
+      return {
+        select: () => ({
+          eq: () => ({
+            eq: () => Promise.resolve({ data: [] }),
+          }),
+        }),
+      };
+    }
     return {};
   },
 } as any;

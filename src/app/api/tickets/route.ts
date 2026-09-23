@@ -46,9 +46,11 @@ export async function GET(request: Request) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, email, full_name')
+      .select('id, email, name, first_name, last_name, role')
       .eq('id', user.id)
-      .maybeSingle<{ id: string; email: string; full_name: string; role?: string }>();
+      .maybeSingle<{ id: string; email: string; name?: string; first_name?: string; last_name?: string; role?: string }>();
+
+    const actorFullName = profile?.name?.trim() || `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || profile?.email || user.email || '';
 
     const secret = process.env.WINTERFELL_INTEGRATION_SECRET || '';
     const lanzaUrl = `${getLanzaBaseUrl()}/api/integration/v1/tickets`;
@@ -63,7 +65,7 @@ export async function GET(request: Request) {
         action: 'list',
         actorWinterfellProfileId: user.id,
         actorWinterfellEmail: profile?.email || user.email || '',
-        actorWinterfellFullName: profile?.full_name || '',
+        actorWinterfellFullName: actorFullName,
         actorWinterfellRole: profile?.role || 'agent',
         clientId: clientIdParam || undefined,
       }),
@@ -97,7 +99,6 @@ export async function GET(request: Request) {
       );
 
       if (clientIds.length > 0) {
-        const adminDb = getSupabaseAdmin();
         const { data: clientRows } = await adminDb
           .from('clients')
           .select('id, full_name')
@@ -114,6 +115,129 @@ export async function GET(request: Request) {
           ...t,
           clientName: t.clientId ? nameMap.get(t.clientId) || 'Cliente Registrado' : null,
         }));
+      }
+    }
+
+    // Enrich candidate appUsers from Winterfell public.profiles & agent_assistant_relationships
+    if (data.success) {
+      const userRole = (profile?.role || 'agent').toLowerCase();
+      const rawLanzaUsers = Array.isArray(data.appUsers) ? data.appUsers : [];
+      const lanzaIdToProfileId = new Map<string, string>();
+      rawLanzaUsers.forEach((u: any) => {
+        if (u.id && u.profileId) lanzaIdToProfileId.set(u.id, u.profileId);
+      });
+
+      // 1. Determine allowed candidate profile IDs
+      const allowedProfileIds = new Set<string>([user.id]);
+      if (userRole === 'admin') {
+        const { data: allProfiles } = await adminDb
+          .from('profiles')
+          .select('id');
+        (allProfiles || []).forEach((p: any) => {
+          if (p.id) allowedProfileIds.add(p.id);
+        });
+      } else if (userRole === 'agent') {
+        const { data: rels } = await adminDb
+          .from('agent_assistant_relationships')
+          .select('assistant_profile_id')
+          .eq('agent_profile_id', user.id);
+        (rels || []).forEach((r: any) => {
+          if (r.assistant_profile_id) allowedProfileIds.add(r.assistant_profile_id);
+        });
+      } else if (userRole === 'assistant') {
+        const { data: rels } = await adminDb
+          .from('agent_assistant_relationships')
+          .select('agent_profile_id')
+          .eq('assistant_profile_id', user.id);
+        (rels || []).forEach((r: any) => {
+          if (r.agent_profile_id) allowedProfileIds.add(r.agent_profile_id);
+        });
+      }
+
+      // 2. Fetch candidate profiles from Winterfell DB
+      const { data: candidateProfiles } = await adminDb
+        .from('profiles')
+        .select('id, name, first_name, last_name, email, role')
+        .in('id', Array.from(allowedProfileIds));
+
+      const candidateMap = new Map<string, { id: string; name: string; role: string; profileId: string }>();
+      (candidateProfiles || []).forEach((p: any) => {
+        const displayName =
+          p.name?.trim() ||
+          `${p.first_name || ''} ${p.last_name || ''}`.trim() ||
+          p.email;
+        candidateMap.set(p.id, {
+          id: p.id,
+          name: displayName,
+          role: p.role || 'agent',
+          profileId: p.id,
+        });
+      });
+
+      // 3. Map appUsers for UI (Winterfell profile IDs & names)
+      data.appUsers = Array.from(candidateMap.values());
+
+      // 4. Map appUser for logged-in user (Winterfell profile ID & name)
+      data.appUser = {
+        id: user.id,
+        name: actorFullName,
+        email: profile?.email || user.email || '',
+        role: userRole,
+      };
+
+      // 5. Enrich tickets: map Lanza app_user.id or winterfell_profile_id to Winterfell profiles
+      if (Array.isArray(data.tickets) && data.tickets.length > 0) {
+        // Collect all referenced target profile IDs from tickets
+        const referencedProfileIds = new Set<string>();
+        data.tickets.forEach((t: any) => {
+          if (t.assignedToId && UUID_REGEX.test(t.assignedToId)) {
+            const pid = lanzaIdToProfileId.get(t.assignedToId) || t.assignedToId;
+            referencedProfileIds.add(pid);
+          }
+          if (t.createdById && UUID_REGEX.test(t.createdById)) {
+            const pid = lanzaIdToProfileId.get(t.createdById) || t.createdById;
+            referencedProfileIds.add(pid);
+          }
+        });
+
+        // Query profiles for any referenced profile IDs not already in candidateMap
+        const missingIds = Array.from(referencedProfileIds).filter((id) => !candidateMap.has(id));
+        if (missingIds.length > 0) {
+          const { data: extraProfiles } = await adminDb
+            .from('profiles')
+            .select('id, name, first_name, last_name, email, role')
+            .in('id', missingIds);
+
+          (extraProfiles || []).forEach((p: any) => {
+            const displayName =
+              p.name?.trim() ||
+              `${p.first_name || ''} ${p.last_name || ''}`.trim() ||
+              p.email;
+            candidateMap.set(p.id, {
+              id: p.id,
+              name: displayName,
+              role: p.role || 'agent',
+              profileId: p.id,
+            });
+          });
+        }
+
+        // Map assignedToId / assignedToName / createdById / createdByName on each ticket
+        data.tickets = data.tickets.map((t: any) => {
+          const assignedProfileId = t.assignedToId ? (lanzaIdToProfileId.get(t.assignedToId) || t.assignedToId) : null;
+          const createdProfileId = t.createdById ? (lanzaIdToProfileId.get(t.createdById) || t.createdById) : null;
+
+          const assignedProf = assignedProfileId ? candidateMap.get(assignedProfileId) : null;
+          const createdProf = createdProfileId ? candidateMap.get(createdProfileId) : null;
+
+          return {
+            ...t,
+            assignedToId: assignedProfileId,
+            assignedToName: assignedProf ? assignedProf.name : (t.assignedToName || 'Sin Asignar'),
+            createdById: createdProfileId,
+            createdByName: createdProf ? createdProf.name : (t.createdByName || 'Sistema'),
+          };
+        });
       }
     }
 
@@ -143,9 +267,11 @@ export async function POST(request: Request) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, email, full_name')
+      .select('id, email, name, first_name, last_name, role')
       .eq('id', user.id)
-      .maybeSingle<{ id: string; email: string; full_name: string; role?: string }>();
+      .maybeSingle<{ id: string; email: string; name?: string; first_name?: string; last_name?: string; role?: string }>();
+
+    const actorFullName = profile?.name?.trim() || `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || profile?.email || user.email || '';
 
     const body = await request.json();
     const action = body.action || 'create';
@@ -153,6 +279,29 @@ export async function POST(request: Request) {
     const secret = process.env.WINTERFELL_INTEGRATION_SECRET || '';
     const lanzaUrl = `${getLanzaBaseUrl()}/api/integration/v1/tickets`;
     const adminDb = getSupabaseAdmin();
+
+    // Helper: resolve target assignee profile details from Winterfell DB
+    const resolveAssigneeDetails = async (assignedToIdInput?: string | null) => {
+      if (!assignedToIdInput || typeof assignedToIdInput !== 'string' || !UUID_REGEX.test(assignedToIdInput)) {
+        return { profileId: null, fullName: undefined, email: undefined, whatsappPhone: undefined };
+      }
+      const { data: targetProf } = await adminDb
+        .from('profiles')
+        .select('id, name, first_name, last_name, email, whatsapp_phone')
+        .eq('id', assignedToIdInput)
+        .maybeSingle();
+
+      if (targetProf) {
+        const fullName = targetProf.name?.trim() || `${targetProf.first_name || ''} ${targetProf.last_name || ''}`.trim() || targetProf.email;
+        return {
+          profileId: targetProf.id,
+          fullName,
+          email: targetProf.email,
+          whatsappPhone: targetProf.whatsapp_phone || undefined,
+        };
+      }
+      return { profileId: assignedToIdInput, fullName: undefined, email: undefined, whatsappPhone: undefined };
+    };
 
     // Handle Operational Actions
     if (action === 'get') {
@@ -171,7 +320,7 @@ export async function POST(request: Request) {
           action: 'get',
           actorWinterfellProfileId: user.id,
           actorWinterfellEmail: profile?.email || user.email || '',
-          actorWinterfellFullName: profile?.full_name || '',
+          actorWinterfellFullName: actorFullName,
           actorWinterfellRole: profile?.role || 'agent',
           ticketId,
         }),
@@ -192,6 +341,46 @@ export async function POST(request: Request) {
       }
 
       const ticket = data.ticket;
+
+      // Map assignedToId / createdById to Winterfell profile IDs and names
+      const rawLanzaUsers = Array.isArray(data.appUsers) ? data.appUsers : [];
+      const lanzaIdToProfileId = new Map<string, string>();
+      rawLanzaUsers.forEach((u: any) => {
+        if (u.id && u.profileId) lanzaIdToProfileId.set(u.id, u.profileId);
+      });
+
+      const assignedProfileId = ticket.assignedToId ? (lanzaIdToProfileId.get(ticket.assignedToId) || ticket.assignedToId) : null;
+      const createdProfileId = ticket.createdById ? (lanzaIdToProfileId.get(ticket.createdById) || ticket.createdById) : null;
+
+      const profileIdsToFetch = new Set<string>();
+      if (assignedProfileId && UUID_REGEX.test(assignedProfileId)) profileIdsToFetch.add(assignedProfileId);
+      if (createdProfileId && UUID_REGEX.test(createdProfileId)) profileIdsToFetch.add(createdProfileId);
+
+      if (profileIdsToFetch.size > 0) {
+        const { data: profRows } = await adminDb
+          .from('profiles')
+          .select('id, name, first_name, last_name, email')
+          .in('id', Array.from(profileIdsToFetch));
+
+        const profMap = new Map<string, string>();
+        (profRows || []).forEach((p: any) => {
+          const name = p.name?.trim() || `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.email;
+          profMap.set(p.id, name);
+        });
+
+        if (assignedProfileId) {
+          ticket.assignedToId = assignedProfileId;
+          if (profMap.has(assignedProfileId)) {
+            ticket.assignedToName = profMap.get(assignedProfileId)!;
+          }
+        }
+        if (createdProfileId) {
+          ticket.createdById = createdProfileId;
+          if (profMap.has(createdProfileId)) {
+            ticket.createdByName = profMap.get(createdProfileId)!;
+          }
+        }
+      }
 
       // Authorize client access if ticket has an associated client
       if (ticket.clientId && UUID_REGEX.test(ticket.clientId)) {
@@ -256,15 +445,43 @@ export async function POST(request: Request) {
         } else if (ticket.policySource === 'life') {
           const { data: pRow } = await adminDb
             .from('life_policies')
-            .select('id, policy_number')
+            .select('id, policy_number, carrier')
             .eq('id', ticket.policyId)
             .maybeSingle();
           if (pRow) {
             policyDetails = {
               id: pRow.id,
               policyNumber: pRow.policy_number || null,
-              carrierName: 'Vida',
+              carrierName: pRow.carrier || 'Vida',
               source: 'life' as const,
+            };
+          }
+        } else if (ticket.policySource === 'medicare') {
+          const { data: pRow } = await adminDb
+            .from('medicare_policies')
+            .select('id, policy_number, carrier')
+            .eq('id', ticket.policyId)
+            .maybeSingle();
+          if (pRow) {
+            policyDetails = {
+              id: pRow.id,
+              policyNumber: pRow.policy_number || null,
+              carrierName: pRow.carrier || 'Medicare',
+              source: 'medicare' as const,
+            };
+          }
+        } else if (ticket.policySource === 'supplemental') {
+          const { data: pRow } = await adminDb
+            .from('supplemental_policies')
+            .select('id, policy_number, carrier')
+            .eq('id', ticket.policyId)
+            .maybeSingle();
+          if (pRow) {
+            policyDetails = {
+              id: pRow.id,
+              policyNumber: pRow.policy_number || null,
+              carrierName: pRow.carrier || 'Suplementario',
+              source: 'supplemental' as const,
             };
           }
         }
@@ -273,15 +490,11 @@ export async function POST(request: Request) {
       ticket.clientDetails = clientDetails;
       ticket.policyDetails = policyDetails;
 
-      return NextResponse.json({
-        success: true,
-        ticket,
-        appUsers: data.appUsers || [],
-      });
+      return NextResponse.json({ success: true, ticket });
     }
 
-    if (action === 'update') {
-      const { ticketId, status, priority, dueAt, assignedTo, tags } = body;
+    if (action === 'delete_ticket') {
+      const { ticketId } = body;
       if (!ticketId) {
         return NextResponse.json({ error: 'Identificador de ticket requerido.' }, { status: 400 });
       }
@@ -293,16 +506,56 @@ export async function POST(request: Request) {
           'x-winterfell-integration-secret': secret,
         },
         body: JSON.stringify({
+          action: 'delete_ticket',
+          actorWinterfellProfileId: user.id,
+          actorWinterfellEmail: profile?.email || user.email || '',
+          actorWinterfellFullName: actorFullName,
+          actorWinterfellRole: profile?.role || 'agent',
+          ticketId,
+        }),
+        cache: 'no-store',
+      });
+
+      if (!lanzaRes.ok) {
+        const errData = await lanzaRes.json().catch(() => ({}));
+        return NextResponse.json(
+          { error: errData.error || `Error al eliminar el ticket (HTTP ${lanzaRes.status}).` },
+          { status: lanzaRes.status }
+        );
+      }
+
+      const data = await lanzaRes.json();
+      return NextResponse.json(data);
+    }
+
+    if (action === 'update') {
+      const { ticketId, status, priority, dueAt, assignedTo, tags } = body;
+      if (!ticketId) {
+        return NextResponse.json({ error: 'Identificador de ticket requerido.' }, { status: 400 });
+      }
+
+      const targetAssignee = assignedTo !== undefined ? await resolveAssigneeDetails(assignedTo) : undefined;
+
+      const lanzaRes = await fetch(lanzaUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-winterfell-integration-secret': secret,
+        },
+        body: JSON.stringify({
           action: 'update',
           actorWinterfellProfileId: user.id,
           actorWinterfellEmail: profile?.email || user.email || '',
-          actorWinterfellFullName: profile?.full_name || '',
+          actorWinterfellFullName: actorFullName,
           actorWinterfellRole: profile?.role || 'agent',
           ticketId,
           status,
           priority,
           dueAt,
-          assignedToWinterfellProfileId: assignedTo !== undefined ? assignedTo : undefined,
+          assignedToWinterfellProfileId: targetAssignee ? (targetAssignee.profileId || undefined) : undefined,
+          assignedToWinterfellFullName: targetAssignee ? targetAssignee.fullName : undefined,
+          assignedToWinterfellEmail: targetAssignee ? targetAssignee.email : undefined,
+          assignedToWinterfellPhone: targetAssignee ? targetAssignee.whatsappPhone : undefined,
           tags,
         }),
         cache: 'no-store',
@@ -338,7 +591,7 @@ export async function POST(request: Request) {
           action: 'add_note',
           actorWinterfellProfileId: user.id,
           actorWinterfellEmail: profile?.email || user.email || '',
-          actorWinterfellFullName: profile?.full_name || '',
+          actorWinterfellFullName: actorFullName,
           actorWinterfellRole: profile?.role || 'agent',
           ticketId,
           content: cleanText,
@@ -375,7 +628,7 @@ export async function POST(request: Request) {
           action: 'upload_attachment',
           actorWinterfellProfileId: user.id,
           actorWinterfellEmail: profile?.email || user.email || '',
-          actorWinterfellFullName: profile?.full_name || '',
+          actorWinterfellFullName: actorFullName,
           actorWinterfellRole: profile?.role || 'agent',
           ticketId: attTicketId,
           fileName,
@@ -414,7 +667,7 @@ export async function POST(request: Request) {
           action: 'get_attachment_url',
           actorWinterfellProfileId: user.id,
           actorWinterfellEmail: profile?.email || user.email || '',
-          actorWinterfellFullName: profile?.full_name || '',
+          actorWinterfellFullName: actorFullName,
           actorWinterfellRole: profile?.role || 'agent',
           attachmentId,
         }),
@@ -433,7 +686,6 @@ export async function POST(request: Request) {
       return NextResponse.json(data);
     }
 
-
     if (action === 'add_checklist') {
       const { ticketId, title } = body;
       if (!ticketId || !title || typeof title !== 'string' || title.trim().length === 0) {
@@ -450,7 +702,7 @@ export async function POST(request: Request) {
           action: 'add_checklist',
           actorWinterfellProfileId: user.id,
           actorWinterfellEmail: profile?.email || user.email || '',
-          actorWinterfellFullName: profile?.full_name || '',
+          actorWinterfellFullName: actorFullName,
           actorWinterfellRole: profile?.role || 'agent',
           ticketId,
           title: title.trim(),
@@ -486,7 +738,7 @@ export async function POST(request: Request) {
           action: 'delete_checklist',
           actorWinterfellProfileId: user.id,
           actorWinterfellEmail: profile?.email || user.email || '',
-          actorWinterfellFullName: profile?.full_name || '',
+          actorWinterfellFullName: actorFullName,
           actorWinterfellRole: profile?.role || 'agent',
           ticketId,
           checklistId,
@@ -514,6 +766,9 @@ export async function POST(request: Request) {
       }
 
       const cleanText = rawText.trim();
+      const targetAssigneeInput = assignedToWinterfellProfileId || assignedTo;
+      const targetAssignee = targetAssigneeInput ? await resolveAssigneeDetails(targetAssigneeInput) : undefined;
+
       const lanzaRes = await fetch(lanzaUrl, {
         method: 'POST',
         headers: {
@@ -524,13 +779,15 @@ export async function POST(request: Request) {
           action: 'add_checklist_item',
           actorWinterfellProfileId: user.id,
           actorWinterfellEmail: profile?.email || user.email || '',
-          actorWinterfellFullName: profile?.full_name || '',
+          actorWinterfellFullName: actorFullName,
           actorWinterfellRole: profile?.role || 'agent',
           ticketId,
           checklistId: checklistId || undefined,
           title: cleanText,
           content: cleanText,
-          assignedToWinterfellProfileId: assignedToWinterfellProfileId || assignedTo || undefined,
+          assignedToWinterfellProfileId: targetAssignee ? (targetAssignee.profileId || undefined) : undefined,
+          assignedToWinterfellFullName: targetAssignee ? targetAssignee.fullName : undefined,
+          assignedToWinterfellEmail: targetAssignee ? targetAssignee.email : undefined,
         }),
         cache: 'no-store',
       });
@@ -563,7 +820,7 @@ export async function POST(request: Request) {
           action: 'delete_checklist_item',
           actorWinterfellProfileId: user.id,
           actorWinterfellEmail: profile?.email || user.email || '',
-          actorWinterfellFullName: profile?.full_name || '',
+          actorWinterfellFullName: actorFullName,
           actorWinterfellRole: profile?.role || 'agent',
           ticketId,
           itemId,
@@ -599,7 +856,7 @@ export async function POST(request: Request) {
           action: 'toggle_checklist_item',
           actorWinterfellProfileId: user.id,
           actorWinterfellEmail: profile?.email || user.email || '',
-          actorWinterfellFullName: profile?.full_name || '',
+          actorWinterfellFullName: actorFullName,
           actorWinterfellRole: profile?.role || 'agent',
           ticketId,
           itemId,
@@ -662,6 +919,8 @@ export async function POST(request: Request) {
       }
     }
 
+    const targetAssignee = assignedTo ? await resolveAssigneeDetails(assignedTo) : undefined;
+
     const lanzaRes = await fetch(lanzaUrl, {
       method: 'POST',
       headers: {
@@ -672,9 +931,12 @@ export async function POST(request: Request) {
         action: 'create',
         actorWinterfellProfileId: user.id,
         actorWinterfellEmail: profile?.email || user.email || '',
-        actorWinterfellFullName: profile?.full_name || '',
+        actorWinterfellFullName: actorFullName,
         actorWinterfellRole: profile?.role || 'agent',
-        assignedToWinterfellProfileId: assignedTo || null,
+        assignedToWinterfellProfileId: targetAssignee ? (targetAssignee.profileId || undefined) : undefined,
+        assignedToWinterfellFullName: targetAssignee ? targetAssignee.fullName : undefined,
+        assignedToWinterfellEmail: targetAssignee ? targetAssignee.email : undefined,
+        assignedToWinterfellPhone: targetAssignee ? targetAssignee.whatsappPhone : undefined,
         title,
         description,
         priority,

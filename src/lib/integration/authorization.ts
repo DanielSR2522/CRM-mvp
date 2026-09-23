@@ -32,7 +32,7 @@ export async function authorizeClientAccess(
 
   const { data: profile } = await adminDb
     .from('profiles')
-    .select('id')
+    .select('id, role')
     .eq('id', actorWinterfellProfileId)
     .maybeSingle();
 
@@ -40,9 +40,9 @@ export async function authorizeClientAccess(
     return { authorized: false, reason: 'actor_not_found' };
   }
 
-  const isAdmin = isOwner;
+  const isAdmin = isOwner || profile?.role === 'admin';
 
-  // 2. Fetch client record using valid schema columns (address instead of non-existent city)
+  // 2. Fetch client record
   const { data: client, error: clientErr } = await adminDb
     .from('clients')
     .select('id, full_name, email, phone, address, agent_id')
@@ -77,6 +77,17 @@ export async function authorizeClientAccess(
     );
 
     if (hasSharedAccess) {
+      return { authorized: true, client };
+    }
+
+    // 6. Assistant relationship check via agent_assistant_relationships
+    const { data: assistantRows } = await adminDb
+      .from('agent_assistant_relationships')
+      .select('agent_profile_id')
+      .eq('assistant_profile_id', actorWinterfellProfileId)
+      .eq('agent_profile_id', client.agent_id);
+
+    if (assistantRows && assistantRows.length > 0) {
       return { authorized: true, client };
     }
   }

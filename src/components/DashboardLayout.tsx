@@ -13,12 +13,15 @@ import {
 import DashboardArrivalGuard from '@/components/DashboardArrivalGuard';
 import { recordNavTrace } from '@/lib/auth/navTrace';
 import GlobalCrmSearch from '@/components/search/GlobalCrmSearch';
+import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
 function DashboardLayoutInner({ children }: DashboardLayoutProps) {
+  const { isLineEnabled } = useBusinessLines();
+  const isPcEnabled = isLineEnabled('property_casualty');
   const pathname = usePathname();
   const router = useRouter();
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -223,7 +226,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
       ),
     },
     {
-      name: 'Carrier Portals',
+      name: 'Portals',
       href: '/carrier-portals',
       icon: (
         <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -258,6 +261,15 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
         </svg>
       ),
     },
+    {
+      name: 'Usuarios y Equipo',
+      href: '/users',
+      icon: (
+        <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+        </svg>
+      ),
+    },
   ];
 
   const searchParams = useSearchParams();
@@ -275,9 +287,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
     pathname === '/commissions' ||
     pathname.startsWith('/commissions/') ||
     pathname === '/import-mapper' ||
-    pathname.startsWith('/import-mapper/') ||
-    pathname === '/agent-information' ||
-    pathname.startsWith('/agent-information/');
+    pathname.startsWith('/import-mapper/');
 
   const isFlushWorkspace = pathname.startsWith('/clients/');
 
@@ -468,24 +478,43 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
               {navItems.map((item) => {
                 const isActive = pathname === item.href || (!item.exact && pathname.startsWith(item.href + '/') && item.href !== '/dashboard');
                 return (
-                  <NextLink
-                    key={item.name}
-                    href={item.href}
-                    title={isCollapsed && mounted ? item.name : undefined}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
-                      isActive
-                        ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
-                        : 'text-[#556176] hover:bg-[#F2F6FF] hover:text-[#172033]'
-                    } ${isCollapsed && mounted ? 'justify-center px-0' : ''}`}
-                  >
-                    <span className={isActive ? 'text-[#2563EB]' : 'text-[#556176]'}>{item.icon}</span>
-                    {(!isCollapsed || !mounted) && <span className="truncate">{item.name}</span>}
-                    {(!isCollapsed || !mounted) && item.name === 'Calendar' && todayApptsCount > 0 && (
-                      <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-bold bg-[#EEF4FF] text-[#2563EB] border border-[#BFDBFE]">
-                        {todayApptsCount}
-                      </span>
+                  <React.Fragment key={item.name}>
+                    <NextLink
+                      href={item.href}
+                      title={isCollapsed && mounted ? item.name : undefined}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
+                        isActive
+                          ? 'bg-[#EEF4FF] text-[#2563EB] font-semibold'
+                          : 'text-[#556176] hover:bg-[#F2F6FF] hover:text-[#172033]'
+                      } ${isCollapsed && mounted ? 'justify-center px-0' : ''}`}
+                    >
+                      <span className={isActive ? 'text-[#2563EB]' : 'text-[#556176]'}>{item.icon}</span>
+                      {(!isCollapsed || !mounted) && <span className="truncate">{item.name}</span>}
+                      {(!isCollapsed || !mounted) && item.name === 'Calendar' && todayApptsCount > 0 && (
+                        <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-bold bg-[#EEF4FF] text-[#2563EB] border border-[#BFDBFE]">
+                          {todayApptsCount}
+                        </span>
+                      )}
+                    </NextLink>
+                    {item.name === 'Dashboard' && (!isCollapsed || !mounted) && (
+                      <div className="ml-7 my-0.5 space-y-0.5 border-l-2 border-[#E2E8F0] pl-2.5">
+                        <NextLink
+                          href="/dashboard?mode=non_pc"
+                          className="block px-2 py-1 text-[11px] font-semibold text-[#64748B] hover:text-[#2563EB] transition-colors"
+                        >
+                          + All Business (Non-P&C)
+                        </NextLink>
+                        {isPcEnabled && (
+                          <NextLink
+                            href="/dashboard?mode=pc"
+                            className="block px-2 py-1 text-[11px] font-semibold text-[#64748B] hover:text-[#2563EB] transition-colors"
+                          >
+                            P&C
+                          </NextLink>
+                        )}
+                      </div>
                     )}
-                  </NextLink>
+                  </React.Fragment>
                 );
               })}
             </nav>

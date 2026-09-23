@@ -360,6 +360,7 @@ export default function TicketWorkspaceShell() {
                 }}
                 onTicketUpdated={fetchTickets}
                 appUsers={appUsers}
+                currentUser={mappedAppUser}
               />
             ) : (
               <>

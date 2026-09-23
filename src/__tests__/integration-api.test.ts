@@ -138,6 +138,15 @@ test("Winterfell Integration Authorization - Assigned agent, Admin, Shared agent
           }),
         };
       }
+      if (table === "agent_assistant_relationships") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => Promise.resolve({ data: [], error: null }),
+            }),
+          }),
+        };
+      }
       return {};
     },
   } as any;
