@@ -150,8 +150,9 @@ export default function ConsentsDashboardPage() {
 
   // Real-time subscription to signature_requests table for automatic UI updates (no F5)
   useEffect(() => {
+    const channelName = `consents_dashboard_${Math.random().toString(36).substring(2, 7)}`;
     const channel = supabase
-      .channel('consents_dashboard_realtime')
+      .channel(channelName)
       .on(
         'postgres_changes',
         {

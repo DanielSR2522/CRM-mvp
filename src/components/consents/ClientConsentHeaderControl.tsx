@@ -54,8 +54,9 @@ export default function ClientConsentHeaderControl({
 
     if (!clientId) return;
 
+    const channelName = `header_control_${clientId}_${Math.random().toString(36).substring(2, 7)}`;
     const channel = supabase
-      .channel(`header_control_${clientId}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {

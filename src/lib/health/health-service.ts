@@ -118,7 +118,7 @@ export async function fetchClientResidence(clientId: string): Promise<ClientResi
     .eq('client_id', clientId)
     .maybeSingle();
 
-  if (residence && residence.zip_code) {
+  if (residence) {
     return {
       address: residence.address || null,
       city: residence.city || null,
@@ -134,17 +134,11 @@ export async function fetchClientResidence(clientId: string): Promise<ClientResi
     .eq('id', clientId)
     .maybeSingle();
 
-  let extractedZip: string | null = null;
-  if (client?.address) {
-    const match = client.address.match(/\b\d{5}\b/);
-    if (match) extractedZip = match[0];
-  }
-
   return {
     address: client?.address || null,
     city: null,
     state: null,
-    zipCode: extractedZip,
+    zipCode: null,
     county: null
   };
 }

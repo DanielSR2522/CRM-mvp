@@ -232,7 +232,7 @@ export default function TicketWorkspaceShell() {
 
           {/* Internal Rail Navigation Items */}
           <div className="mt-5 space-y-1">
-            <span className="block px-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="block px-2 text-xs font-semibold text-slate-500">
               Vistas
             </span>
 
@@ -369,29 +369,29 @@ export default function TicketWorkspaceShell() {
                   <div className="space-y-5">
                     <div className="grid grid-cols-4 gap-4">
                       <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
-                        <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Total Tickets</span>
+                        <span className="text-xs font-medium text-slate-500">Total Tickets</span>
                         <p className="mt-1 text-2xl font-bold text-slate-900">{stats.total}</p>
                       </div>
 
                       <div className="rounded-lg border border-indigo-200 bg-indigo-50/30 p-4">
-                        <span className="text-[11px] font-medium text-indigo-600 uppercase tracking-wider">En Progreso</span>
+                        <span className="text-xs font-medium text-indigo-600">En Progreso</span>
                         <p className="mt-1 text-2xl font-bold text-indigo-700">{stats.inProgress}</p>
                       </div>
 
                       <div className="rounded-lg border border-amber-200 bg-amber-50/30 p-4">
-                        <span className="text-[11px] font-medium text-amber-600 uppercase tracking-wider">Esperando Respuesta</span>
+                        <span className="text-xs font-medium text-amber-600">Esperando Respuesta</span>
                         <p className="mt-1 text-2xl font-bold text-amber-700">{stats.waiting}</p>
                       </div>
 
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50/30 p-4">
-                        <span className="text-[11px] font-medium text-emerald-600 uppercase tracking-wider">Resueltos / Cerrados</span>
+                        <span className="text-xs font-medium text-emerald-600">Resueltos / Cerrados</span>
                         <p className="mt-1 text-2xl font-bold text-emerald-700">{stats.resolved}</p>
                       </div>
                     </div>
 
                     {/* Quick Preview Table in Panel View */}
                     <div>
-                      <h2 className="mb-2 text-xs font-semibold text-slate-700 uppercase tracking-wider">Últimos Tickets Creados</h2>
+                      <h2 className="mb-2 text-sm font-semibold text-slate-800">Últimos Tickets Creados</h2>
                       <TicketTableView
                         tickets={tickets.slice(0, 5)}
                         selectedId={undefined}

@@ -257,7 +257,7 @@ export default function TicketFormModal({
         <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs">
           {/* CLIENT & POLICY CONTEXT SECTION */}
           <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3.5 space-y-3">
-            <span className="block text-[11px] font-bold uppercase tracking-wider text-indigo-700">
+            <span className="block text-xs font-semibold text-indigo-700">
               Cliente y Póliza
             </span>
 

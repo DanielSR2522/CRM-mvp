@@ -46,7 +46,7 @@ export default function LifePolicyTimeline({ lifePolicyId }: LifePolicyTimelineP
   return (
     <div className="space-y-3 font-sans">
       <div>
-        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 font-sans">Policy Timeline</h4>
+        <h4 className="text-sm font-semibold text-slate-800">Policy Timeline</h4>
         <p className="text-[11px] text-slate-400 font-normal">
           Chronological activity history for this Life Policy
         </p>

@@ -203,7 +203,7 @@ export default function MedicareLeftRail({
         <div className="bg-slate-50 border border-slate-200/70 rounded-xl p-3.5 space-y-3 font-sans text-xs">
           {/* Scope of Appointment Toggle */}
           <div>
-            <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5">
+            <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1.5">
               Scope of Appointment
             </label>
             <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 w-full shadow-2xs">
@@ -236,7 +236,7 @@ export default function MedicareLeftRail({
 
           {/* SOA Date */}
           <div>
-            <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
               SOA Date
             </label>
             <DatePicker
@@ -250,7 +250,7 @@ export default function MedicareLeftRail({
 
           {/* SOA Method */}
           <div>
-            <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
               SOA Method
             </label>
             <select
@@ -286,7 +286,7 @@ export default function MedicareLeftRail({
 
             <form onSubmit={handleAddLink} className="space-y-3 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-1">Title *</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Title *</label>
                 <input
                   type="text"
                   value={newLinkTitle}
@@ -298,7 +298,7 @@ export default function MedicareLeftRail({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-1">URL *</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">URL *</label>
                 <input
                   type="text"
                   value={newLinkUrl}

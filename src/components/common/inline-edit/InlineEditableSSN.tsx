@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import InlineEditActions from './InlineEditActions';
 import SSNInput from '@/components/common/SSNInput';
 import { formatSSN, maskSSN, isValidSSNLength } from '@/lib/formatters/ssn';
+import { BASE_INLINE_INPUT_CLASSES } from './editorStyles';
 
 export interface InlineEditableSSNProps {
   value: string | null | undefined;
@@ -81,19 +82,21 @@ export default function InlineEditableSSN({
 
   return (
     <div className={`w-full font-sans ${className}`}>
-      {label && <span className="block text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">{label}</span>}
+      {label && <span className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">{label}</span>}
 
       {isEditing ? (
-        <div className="flex items-center gap-1.5 w-full" onKeyDown={handleKeyDown}>
-          <SSNInput
-            value={draftValue}
-            onChange={(val) => {
-              setDraftValue(val);
-              setError(null);
-            }}
-            disabled={saving}
-            className="w-full bg-white border border-blue-500 ring-2 ring-blue-100 rounded-xl px-3 py-1.5 text-sm text-slate-900 font-bold outline-none transition-all"
-          />
+        <div className="flex items-center gap-2" onKeyDown={handleKeyDown}>
+          <div className="w-full max-w-[260px]">
+            <SSNInput
+              value={draftValue}
+              onChange={(val) => {
+                setDraftValue(val);
+                setError(null);
+              }}
+              disabled={saving}
+              className={BASE_INLINE_INPUT_CLASSES}
+            />
+          </div>
           <InlineEditActions onSave={handleSave} onCancel={handleCancel} saving={saving} error={error} />
         </div>
       ) : (
@@ -104,7 +107,7 @@ export default function InlineEditableSSN({
             disabled ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:bg-slate-100/80 hover:text-blue-600'
           }`}
         >
-          <span className="text-[15px] font-semibold text-slate-950 truncate">
+          <span className="text-[15px] font-normal text-[#253247] leading-snug truncate">
             {value ? displayFormatted() : <span className="text-slate-400 font-normal italic">{emptyDisplay}</span>}
           </span>
           {!disabled && (

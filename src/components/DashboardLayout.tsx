@@ -314,7 +314,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
   };
 
   return (
-    <div className={`min-h-screen flex ${isTopNavWorkspace ? 'flex-col' : 'flex-col md:flex-row'} bg-[#F6F8FC] text-[#172033] font-sans antialiased`}>
+    <div className={`flex ${isFlushWorkspace ? 'h-screen overflow-hidden' : 'min-h-screen'} ${isTopNavWorkspace ? 'flex-col' : 'flex-col md:flex-row'} bg-[#F6F8FC] text-[#172033] font-sans antialiased`}>
       <DashboardArrivalGuard />
 
       {/* Top Global Navigation Bar for Top-Nav Workspaces */}
@@ -568,7 +568,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
       )}
 
       {/* Main Container with Top Navigation Bar */}
-      <div className="flex-1 flex flex-col min-w-0 bg-[#F6F8FC]">
+      <div className="flex-1 flex flex-col min-w-0 bg-[#F6F8FC] h-full overflow-hidden">
         
         {/* Top White Navigation Bar */}
         {!isTopNavWorkspace && (
@@ -611,7 +611,7 @@ function DashboardLayoutInner({ children }: DashboardLayoutProps) {
         )}
 
         {/* Page Content */}
-        <main className={`flex-1 overflow-y-auto ${isTopNavWorkspace || isFlushWorkspace ? 'p-0' : 'px-4 py-6 md:px-8 md:py-8'}`}>
+        <main className={`flex-1 min-h-0 ${isFlushWorkspace ? 'overflow-hidden flex flex-col p-0 h-full' : 'overflow-y-auto ' + (isTopNavWorkspace ? 'p-0' : 'px-4 py-6 md:px-8 md:py-8')}`}>
           {children}
         </main>
       </div>

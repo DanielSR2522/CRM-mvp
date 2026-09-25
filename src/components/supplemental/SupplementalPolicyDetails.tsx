@@ -76,44 +76,44 @@ export default function SupplementalPolicyDetails({
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
           {/* Row 1 */}
           <div>
-            <span className="text-sm font-semibold text-slate-500 block mb-0.5">Product Type</span>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Product Type</span>
             <p className="text-[15px] font-semibold text-slate-950">{policy.product_type}</p>
           </div>
 
           <div>
-            <span className="text-sm font-semibold text-slate-500 block mb-0.5">Company / Carrier</span>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Company / Carrier</span>
             <p className="text-[15px] font-semibold text-slate-950">{policy.company || 'Not specified'}</p>
           </div>
 
           <div>
-            <span className="text-sm font-semibold text-slate-500 block mb-0.5">Plan Name</span>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Plan Name</span>
             <p className="text-[15px] font-semibold text-slate-950">{policy.plan_name || '—'}</p>
           </div>
 
           {/* Row 2 */}
           <div>
-            <span className="text-sm font-semibold text-slate-500 block mb-0.5">Coverage Type</span>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Coverage Type</span>
             <p className="text-[15px] font-semibold text-slate-950">{policy.coverage_type || 'Individual'}</p>
           </div>
 
           <div>
-            <span className="text-sm font-semibold text-slate-500 block mb-0.5">Member ID / Policy Number</span>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Member ID / Policy Number</span>
             <p className="text-[15px] font-semibold text-slate-950">{policy.member_id || '—'}</p>
           </div>
 
           <div>
-            <span className="text-sm font-semibold text-slate-500 block mb-0.5">Monthly Premium</span>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Monthly Premium</span>
             <p className="text-[15px] font-semibold text-emerald-600">{formattedPremium} / month</p>
           </div>
 
           {/* Row 3 */}
           <div>
-            <span className="text-sm font-semibold text-slate-500 block mb-0.5">Effective Date</span>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Effective Date</span>
             <p className="text-[15px] font-semibold text-slate-950">{formatIsoToUsDate(policy.effective_date)}</p>
           </div>
 
           <div>
-            <span className="text-sm font-semibold text-slate-500 block mb-0.5">Status</span>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Status</span>
             <p className="text-[15px] font-semibold text-slate-950">{policy.status || 'Active'}</p>
           </div>
         </div>

@@ -11,7 +11,19 @@ import { isoDateToMMDDYYYY } from '@/lib/formatters/date';
 import {
   InlineEditableText,
   InlineEditablePhone,
+  InlineEditableSSN,
+  InlineEditableDate,
+  InlineEditableSelect,
 } from '@/components/common/inline-edit';
+import { US_STATES_52, normalizeStateToCode } from '@/utils/usStates';
+import {
+  fetchAgentNpns,
+  addAgentNpn,
+  updateAgentNpn,
+  setDefaultAgentNpn,
+  deleteAgentNpn,
+  AgentNpn,
+} from '@/lib/agent/agent-npn-service';
 import { CARRIER_REGISTRY } from '@/lib/carrier-portals/carrier-registry';
 
 interface AgentDocument {
@@ -40,6 +52,15 @@ interface AgentProfileForm {
   whatsapp_phone: string;
   timezone: string;
   language: string;
+  dob: string;
+  ssn: string;
+  address: string;
+  city: string;
+  state: string;
+  zip_code: string;
+  agency_license_number: string;
+  agency_npn: string;
+  tax_id: string;
 }
 
 const US_STATES = [
@@ -113,7 +134,23 @@ export default function AgentInformationPage() {
     whatsapp_phone: '',
     timezone: 'America/New_York',
     language: 'English',
+    dob: '',
+    ssn: '',
+    address: '',
+    city: '',
+    state: '',
+    zip_code: '',
+    agency_license_number: '',
+    agency_npn: '',
+    tax_id: '',
   });
+
+  const [authorizedNpns, setAuthorizedNpns] = useState<AgentNpn[]>([]);
+  const [isAddNpnModalOpen, setIsAddNpnModalOpen] = useState(false);
+  const [newNpn, setNewNpn] = useState('');
+  const [newNpnDisplayName, setNewNpnDisplayName] = useState('');
+  const [newNpnIsDefault, setNewNpnIsDefault] = useState(false);
+  const [savingNpn, setSavingNpn] = useState(false);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -201,7 +238,21 @@ export default function AgentInformationPage() {
             whatsapp_phone: data.whatsapp_phone || '',
             timezone: data.timezone || 'America/New_York',
             language: data.language || 'English',
+            dob: data.dob || '',
+            ssn: data.ssn || '',
+            address: data.address || '',
+            city: data.city || '',
+            state: data.state || '',
+            zip_code: data.zip_code || '',
+            agency_license_number: data.agency_license_number || '',
+            agency_npn: data.agency_npn || '',
+            tax_id: data.tax_id || '',
           });
+
+          // Fetch Authorized NPNs
+          fetchAgentNpns(currentUserId)
+            .then(npns => setAuthorizedNpns(npns))
+            .catch(err => console.warn('Failed to load agent NPNs:', err));
         } else {
           setForm(prev => ({ ...prev, email: session.user.email || '' }));
         }
@@ -223,6 +274,58 @@ export default function AgentInformationPage() {
 
     loadProfile();
   }, []);
+
+  // Authorized NPN Handlers
+  const reloadNpns = async (agentId: string) => {
+    try {
+      const npns = await fetchAgentNpns(agentId);
+      setAuthorizedNpns(npns);
+    } catch (e) {
+      console.error('Failed to reload NPNs:', e);
+    }
+  };
+
+  const handleAddNpn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userId || !newNpn.trim()) return;
+    setSavingNpn(true);
+    setErrorMsg(null);
+    try {
+      await addAgentNpn(userId, newNpn, newNpnDisplayName, newNpnIsDefault);
+      await reloadNpns(userId);
+      setNewNpn('');
+      setNewNpnDisplayName('');
+      setNewNpnIsDefault(false);
+      setIsAddNpnModalOpen(false);
+      flashSuccess('Authorized NPN added successfully.');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to add NPN.');
+    } finally {
+      setSavingNpn(false);
+    }
+  };
+
+  const handleSetDefaultNpn = async (npnId: string) => {
+    if (!userId) return;
+    try {
+      await setDefaultAgentNpn(userId, npnId);
+      await reloadNpns(userId);
+      flashSuccess('Default NPN updated.');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to set default NPN.');
+    }
+  };
+
+  const handleDeleteNpn = async (npnId: string) => {
+    if (!userId) return;
+    try {
+      await deleteAgentNpn(npnId);
+      await reloadNpns(userId);
+      flashSuccess('NPN removed.');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to delete NPN.');
+    }
+  };
 
   // Fetch Agent Documents
   const loadAgentDocs = useCallback(async () => {
@@ -266,40 +369,49 @@ export default function AgentInformationPage() {
       patch = { ...fieldOrPayload };
     }
 
-    const nextFn = patch.first_name !== undefined ? patch.first_name : form.first_name;
-    const nextLn = patch.last_name !== undefined ? patch.last_name : form.last_name;
-    const computedName = `${(nextFn || '').trim()} ${(nextLn || '').trim()}`.trim() || session?.user?.email || 'Agent Profile';
+    // 1. Sanitize dob: empty string "" must become null for Postgres DATE column
+    if (patch.dob !== undefined) {
+      const trimmedDob = typeof patch.dob === 'string' ? patch.dob.trim() : patch.dob;
+      patch.dob = trimmedDob ? trimmedDob : null;
+    }
 
-    const upsertPayload = {
-      id: currentUserId,
-      name: computedName,
-      first_name: form.first_name,
-      last_name: form.last_name,
-      email: form.email,
-      phone: form.phone,
-      npn_number: form.npn_number,
-      license_number: form.license_number,
-      agency_name: form.agency_name,
-      website: form.website,
-      secondary_phone: form.secondary_phone,
-      timezone: form.timezone,
-      language: form.language,
-      business_lines: selectedLines,
-      ...patch,
-      updated_at: new Date().toISOString(),
-    };
+    // 2. Text fields: preserve string values (or null if empty where applicable)
+    if (patch.ssn !== undefined && typeof patch.ssn === 'string') {
+      patch.ssn = patch.ssn.trim() || null;
+    }
+    if (patch.tax_id !== undefined && typeof patch.tax_id === 'string') {
+      patch.tax_id = patch.tax_id.trim() || null;
+    }
 
+    // 3. Recompute full display name if editing first_name or last_name
+    if (patch.first_name !== undefined || patch.last_name !== undefined) {
+      const nextFn = patch.first_name !== undefined ? patch.first_name : form.first_name;
+      const nextLn = patch.last_name !== undefined ? patch.last_name : form.last_name;
+      patch.name = `${(nextFn || '').trim()} ${(nextLn || '').trim()}`.trim() || session?.user?.email || 'Agent Profile';
+    }
+
+    patch.updated_at = new Date().toISOString();
+
+    // Send TARGETED update payload to avoid stale unvalidated fields contaminating upsert
     const { data: updatedRow, error: profileErr } = await supabase
       .from('profiles')
-      .upsert(upsertPayload, { onConflict: 'id' })
+      .update(patch)
+      .eq('id', currentUserId)
       .select('*')
       .maybeSingle();
 
-    if (profileErr || !updatedRow) {
-      throw profileErr || new Error('Zero rows returned from Supabase profiles upsert.');
+    if (profileErr) {
+      console.error('Error saving profile field:', profileErr);
+      throw profileErr;
     }
 
-    setForm(prev => ({ ...prev, ...patch }));
+    setForm(prev => ({
+      ...prev,
+      ...patch,
+      dob: patch.dob === null ? '' : (patch.dob ?? prev.dob),
+      ssn: patch.ssn === null ? '' : (patch.ssn ?? prev.ssn),
+      tax_id: patch.tax_id === null ? '' : (patch.tax_id ?? prev.tax_id),
+    }));
     flashSuccess('Field updated successfully!');
   };
 
@@ -656,6 +768,47 @@ export default function AgentInformationPage() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-3.5">
+                    <InlineEditableDate
+                      label="DOB"
+                      value={form.dob}
+                      onSave={(val) => saveProfileField('dob', val || '')}
+                    />
+                    <InlineEditableSSN
+                      label="SSN"
+                      value={form.ssn}
+                      masked={true}
+                      onSave={(val) => saveProfileField('ssn', val)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-3.5">
+                    <InlineEditableText
+                      label="Address"
+                      value={form.address}
+                      onSave={(val) => saveProfileField('address', val)}
+                    />
+                    <InlineEditableText
+                      label="City"
+                      value={form.city}
+                      onSave={(val) => saveProfileField('city', val)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-3.5">
+                    <InlineEditableSelect
+                      label="State"
+                      value={form.state}
+                      options={US_STATES_52.map(s => ({ label: s.label, value: s.value }))}
+                      onSave={(val) => saveProfileField('state', val)}
+                    />
+                    <InlineEditableText
+                      label="ZIP"
+                      value={form.zip_code}
+                      onSave={(val) => saveProfileField('zip_code', val)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-3.5">
                     <InlineEditableText
                       label="NPN Number"
                       value={form.npn_number}
@@ -700,6 +853,148 @@ export default function AgentInformationPage() {
                       onSave={(val) => saveProfileField('website', val)}
                     />
                   </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-3.5">
+                    <InlineEditableText
+                      label="Agency License Number"
+                      value={form.agency_license_number}
+                      onSave={(val) => saveProfileField('agency_license_number', val)}
+                    />
+                    <InlineEditableText
+                      label="Agency NPN"
+                      value={form.agency_npn}
+                      onSave={(val) => saveProfileField('agency_npn', val)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-3.5">
+                    <InlineEditableText
+                      label="Tax ID / EIN"
+                      value={form.tax_id}
+                      onSave={(val) => saveProfileField('tax_id', val)}
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Authorized NPNs */}
+                <div className="space-y-3.5 pt-4 border-t border-[#F1F5F9] max-w-4xl">
+                  <div className="flex items-center justify-between border-b border-[#F1F5F9] pb-2">
+                    <div>
+                      <h2 className="text-sm font-bold text-[#0F172A]">Authorized NPNs</h2>
+                      <p className="text-xs text-[#64748B]">
+                        Authorized agent NPN numbers available for Health policies and carrier submissions.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddNpnModalOpen(true)}
+                      className="px-3 py-1.5 bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-95 text-white text-xs font-semibold rounded-lg shadow-2xs transition-all"
+                    >
+                      + Add NPN
+                    </button>
+                  </div>
+
+                  {/* Add NPN Form / Modal */}
+                  {isAddNpnModalOpen && (
+                    <form onSubmit={handleAddNpn} className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4 space-y-3">
+                      <h3 className="text-xs font-bold text-[#0F172A]">Add Authorized NPN</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-[#64748B] mb-1">NPN Number *</label>
+                          <input
+                            type="text"
+                            required
+                            value={newNpn}
+                            onChange={(e) => setNewNpn(e.target.value)}
+                            placeholder="e.g. 19827364"
+                            className="w-full bg-white border border-[#CBD5E1] rounded-lg px-3 py-1.5 text-xs text-[#0F172A] focus:outline-none focus:border-[#2563EB]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-[#64748B] mb-1">Display Name / Note</label>
+                          <input
+                            type="text"
+                            value={newNpnDisplayName}
+                            onChange={(e) => setNewNpnDisplayName(e.target.value)}
+                            placeholder="e.g. Primary ACA, Supplemental"
+                            className="w-full bg-white border border-[#CBD5E1] rounded-lg px-3 py-1.5 text-xs text-[#0F172A] focus:outline-none focus:border-[#2563EB]"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="newNpnDefault"
+                          checked={newNpnIsDefault}
+                          onChange={(e) => setNewNpnIsDefault(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded text-[#2563EB] border-[#CBD5E1]"
+                        />
+                        <label htmlFor="newNpnDefault" className="text-xs text-[#0F172A] cursor-pointer">
+                          Set as Default NPN
+                        </label>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setIsAddNpnModalOpen(false)}
+                          className="px-3 py-1 text-xs text-[#64748B] hover:text-[#0F172A]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={savingNpn}
+                          className="px-3 py-1 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold rounded-lg disabled:opacity-50"
+                        >
+                          {savingNpn ? 'Saving...' : 'Save NPN'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Authorized NPN List */}
+                  {authorizedNpns.length === 0 ? (
+                    <div className="text-xs text-[#64748B] italic py-2">No authorized NPNs added yet.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {authorizedNpns.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between bg-white border border-[#E2E8F0] rounded-lg p-3 text-xs"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="font-bold text-[#0F172A] font-mono text-sm">{item.npn}</span>
+                            {item.display_name && (
+                              <span className="text-[#64748B]">({item.display_name})</span>
+                            )}
+                            {item.is_default && (
+                              <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded font-semibold text-[10px]">
+                                Default
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {!item.is_default && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetDefaultNpn(item.id)}
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-[#0F172A] font-semibold rounded text-[11px]"
+                              >
+                                Make Default
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteNpn(item.id)}
+                              className="px-2 py-1 text-rose-600 hover:text-rose-800 font-semibold text-[11px]"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* 3. Business Lines (Distinct Visual Icons) */}

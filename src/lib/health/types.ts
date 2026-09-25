@@ -5,7 +5,7 @@ export interface HealthPolicy {
   year_renovation: number | null;
   policy_status: 'Active' | 'Pending' | 'Cancelled';
   action_pending: 'Documents' | 'Verification' | 'Call To Marketplace' | 'Completed';
-  renovation_status: 'New Policy 2026' | 'Renewal 2026' | 'Only Service';
+  renovation_status: 'New Policy 2026' | 'Renewal 2026' | 'Only Service' | null;
   npn: string | null;
   company_2026: string | null;
   application_number: string | null;

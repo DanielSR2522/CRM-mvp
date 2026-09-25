@@ -48,7 +48,7 @@ export function ClientProfileNavTabs({
   );
 
   return (
-    <div className="bg-[#F3F6FB] border-b border-slate-200/80 px-6 py-1.5 flex items-center gap-1 font-sans overflow-x-auto min-h-[57px] h-[57px]">
+    <div className="bg-[#F3F6FB] border-b border-slate-200/80 px-6 py-1.5 flex items-center gap-1 font-sans overflow-x-auto min-h-[57px] h-[57px] shrink-0">
       {navTab('Overview', 'overview', activeSection === 'overview')}
       {navTab(isCompanyClient ? 'Company Information' : 'Personal Info', 'personal-information', activeSection === 'personal-information')}
       {isLineEnabled('health') && navTab('Health', 'health', activeSection === 'health')}

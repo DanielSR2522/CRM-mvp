@@ -48,6 +48,7 @@ export interface PcDashboardProps {
   topCarrierItems: TopCarrierItem[];
 
   // Operational Table Data & Filters
+  clientMap?: Record<string, string>;
   displayedPolicies: PcPolicyRow[];
   searchQuery: string;
   setSearchQuery: (val: string) => void;
@@ -92,6 +93,7 @@ export default function PcDashboard({
   policyMixItems,
   totalPcPoliciesCount,
   topCarrierItems,
+  clientMap,
   displayedPolicies,
   searchQuery,
   setSearchQuery,
@@ -418,7 +420,7 @@ export default function PcDashboard({
                   <tr key={p.id} className="hover:bg-[#F8FAFC] transition-colors">
                     <td className="py-2 px-2.5 font-bold text-[#2563EB]">
                       <Link href={`/clients/${p.client_id}`} className="hover:underline">
-                        {p.clientName}
+                        {clientMap?.[p.client_id] || p.clientName || 'Client Record'}
                       </Link>
                     </td>
                     <td className="py-2 px-2.5">

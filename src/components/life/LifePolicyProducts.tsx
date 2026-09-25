@@ -190,8 +190,8 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
     <div className="space-y-3 font-sans">
       <div className="flex items-center justify-between">
         <div>
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 font-sans">Policy Products</h4>
-          <p className="text-[11px] text-slate-400 font-normal">Life insurance products attached to this policy</p>
+          <h4 className="text-sm font-semibold text-slate-800 font-sans">Policy Products</h4>
+          <p className="text-xs text-slate-400 font-normal">Life insurance products attached to this policy</p>
         </div>
         <button
           type="button"
@@ -221,7 +221,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
       ) : (
         <div className="overflow-x-auto rounded-lg border border-slate-200/80">
           <table className="w-full text-left text-xs font-sans">
-            <thead className="bg-slate-50 border-b border-slate-200/80 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+            <thead className="bg-slate-50 border-b border-slate-200/80 text-slate-500 font-semibold text-xs">
               <tr>
                 <th className="p-2.5">Product</th>
                 <th className="p-2.5">Company</th>
@@ -292,7 +292,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
             <form onSubmit={handleSaveProduct} className="space-y-3.5 text-xs font-sans">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Product Type *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Product Type *</label>
                   <select
                     value={productType}
                     onChange={(e) => setProductType(e.target.value as LifeProductType)}
@@ -305,7 +305,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Company / Carrier</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Company / Carrier</label>
                   <input
                     type="text"
                     value={company}
@@ -316,7 +316,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Product Policy #</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Product Policy #</label>
                   <input
                     type="text"
                     value={policyNumber}
@@ -327,7 +327,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Policy Date</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Policy Date</label>
                   <USDateInput
                     value={policyDate}
                     onChange={(isoVal) => setPolicyDate(isoVal)}
@@ -335,7 +335,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Face Amount ($)</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Face Amount ($)</label>
                   <input
                     type="text"
                     value={faceAmount}
@@ -346,7 +346,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Monthly Premium ($)</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Monthly Premium ($)</label>
                   <input
                     type="text"
                     value={monthlyPremium}
@@ -357,7 +357,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Time to Pay Premium</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Time to Pay Premium</label>
                   <input
                     type="text"
                     value={timeToPayPremium}
@@ -368,7 +368,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Level Period</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Level Period</label>
                   <input
                     type="text"
                     value={levelPeriod}
@@ -379,7 +379,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Conversion Credit ($)</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Conversion Credit ($)</label>
                   <input
                     type="text"
                     value={conversionCredit}

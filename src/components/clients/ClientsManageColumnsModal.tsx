@@ -90,7 +90,7 @@ export default function ClientsManageColumnsModal({
                   />
                   <span>{col.label}</span>
                 </div>
-                {isRequired && <span className="text-[10px] text-slate-400 font-bold uppercase">Required</span>}
+                {isRequired && <span className="text-xs font-medium text-slate-400">Required</span>}
               </label>
             );
           })}

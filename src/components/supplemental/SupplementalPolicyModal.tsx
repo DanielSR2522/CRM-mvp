@@ -165,11 +165,11 @@ export default function SupplementalPolicyModal({
 
           {/* Section 1: Policy Information */}
           <div className="space-y-3">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Policy Details</h4>
+            <h4 className="text-sm font-semibold text-slate-800">Policy Details</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Product Type */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   Product Type <span className="text-rose-500">*</span>
                 </label>
                 <select
@@ -185,7 +185,7 @@ export default function SupplementalPolicyModal({
 
               {/* Company / Carrier */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   Company / Carrier
                 </label>
                 <input
@@ -199,7 +199,7 @@ export default function SupplementalPolicyModal({
 
               {/* Plan Name */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   Plan Name
                 </label>
                 <input
@@ -213,7 +213,7 @@ export default function SupplementalPolicyModal({
 
               {/* Coverage Type */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   Coverage Type
                 </label>
                 <select
@@ -229,7 +229,7 @@ export default function SupplementalPolicyModal({
 
               {/* Member ID / Policy Number */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   Member ID / Policy Number
                 </label>
                 <input
@@ -243,7 +243,7 @@ export default function SupplementalPolicyModal({
 
               {/* Monthly Premium */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   Monthly Premium ($)
                 </label>
                 <input
@@ -270,7 +270,7 @@ export default function SupplementalPolicyModal({
 
               {/* Status */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   Status
                 </label>
                 <select
@@ -288,10 +288,10 @@ export default function SupplementalPolicyModal({
 
           {/* Section 2: Beneficiary Information */}
           <div className="pt-3 border-t border-slate-100 space-y-3">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Beneficiary Information</h4>
+            <h4 className="text-sm font-semibold text-slate-800">Beneficiary Information</h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   Beneficiary Name
                 </label>
                 <input
@@ -304,7 +304,7 @@ export default function SupplementalPolicyModal({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">
                   Beneficiary Phone
                 </label>
                 <input

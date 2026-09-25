@@ -12,11 +12,16 @@ interface Props {
 }
 
 export default function MedicareDetailsForm({ data, onChange, onSave, saving = false }: Props) {
+  const baseInputClass =
+    'h-[34px] w-full max-w-[260px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans';
+  const baseSelectClass =
+    'h-[34px] w-full max-w-[260px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans cursor-pointer';
+
   return (
     <div className="space-y-4 font-sans text-sm">
       <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
         <div>
-          <h4 className="text-[16px] font-bold text-slate-950 tracking-tight">
+          <h4 className="text-[16px] font-semibold text-[#111827] tracking-tight">
             Medicare Information 2026
           </h4>
           <p className="text-[12px] text-slate-500 mt-0.5 font-normal">
@@ -41,7 +46,7 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
         <div className="space-y-3">
           {/* MBI */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               MBI (Medicare Beneficiary Identifier)
             </label>
             <input
@@ -50,48 +55,52 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
               value={data.mbi || ''}
               onChange={(e) => onChange('mbi', e.target.value || null)}
               placeholder="e.g. 1EG4-TE5-MK72"
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-[15px] text-slate-950 font-mono font-semibold placeholder-slate-400 outline-none transition-all uppercase"
+              className={`${baseInputClass} font-mono uppercase`}
             />
           </div>
 
           {/* Part A Effective Date */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               Hospital (Part A) Effective Date
             </label>
-            <DatePicker
-              value={data.part_a_effective_date}
-              onChange={(isoDate) => onChange('part_a_effective_date', isoDate)}
-              disabled={saving}
-              placeholder="MM/DD/YYYY"
-              optional
-            />
+            <div className="w-full max-w-[220px]">
+              <DatePicker
+                value={data.part_a_effective_date}
+                onChange={(isoDate) => onChange('part_a_effective_date', isoDate)}
+                disabled={saving}
+                placeholder="MM/DD/YYYY"
+                optional
+              />
+            </div>
           </div>
 
           {/* Part B Effective Date */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               Medical (Part B) Effective Date
             </label>
-            <DatePicker
-              value={data.part_b_effective_date}
-              onChange={(isoDate) => onChange('part_b_effective_date', isoDate)}
-              disabled={saving}
-              placeholder="MM/DD/YYYY"
-              optional
-            />
+            <div className="w-full max-w-[220px]">
+              <DatePicker
+                value={data.part_b_effective_date}
+                onChange={(isoDate) => onChange('part_b_effective_date', isoDate)}
+                disabled={saving}
+                placeholder="MM/DD/YYYY"
+                optional
+              />
+            </div>
           </div>
 
           {/* Part C Subtype */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               Advantage Plan Subtype (Part C)
             </label>
             <select
               disabled={saving}
               value={data.part_c_subtype || ''}
               onChange={(e) => onChange('part_c_subtype', e.target.value || null)}
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-sm text-slate-900 font-semibold outline-none transition-all"
+              className={baseSelectClass}
             >
               <option value="">Select Subtype...</option>
               <option value="HMO">HMO (Health Maintenance Organization)</option>
@@ -106,14 +115,14 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
 
           {/* Medicaid Level */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               Medicaid Level
             </label>
             <select
               disabled={saving}
               value={data.medicaid_level || ''}
               onChange={(e) => onChange('medicaid_level', e.target.value || null)}
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-sm text-slate-900 font-semibold outline-none transition-all"
+              className={baseSelectClass}
             >
               <option value="">Select Medicaid Level...</option>
               <option value="Full Medicaid">Full Medicaid</option>
@@ -129,7 +138,7 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
 
           {/* Medicaid ID */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               Medicaid ID
             </label>
             <input
@@ -138,7 +147,7 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
               value={data.medicaid_id || ''}
               onChange={(e) => onChange('medicaid_id', e.target.value || null)}
               placeholder="Medicaid ID number"
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-sm text-slate-900 font-semibold placeholder-slate-400 outline-none transition-all"
+              className={baseInputClass}
             />
           </div>
         </div>
@@ -147,14 +156,14 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
         <div className="space-y-3">
           {/* Medicare Renewal Status */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               Medicare Renewal Status
             </label>
             <select
               disabled={saving}
               value={data.renewal_status || ''}
               onChange={(e) => onChange('renewal_status', e.target.value || null)}
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-sm text-slate-900 font-semibold outline-none transition-all"
+              className={baseSelectClass}
             >
               <option value="">Select Renewal Status...</option>
               <option value="Active">Active</option>
@@ -167,7 +176,7 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
 
           {/* Medicare Company */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               Medicare Company / Carrier
             </label>
             <input
@@ -176,13 +185,13 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
               value={data.company || ''}
               onChange={(e) => onChange('company', e.target.value || null)}
               placeholder="e.g. Humana, UnitedHealthcare"
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-sm text-slate-900 font-semibold placeholder-slate-400 outline-none transition-all"
+              className={baseInputClass}
             />
           </div>
 
           {/* Plan Name */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               Plan Name
             </label>
             <input
@@ -191,13 +200,13 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
               value={data.plan_name || ''}
               onChange={(e) => onChange('plan_name', e.target.value || null)}
               placeholder="e.g. Humana Choice HMO-POS"
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-sm text-slate-900 font-semibold placeholder-slate-400 outline-none transition-all"
+              className={baseInputClass}
             />
           </div>
 
           {/* Plan ID */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               Plan ID
             </label>
             <input
@@ -206,22 +215,24 @@ export default function MedicareDetailsForm({ data, onChange, onSave, saving = f
               value={data.plan_id || ''}
               onChange={(e) => onChange('plan_id', e.target.value || null)}
               placeholder="e.g. H1036-089-0"
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-sm text-slate-900 font-mono font-semibold placeholder-slate-400 outline-none transition-all uppercase"
+              className={`${baseInputClass} font-mono uppercase`}
             />
           </div>
 
           {/* Plan Effective Date */}
           <div className="grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[38px]">
-            <label className="text-slate-500 font-medium leading-snug break-words text-right">
+            <label className="text-[15px] font-normal text-[#52627A] leading-snug break-words text-right">
               Plan Effective Date
             </label>
-            <DatePicker
-              value={data.plan_effective_date}
-              onChange={(isoDate) => onChange('plan_effective_date', isoDate)}
-              disabled={saving}
-              placeholder="MM/DD/YYYY"
-              optional
-            />
+            <div className="w-full max-w-[220px]">
+              <DatePicker
+                value={data.plan_effective_date}
+                onChange={(isoDate) => onChange('plan_effective_date', isoDate)}
+                disabled={saving}
+                placeholder="MM/DD/YYYY"
+                optional
+              />
+            </div>
           </div>
         </div>
       </div>

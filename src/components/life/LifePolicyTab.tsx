@@ -114,20 +114,7 @@ export default function LifePolicyTab({
   }
 
   return (
-    <div className="flex flex-col w-full font-sans min-h-screen bg-white">
-      {/* 1. White Client Identity Header Bar */}
-      <HealthClientHeader
-        clientId={clientId}
-        clientName={clientName}
-        photoUrl={photoUrl}
-        lastUpdated={lastUpdated}
-        onSendEmail={onSendEmail}
-        onConsent={onConsent}
-        onDeleteProfile={onDeleteProfile}
-        isCompanyClient={isCompanyClient}
-        activeSection="life"
-        hideNavStrip={true}
-      />
+    <div className="flex flex-col w-full flex-1 min-h-0 overflow-hidden h-full font-sans bg-white">
 
       {/* 2. Main Workspace Layout */}
       <div className="flex flex-col lg:flex-row items-stretch w-full flex-1 min-h-0">
@@ -142,7 +129,7 @@ export default function LifePolicyTab({
         <div className="hidden lg:block w-2 shrink-0 bg-slate-100 self-stretch" />
 
         {/* Right Main Content Workspace */}
-        <div className="flex-1 w-full min-w-0 bg-white flex flex-col">
+        <div className="flex-1 w-full min-w-0 bg-white flex flex-col min-h-0 overflow-hidden h-full">
           {/* Profile Navigation Strip */}
           <ClientProfileNavTabs
             clientId={clientId}
@@ -151,13 +138,13 @@ export default function LifePolicyTab({
           />
 
           {/* Main Content Area starting directly below tabs */}
-          <div className="p-6 flex-1 bg-white space-y-6 font-sans">
+          <main id="life-main-content-panel" className="p-6 flex-1 bg-white space-y-6 overflow-y-auto min-h-0 h-full font-sans">
           {/* SUBTAB 1: SUMMARY */}
           {activeSubtab === 'summary' && (
             <div className="space-y-4 animate-in fade-in duration-150">
               <div className="bg-white border border-slate-200/70 rounded-xl p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 font-sans">
                 <div>
-                  <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
+                  <h3 className="text-[16px] font-semibold text-[#111827] leading-6">
                     Life Policies
                   </h3>
                   <p className="text-xs text-slate-500 font-medium mt-0.5">
@@ -235,7 +222,7 @@ export default function LifePolicyTab({
             <div className="space-y-4 animate-in fade-in duration-150">
               {policies.length > 1 && (
                 <div className="bg-white border border-slate-200/80 rounded-xl p-3 flex items-center justify-between gap-3 shadow-2xs font-sans">
-                  <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">Target Life Policy:</span>
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug">Target Life Policy:</span>
                   <select
                     value={selectedLifePolicyId || ''}
                     onChange={(e) => setSelectedLifePolicyId(e.target.value || null)}
@@ -262,7 +249,7 @@ export default function LifePolicyTab({
           {activeSubtab === 'timeline' && (
             <div className="bg-white border border-slate-200/70 rounded-xl p-6 shadow-2xs space-y-4 animate-in fade-in duration-150 font-sans">
               <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">Life Activity Timeline</h3>
+                <h3 className="text-[16px] font-semibold text-[#111827] leading-6">Life Activity Timeline</h3>
                 <p className="text-xs text-slate-500 mt-0.5 font-medium">Chronological record of Life policy updates and status changes.</p>
               </div>
               <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 text-xs">
@@ -281,7 +268,7 @@ export default function LifePolicyTab({
           {activeSubtab === 'links' && (
             <div className="bg-white border border-slate-200/70 rounded-xl p-6 shadow-2xs space-y-4 animate-in fade-in duration-150 font-sans">
               <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">Saved Client Links</h3>
+                <h3 className="text-[16px] font-semibold text-[#111827] leading-6">Saved Client Links</h3>
                 <p className="text-xs text-slate-500 mt-0.5 font-medium">Quick reference links for Life portals and carrier tools.</p>
               </div>
               <p className="text-xs text-slate-600">
@@ -289,7 +276,7 @@ export default function LifePolicyTab({
               </p>
             </div>
           )}
-        </div>
+        </main>
       </div>
     </div>
     </div>

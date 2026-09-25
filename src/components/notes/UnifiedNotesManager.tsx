@@ -384,7 +384,7 @@ export default function UnifiedNotesManager({
           {/* Category Selector (Mandatory if central view) */}
           {!inferredCategory && (
             <div className="w-full sm:w-1/2">
-              <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
                 Category / Module <span className="text-rose-500">*</span>
               </label>
               <select
@@ -409,7 +409,7 @@ export default function UnifiedNotesManager({
           {/* Policy Association Dropdown */}
           {!policyId && !healthPolicyId && (
             <div className={`w-full ${!inferredCategory ? 'sm:w-1/2' : 'sm:w-full'}`}>
-              <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
                 Link to Policy (Optional)
               </label>
               <select
@@ -430,7 +430,7 @@ export default function UnifiedNotesManager({
 
         {/* Optional Note Title */}
         <div>
-          <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
+          <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
             Note Title <span className="text-slate-400 font-normal">(Optional)</span>
           </label>
           <input
@@ -444,7 +444,7 @@ export default function UnifiedNotesManager({
 
         {/* Textarea Composer */}
         <div>
-          <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
+          <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
             Note Content (Ctrl+V to paste screenshot)
           </label>
           <textarea

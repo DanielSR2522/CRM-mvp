@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from '@/components/DashboardLayout';
 import CrmPageContainer from '@/components/layout/CrmPageContainer';
 import { supabase } from '@/lib/supabaseClient';
@@ -51,8 +51,10 @@ const WHITELIST_BULK_FIELDS = [
   { id: 'address', label: 'Address / Location', type: 'text' },
 ];
 
-export default function ClientsPage() {
+function ClientsPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const urlAgentId = searchParams ? (searchParams.get('agent_id') || searchParams.get('agent') || searchParams.get('profile_id')) : null;
 
   // Core Data States
   const [clients, setClients] = useState<ClientProfile[]>([]);
@@ -178,6 +180,7 @@ export default function ClientsPage() {
 
       const currentAgentId = currentUser.id;
       const isAgencyOwner = currentAgentId === AMANDA_UUID || currentAgentId === LAURA_UUID;
+      const targetAgentId = urlAgentId || (!isAgencyOwner || quickView === 'my_clients' ? currentAgentId : null);
 
       // Step 1: Check active policy filter categories and policy field rules
       const selectedPolicyTypes = Object.entries(policyTypeFilter)
@@ -293,9 +296,9 @@ export default function ClientsPage() {
           updated_at
         `, { count: 'exact' });
 
-      // Ownership Scope: Filter by current agent's owned clients unless user is an agency owner/admin
-      if (!isAgencyOwner || quickView === 'my_clients') {
-        clientQuery = clientQuery.eq('agent_id', currentAgentId);
+      // Ownership Scope: Filter by target agent's owned clients if specified or for non-owners / my_clients
+      if (targetAgentId) {
+        clientQuery = clientQuery.eq('agent_id', targetAgentId);
       }
 
       // Quick View Filters
@@ -336,6 +339,7 @@ export default function ClientsPage() {
         if (r.field === 'email') clientQuery = clientQuery.ilike('email', `%${r.value}%`);
         if (r.field === 'phone') clientQuery = clientQuery.ilike('phone', `%${r.value}%`);
         if (r.field === 'client_type') clientQuery = clientQuery.eq('client_type', r.value);
+        if (r.field === 'agent_id') clientQuery = clientQuery.eq('agent_id', r.value);
         if (r.field === 'address' || r.field === 'city' || r.field === 'state' || r.field === 'zip_code') {
           clientQuery = clientQuery.ilike('address', `%${r.value}%`);
         }
@@ -408,7 +412,7 @@ export default function ClientsPage() {
     } finally {
       setLoading(false);
     }
-  }, [authLoading, currentUser, router, quickView, searchQuery, sortBy, policyTypeFilter, filterRules, page, pageSize]);
+  }, [authLoading, currentUser, router, quickView, searchQuery, sortBy, policyTypeFilter, filterRules, page, pageSize, urlAgentId]);
 
   useEffect(() => {
     loadClientsServerSide();
@@ -1142,5 +1146,13 @@ export default function ClientsPage() {
         currentUserId={currentUser?.id || ''}
       />
     </DashboardLayout>
+  );
+}
+
+export default function ClientsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClientsPageContent />
+    </Suspense>
   );
 }

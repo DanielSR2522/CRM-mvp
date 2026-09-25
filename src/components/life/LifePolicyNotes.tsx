@@ -101,7 +101,7 @@ export default function LifePolicyNotes({ lifePolicyId, onNotesChange }: LifePol
   return (
     <div className="space-y-3 font-sans">
       <div>
-        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 font-sans">Policy Internal Notes</h4>
+        <h4 className="text-sm font-semibold text-slate-800">Policy Internal Notes</h4>
         <p className="text-[11px] text-slate-400 font-normal">Internal notes and logs scoped to this policy</p>
       </div>
 
@@ -140,7 +140,7 @@ export default function LifePolicyNotes({ lifePolicyId, onNotesChange }: LifePol
           {notes.map((n) => (
             <div key={n.id} className="p-3 bg-slate-50/80 border border-slate-200/80 rounded-lg space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                <span className="text-[11px] font-medium text-slate-400">
                   {isoDateToMMDDYYYY(n.created_at)}
                 </span>
                 <button

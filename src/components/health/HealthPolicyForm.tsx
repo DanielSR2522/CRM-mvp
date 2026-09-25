@@ -36,6 +36,7 @@ import HealthMedicalSection from './HealthMedicalSection';
 import { MarketplacePlanPreview, MarketplaceClientContext } from '@/lib/marketplace/types';
 import { transformHouseholdToMarketplacePeople } from '@/lib/marketplace/people-helper';
 import { saveMarketplacePlanSnapshot, fetchLatestMarketplaceSnapshot } from '@/lib/marketplace/snapshot-service';
+import { fetchAgentNpns, AgentNpn, formatAgentNpnLabel } from '@/lib/agent/agent-npn-service';
 
 // Helper to calculate age dynamically from DOB string without timezone offset
 const calculateAgeFromDob = (dobStr: string | null | undefined): string => {
@@ -71,8 +72,9 @@ export default function HealthPolicyForm({
   const [yearRenovation, setYearRenovation] = useState('');
   const [policyStatus, setPolicyStatus] = useState<'Active' | 'Pending' | 'Cancelled'>('Pending');
   const [actionPending, setActionPending] = useState<'Documents' | 'Verification' | 'Call To Marketplace' | 'Completed'>('Documents');
-  const [renovationStatus, setRenovationStatus] = useState<'New Policy 2026' | 'Renewal 2026' | 'Only Service'>('New Policy 2026');
+  const [renovationStatus, setRenovationStatus] = useState<'New Policy 2026' | 'Renewal 2026' | 'Only Service' | null>('New Policy 2026');
   const [npn, setNpn] = useState('');
+  const [authorizedNpns, setAuthorizedNpns] = useState<AgentNpn[]>([]);
 
   const [company2026, setCompany2026] = useState('');
   const [applicationNumber, setApplicationNumber] = useState('');
@@ -191,6 +193,30 @@ export default function HealthPolicyForm({
         .catch(err => console.error('Failed to load client residence for health:', err));
 
       loadIncome();
+
+      const loadAgentNpns = async () => {
+        try {
+          const { data: clientData } = await supabase
+            .from('clients')
+            .select('agent_id')
+            .eq('id', clientId)
+            .maybeSingle();
+
+          let targetAgentId = clientData?.agent_id;
+          if (!targetAgentId) {
+            const { data: { session } } = await supabase.auth.getSession();
+            targetAgentId = session?.user?.id;
+          }
+          if (targetAgentId) {
+            const npns = await fetchAgentNpns(targetAgentId);
+            setAuthorizedNpns(npns);
+          }
+        } catch (err: any) {
+          console.warn('Failed to load client agent NPNs:', err);
+        }
+      };
+
+      loadAgentNpns();
     }
 
     const handleIncomeUpdated = () => {
@@ -940,6 +966,22 @@ export default function HealthPolicyForm({
     validationErrors: peopleResult.validationErrors
   }), [activeCoverageYear, activeZip, activeState, clientResidence?.county, activeIncome, peopleResult]);
 
+  const npnSelectOptions = useMemo(() => {
+    const list = authorizedNpns.map(item => ({
+      value: item.npn,
+      label: formatAgentNpnLabel(item.npn, item.display_name)
+    }));
+
+    if (initialPolicy?.npn && !list.some(o => o.value === initialPolicy.npn)) {
+      list.unshift({
+        value: initialPolicy.npn,
+        label: initialPolicy.npn
+      });
+    }
+
+    return list;
+  }, [authorizedNpns, initialPolicy?.npn]);
+
   useEffect(() => {
     if (onMarketplaceContextUpdated) {
       onMarketplaceContextUpdated({
@@ -993,26 +1035,26 @@ export default function HealthPolicyForm({
       )}
 
       {/* PARENT FULL-WIDTH PAGE LAYOUT STARTING AT AGENCY INFORMATION */}
-      <div className="w-full space-y-6 font-sans">
+      <div className="w-full space-y-8 font-sans">
         {/* SECTION 1 — Agency Information */}
-        <div className="space-y-4 font-sans">
-            <div className="flex items-center justify-between pb-2.5">
-              <h4 className="text-base font-bold text-slate-900 tracking-tight">
-                Agency Information
-              </h4>
-          <span className="text-xs font-medium text-slate-400">
-            Click value to edit
-          </span>
-        </div>
+        <div>
+          <div className="flex items-center justify-between mb-5">
+            <h4 className="text-base font-bold text-slate-900 tracking-tight">
+              Agency Information
+            </h4>
+            <span className="text-xs font-medium text-slate-400">
+              Click value to edit
+            </span>
+          </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 max-w-[850px] gap-x-12 gap-y-1 text-sm font-sans">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
           {/* LEFT COLUMN */}
           <div className="space-y-0">
             {/* 1. Enrolled */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">Enrolled</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Enrolled</span>
               {editingAgencyField === 'active' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <select
                     value={agencyDraftValue ? 'Yes' : 'No'}
                     onChange={e => setAgencyDraftValue(e.target.value === 'Yes')}
@@ -1052,7 +1094,7 @@ export default function HealthPolicyForm({
                     setAgencyDraftValue(isActive);
                     setAgencyFieldError(null);
                   }}
-                  className="text-[15px] font-semibold text-slate-950 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Enrolled"
                 >
                   {isActive ? 'Yes' : 'No'}
@@ -1061,10 +1103,10 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 2. Renovation Year 2026 */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">Renovation Year 2026</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Renovation Year 2026</span>
               {editingAgencyField === 'yearRenovation' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <input
                     type="text"
                     value={agencyDraftValue}
@@ -1102,7 +1144,7 @@ export default function HealthPolicyForm({
                     setAgencyDraftValue(yearRenovation || '2026');
                     setAgencyFieldError(null);
                   }}
-                  className="text-[15px] font-semibold text-slate-950 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Renovation Year"
                 >
                   {yearRenovation || '2026'}
@@ -1111,17 +1153,17 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 3. Notes */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">Notes</span>
-              <span className="text-[15px] font-semibold text-slate-950 select-none">
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Notes</span>
+              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
                 {notesCount}
               </span>
             </div>
 
             {/* 4. Documents */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-sm font-semibold text-slate-500 leading-snug break-words text-right">Documents</span>
-              <span className="text-[15px] font-semibold text-slate-950 select-none">
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Documents</span>
+              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
                 {documentsCount}
               </span>
             </div>
@@ -1130,14 +1172,14 @@ export default function HealthPolicyForm({
           {/* RIGHT COLUMN */}
           <div className="space-y-0">
             {/* 1. Policy Status */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Policy Status</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Policy Status</span>
               {editingAgencyField === 'policyStatus' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <select
                     value={agencyDraftValue || 'Pending'}
                     onChange={e => setAgencyDraftValue(e.target.value)}
-                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingAgencyField(null);
@@ -1174,7 +1216,7 @@ export default function HealthPolicyForm({
                     setAgencyDraftValue(policyStatus || 'Pending');
                     setAgencyFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Policy Status"
                 >
                   {policyStatus || '—'}
@@ -1183,14 +1225,14 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 2. Action Pending */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Action Pending</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Action Pending</span>
               {editingAgencyField === 'actionPending' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <select
                     value={agencyDraftValue || 'Documents'}
                     onChange={e => setAgencyDraftValue(e.target.value)}
-                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingAgencyField(null);
@@ -1228,7 +1270,7 @@ export default function HealthPolicyForm({
                     setAgencyDraftValue(actionPending || 'Documents');
                     setAgencyFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Action Pending"
                 >
                   {actionPending || '—'}
@@ -1237,14 +1279,14 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 3. Renovation Status */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Renovation Status</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Renovation Status</span>
               {editingAgencyField === 'renovationStatus' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <select
                     value={agencyDraftValue}
                     onChange={e => setAgencyDraftValue(e.target.value)}
-                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingAgencyField(null);
@@ -1281,7 +1323,7 @@ export default function HealthPolicyForm({
                     setAgencyDraftValue(renovationStatus);
                     setAgencyFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Renovation Status"
                 >
                   {renovationStatus || '—'}
@@ -1290,29 +1332,34 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 4. Agent */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Agent</span>
-              <span className="text-slate-900 font-semibold select-none">
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Agent</span>
+              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
                 {agentName || '—'}
               </span>
             </div>
 
             {/* 5. NPN */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">NPN</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">NPN</span>
               {editingAgencyField === 'npn' ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                  <select
                     value={agencyDraftValue}
                     onChange={e => setAgencyDraftValue(e.target.value)}
-                    className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] font-normal outline-none cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingAgencyField(null);
                       if (e.key === 'Enter') handleInlineSaveAgencyField('npn', agencyDraftValue);
                     }}
-                  />
+                  >
+                    {npnSelectOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
                   <button
                     type="button"
                     disabled={agencyFieldSaving}
@@ -1336,21 +1383,21 @@ export default function HealthPolicyForm({
                 <span
                   onClick={() => {
                     setEditingAgencyField('npn');
-                    setAgencyDraftValue(npn);
+                    setAgencyDraftValue(npn || (npnSelectOptions[0]?.value ?? ''));
                     setAgencyFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit NPN"
                 >
-                  {npn || '—'}
+                  {npnSelectOptions.find(o => o.value === npn)?.label || npn || '—'}
                 </span>
               )}
             </div>
 
             {/* 6. Consent Ready */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Consent Ready</span>
-              <span className="text-slate-900 font-semibold select-none">
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Consent Ready</span>
+              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
                 {isConsentReady ? 'Yes' : 'No'}
               </span>
             </div>
@@ -1359,8 +1406,8 @@ export default function HealthPolicyForm({
       </div>
 
         {/* SECTION 2 — Health Information 2026 */}
-        <div className="space-y-4 font-sans">
-          <div className="flex items-center justify-between pb-2.5">
+        <div>
+          <div className="flex items-center justify-between mb-5">
             <h4 className="text-base font-bold text-slate-900 tracking-tight">
               Health Information 2026
             </h4>
@@ -1369,14 +1416,14 @@ export default function HealthPolicyForm({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 max-w-[850px] gap-x-12 gap-y-1 text-sm font-sans">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
             {/* LEFT COLUMN */}
             <div className="space-y-0">
               {/* 1. Company 2026 */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Company 2026</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Company 2026</span>
                 {editingHealthField === 'company2026' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <input
                       type="text"
                       value={healthDraftValue}
@@ -1415,7 +1462,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(company2026);
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                     title="Click to edit Company 2026"
                   >
                     {company2026 || '—'}
@@ -1424,14 +1471,14 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 2. Type Plan */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Type Plan</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Type Plan</span>
                 {editingHealthField === 'typePlan' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <select
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
-                      className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                       autoFocus
                       onKeyDown={e => {
                         if (e.key === 'Escape') setEditingHealthField(null);
@@ -1471,7 +1518,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(typePlan);
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                     title="Click to edit Type Plan"
                   >
                     {typePlan || '—'}
@@ -1480,10 +1527,10 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 3. Plan ID */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Plan ID</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Plan ID</span>
                 {editingHealthField === 'planId' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <input
                       type="text"
                       value={healthDraftValue}
@@ -1522,7 +1569,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(planId);
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                     title="Click to edit Plan ID"
                   >
                     {planId || '—'}
@@ -1531,16 +1578,16 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 4. Plan Name */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Plan Name</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Plan Name</span>
                 {editingHealthField === 'planName' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <input
                       type="text"
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
                       placeholder="Plan Name..."
-                      className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[260px]"
                       autoFocus
                       onKeyDown={e => {
                         if (e.key === 'Escape') setEditingHealthField(null);
@@ -1573,7 +1620,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(planName);
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors break-words max-w-[260px]"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors break-words max-w-[260px]"
                     title={planName || 'Click to edit Plan Name'}
                   >
                     {planName || '—'}
@@ -1582,10 +1629,10 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 5. No. Membership */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">No. Membership</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">No. Membership</span>
                 {editingHealthField === 'noMembership' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <input
                       type="text"
                       value={healthDraftValue}
@@ -1624,7 +1671,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(noMembership);
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                     title="Click to edit Membership Number"
                   >
                     {noMembership || '—'}
@@ -1633,10 +1680,10 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 6. Plan Cost */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Plan Cost</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Plan Cost</span>
                 {editingHealthField === 'planCost' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <input
                       type="number"
                       step="0.01"
@@ -1676,7 +1723,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(planCost);
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                     title="Click to edit Plan Cost"
                   >
                     ${Number(planCost || 0).toFixed(2)}
@@ -1685,10 +1732,10 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 7. Tax Credit */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Tax Credit</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Tax Credit</span>
                 {editingHealthField === 'taxCredit' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <input
                       type="number"
                       step="0.01"
@@ -1728,7 +1775,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(taxCredit);
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                     title="Click to edit Tax Credit"
                   >
                     ${Number(taxCredit || 0).toFixed(2)}
@@ -1737,24 +1784,24 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 8. Monthly Premium */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Monthly Premium</span>
-                <span className="text-slate-900 font-bold select-none">
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Monthly Premium</span>
+                <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
                   ${monthlyPremium}
                 </span>
               </div>
 
               {/* 9. Effective Date */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Effective Date</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Effective Date</span>
                 {editingHealthField === 'effectiveDate' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <input
                       type="text"
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(formatAsDateInput(e.target.value))}
                       placeholder="MM/DD/YYYY"
-                      className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+                      className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                       autoFocus
                       onKeyDown={e => {
                         if (e.key === 'Escape') setEditingHealthField(null);
@@ -1787,7 +1834,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(effectiveDate ? formatDateForDisplay(effectiveDate) : '');
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                     title="Click to edit Effective Date"
                   >
                     {effectiveDate ? formatDateForDisplay(effectiveDate) : '—'}
@@ -1796,9 +1843,9 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 10. Coverage Members Count */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Coverage Members Count</span>
-                <span className="text-slate-900 font-semibold select-none">
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Coverage Members Count</span>
+                <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
                   {calculatedCoverageMembersCount}
                 </span>
               </div>
@@ -1807,10 +1854,10 @@ export default function HealthPolicyForm({
             {/* RIGHT COLUMN */}
             <div className="space-y-0">
               {/* 1. Application Number 2026 */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Application Number 2026</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Application Number 2026</span>
                 {editingHealthField === 'applicationNumber' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <input
                       type="text"
                       value={healthDraftValue}
@@ -1849,7 +1896,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(applicationNumber);
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                     title="Click to edit Application Number"
                   >
                     {applicationNumber || '—'}
@@ -1858,10 +1905,10 @@ export default function HealthPolicyForm({
               </div>
 
               {/* 2. Marketplace Account */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Marketplace Account</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Marketplace Account</span>
                 {editingHealthField === 'marketplaceAccount' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <select
                       value={healthDraftValue ? 'Yes' : 'No'}
                       onChange={e => setHealthDraftValue(e.target.value === 'Yes')}
@@ -1901,7 +1948,7 @@ export default function HealthPolicyForm({
                       setHealthDraftValue(marketplaceAccount);
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                     title="Click to edit Marketplace Account"
                   >
                     {marketplaceAccount ? 'Yes' : 'No'}
@@ -1941,10 +1988,10 @@ export default function HealthPolicyForm({
               )}
 
               {/* 4. Company Account Toggle */}
-              <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                <span className="text-slate-500 font-medium leading-snug break-words text-right">Company Account</span>
+              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Company Account</span>
                 {editingHealthField === 'companyAccount' ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
                     <select
                       value={companyAccount ? 'Yes' : 'No'}
                       onChange={e => setCompanyAccount(e.target.value === 'Yes')}
@@ -1981,7 +2028,7 @@ export default function HealthPolicyForm({
                       setEditingHealthField('companyAccount');
                       setHealthFieldError(null);
                     }}
-                    className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                     title="Click to edit Company Account"
                   >
                     {companyAccount ? 'Yes' : 'No'}
@@ -2016,8 +2063,8 @@ export default function HealthPolicyForm({
         </div>
 
       {/* SECTION: APPLICANT INFORMATION / TAX HOUSEHOLD MEMBER 1 */}
-      <div className="space-y-6 font-sans">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 gap-2">
+      <div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-5 gap-2">
           <div>
             <h4 className="text-base font-bold text-slate-900 tracking-tight">
               Applicant Information
@@ -2031,18 +2078,18 @@ export default function HealthPolicyForm({
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 max-w-[850px] gap-x-12 gap-y-1 text-sm font-sans">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
           {/* LEFT COLUMN */}
           <div className="space-y-0">
             {/* 1. Coverage */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Coverage</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Coverage</span>
               {editingHealthField === 'applicantCoverage' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <select
                     value={applicantCoverage ? 'Yes' : 'No'}
                     onChange={e => setApplicantCoverage(e.target.value === 'Yes')}
-                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingHealthField(null);
@@ -2072,7 +2119,7 @@ export default function HealthPolicyForm({
               ) : (
                 <span
                   onClick={() => setEditingHealthField('applicantCoverage')}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Coverage status"
                 >
                   {applicantCoverage ? 'Yes' : 'No'}
@@ -2081,15 +2128,15 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 2. Applicant Name */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Applicant Name</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Applicant Name</span>
               {editingApplicantField === 'full_name' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <input
                     type="text"
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
-                    className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[260px]"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingApplicantField(null);
@@ -2122,7 +2169,7 @@ export default function HealthPolicyForm({
                     setApplicantDraftValue(primaryApplicant?.fullName || '');
                     setApplicantFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Applicant Name"
                 >
                   {primaryApplicant?.fullName || '—'}
@@ -2131,16 +2178,16 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 3. DOB */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">DOB</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">DOB</span>
               {editingApplicantField === 'date_of_birth' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <input
                     type="text"
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(formatAsDateInput(e.target.value))}
                     placeholder="MM/DD/YYYY"
-                    className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+                    className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingApplicantField(null);
@@ -2187,7 +2234,7 @@ export default function HealthPolicyForm({
                     setApplicantDraftValue(primaryApplicant?.dateOfBirth ? formatDateForDisplay(primaryApplicant.dateOfBirth) : '');
                     setApplicantFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Date of Birth"
                 >
                   {formatDateForDisplay(primaryApplicant?.dateOfBirth)}
@@ -2196,18 +2243,18 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 4. Age */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Age</span>
-              <span className="text-slate-900 font-semibold select-none">
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Age</span>
+              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
                 {primaryApplicant?.dateOfBirth ? calculateAgeFromDob(primaryApplicant.dateOfBirth) : '—'}
               </span>
             </div>
 
             {/* 5. SSN (Visible unmasked) */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">SSN</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">SSN</span>
               {editingApplicantField === 'ssn' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <input
                     type="text"
                     value={applicantDraftValue}
@@ -2246,7 +2293,7 @@ export default function HealthPolicyForm({
                     setApplicantDraftValue(primaryApplicant?.ssn ? formatSsnInput(primaryApplicant.ssn) : '');
                     setApplicantFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit SSN"
                 >
                   {primaryApplicant?.ssn ? formatSsnInput(primaryApplicant.ssn) : '—'}
@@ -2255,16 +2302,16 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 6. Email */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Email</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Email</span>
               {editingApplicantField === 'email' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <input
                     type="email"
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
                     placeholder="email@domain.com"
-                    className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[260px]"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingApplicantField(null);
@@ -2297,7 +2344,7 @@ export default function HealthPolicyForm({
                     setApplicantDraftValue(primaryApplicant?.email || '');
                     setApplicantFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold truncate cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug truncate cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Email"
                 >
                   {primaryApplicant?.email || '—'}
@@ -2306,10 +2353,10 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 7. Phone */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Phone</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Phone</span>
               {editingApplicantField === 'phone' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <input
                     type="text"
                     value={applicantDraftValue}
@@ -2348,7 +2395,7 @@ export default function HealthPolicyForm({
                     setApplicantDraftValue(primaryApplicant?.phone || '');
                     setApplicantFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Phone"
                 >
                   {primaryApplicant?.phone || '—'}
@@ -2357,14 +2404,14 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 8. Number of People on Tax Return */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Number of People on Tax Return</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Number of People on Tax Return</span>
               {editingApplicantField === 'tax_household_count' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <select
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(Number(e.target.value))}
-                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingApplicantField(null);
@@ -2412,7 +2459,7 @@ export default function HealthPolicyForm({
                     setEditingApplicantField('tax_household_count');
                     setApplicantDraftValue(taxMemberCount);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Number of People on Tax Return"
                 >
                   {taxMemberCount}
@@ -2424,22 +2471,22 @@ export default function HealthPolicyForm({
           {/* RIGHT COLUMN */}
           <div className="space-y-0">
             {/* 1. Relationship */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Relationship</span>
-              <span className="text-slate-900 font-semibold bg-slate-100 px-2 py-0.5 rounded text-[11px] w-fit">
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Relationship</span>
+              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
                 Self
               </span>
             </div>
 
             {/* 2. Gender */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Gender</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Gender</span>
               {editingApplicantField === 'gender' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <select
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
-                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingApplicantField(null);
@@ -2476,7 +2523,7 @@ export default function HealthPolicyForm({
                     setApplicantDraftValue(primaryApplicant?.gender || '');
                     setApplicantFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Gender"
                 >
                   {primaryApplicant?.gender || '—'}
@@ -2485,14 +2532,14 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 3. Marital Status */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Marital Status</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Marital Status</span>
               {editingApplicantField === 'marital_status' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <select
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
-                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingApplicantField(null);
@@ -2532,7 +2579,7 @@ export default function HealthPolicyForm({
                     setApplicantDraftValue(primaryApplicant?.maritalStatus || '');
                     setApplicantFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Marital Status"
                 >
                   {primaryApplicant?.maritalStatus || '—'}
@@ -2541,14 +2588,14 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 4. U.S. Citizen */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">U.S. Citizen</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">U.S. Citizen</span>
               {editingApplicantField === 'us_citizen' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <select
                     value={applicantDraftValue ? 'Yes' : 'No'}
                     onChange={e => setApplicantDraftValue(e.target.value === 'Yes')}
-                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingApplicantField(null);
@@ -2584,7 +2631,7 @@ export default function HealthPolicyForm({
                     setApplicantDraftValue(primaryApplicant?.usCitizen !== false);
                     setApplicantFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit U.S. Citizen"
                 >
                   {primaryApplicant?.usCitizen !== null && primaryApplicant?.usCitizen !== undefined
@@ -2595,14 +2642,14 @@ export default function HealthPolicyForm({
             </div>
 
             {/* 5. Immigration Status */}
-            <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-              <span className="text-slate-500 font-medium leading-snug break-words text-right">Immigration Status</span>
+            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Immigration Status</span>
               {editingApplicantField === 'immigration_status' ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                   <select
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
-                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
                       if (e.key === 'Escape') setEditingApplicantField(null);
@@ -2641,7 +2688,7 @@ export default function HealthPolicyForm({
                     setApplicantDraftValue(primaryApplicant?.immigrationStatus || '');
                     setApplicantFieldError(null);
                   }}
-                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                   title="Click to edit Immigration Status"
                 >
                   {primaryApplicant?.immigrationStatus || '—'}
@@ -2652,10 +2699,10 @@ export default function HealthPolicyForm({
             {/* CONDITIONAL IMMIGRATION FIELDS: Work Permit */}
             {primaryApplicant?.immigrationStatus === 'Work Permit' && (
               <>
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Card Number</span>
+                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Card Number</span>
                   {editingApplicantField === 'card_number' ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
                       <input
                         type="text"
                         value={applicantDraftValue}
@@ -2692,7 +2739,7 @@ export default function HealthPolicyForm({
                         setEditingApplicantField('card_number');
                         setApplicantDraftValue(primaryApplicant?.cardNumber || '');
                       }}
-                      className="text-slate-900 font-semibold font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      className="text-[15px] font-normal text-[#253247] leading-snug font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                       title="Click to edit Card Number"
                     >
                       {primaryApplicant?.cardNumber || '—'}
@@ -2700,10 +2747,10 @@ export default function HealthPolicyForm({
                   )}
                 </div>
 
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words text-right">USCIS Number</span>
+                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">USCIS Number</span>
                   {editingApplicantField === 'uscis_number' ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
                       <input
                         type="text"
                         value={applicantDraftValue}
@@ -2740,7 +2787,7 @@ export default function HealthPolicyForm({
                         setEditingApplicantField('uscis_number');
                         setApplicantDraftValue(primaryApplicant?.uscisNumber || '');
                       }}
-                      className="text-slate-900 font-semibold font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      className="text-[15px] font-normal text-[#253247] leading-snug font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                       title="Click to edit USCIS Number"
                     >
                       {primaryApplicant?.uscisNumber || '—'}
@@ -2748,10 +2795,10 @@ export default function HealthPolicyForm({
                   )}
                 </div>
 
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Category</span>
+                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Category</span>
                   {editingApplicantField === 'immigration_category' ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
                       <input
                         type="text"
                         value={applicantDraftValue}
@@ -2788,7 +2835,7 @@ export default function HealthPolicyForm({
                         setEditingApplicantField('immigration_category');
                         setApplicantDraftValue(primaryApplicant?.immigrationCategory || '');
                       }}
-                      className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                       title="Click to edit Category"
                     >
                       {primaryApplicant?.immigrationCategory || '—'}
@@ -2796,16 +2843,16 @@ export default function HealthPolicyForm({
                   )}
                 </div>
 
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Expiration Date</span>
+                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Expiration Date</span>
                   {editingApplicantField === 'immigration_expiration_date' ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
                       <input
                         type="text"
                         value={applicantDraftValue}
                         onChange={e => setApplicantDraftValue(formatAsDateInput(e.target.value))}
                         placeholder="MM/DD/YYYY"
-                        className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+                        className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                         autoFocus
                         onKeyDown={e => {
                           if (e.key === 'Escape') setEditingApplicantField(null);
@@ -2842,7 +2889,7 @@ export default function HealthPolicyForm({
                         setEditingApplicantField('immigration_expiration_date');
                         setApplicantDraftValue(primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '');
                       }}
-                      className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                       title="Click to edit Expiration Date"
                     >
                       {formatDateForDisplay(primaryApplicant?.immigrationExpirationDate)}
@@ -2855,10 +2902,10 @@ export default function HealthPolicyForm({
             {/* CONDITIONAL IMMIGRATION FIELDS: Resident */}
             {(primaryApplicant?.immigrationStatus === 'Resident' || primaryApplicant?.immigrationStatus === 'Permanent Resident') && (
               <>
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Alien Number</span>
+                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Alien Number</span>
                   {editingApplicantField === 'alien_number' ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
                       <input
                         type="text"
                         value={applicantDraftValue}
@@ -2895,7 +2942,7 @@ export default function HealthPolicyForm({
                         setEditingApplicantField('alien_number');
                         setApplicantDraftValue(primaryApplicant?.alienNumber || '');
                       }}
-                      className="text-slate-900 font-semibold font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      className="text-[15px] font-normal text-[#253247] leading-snug font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                       title="Click to edit Alien Number"
                     >
                       {primaryApplicant?.alienNumber || '—'}
@@ -2903,10 +2950,10 @@ export default function HealthPolicyForm({
                   )}
                 </div>
 
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Card Number</span>
+                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Card Number</span>
                   {editingApplicantField === 'card_number' ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
                       <input
                         type="text"
                         value={applicantDraftValue}
@@ -2943,7 +2990,7 @@ export default function HealthPolicyForm({
                         setEditingApplicantField('card_number');
                         setApplicantDraftValue(primaryApplicant?.cardNumber || '');
                       }}
-                      className="text-slate-900 font-semibold font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      className="text-[15px] font-normal text-[#253247] leading-snug font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                       title="Click to edit Card Number"
                     >
                       {primaryApplicant?.cardNumber || '—'}
@@ -2951,16 +2998,16 @@ export default function HealthPolicyForm({
                   )}
                 </div>
 
-                <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                  <span className="text-slate-500 font-medium leading-snug break-words text-right">Expiration Date</span>
+                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Expiration Date</span>
                   {editingApplicantField === 'immigration_expiration_date' ? (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
                       <input
                         type="text"
                         value={applicantDraftValue}
                         onChange={e => setApplicantDraftValue(formatAsDateInput(e.target.value))}
                         placeholder="MM/DD/YYYY"
-                        className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+                        className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                         autoFocus
                         onKeyDown={e => {
                           if (e.key === 'Escape') setEditingApplicantField(null);
@@ -2997,7 +3044,7 @@ export default function HealthPolicyForm({
                         setEditingApplicantField('immigration_expiration_date');
                         setApplicantDraftValue(primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '');
                       }}
-                      className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                      className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                       title="Click to edit Expiration Date"
                     >
                       {formatDateForDisplay(primaryApplicant?.immigrationExpirationDate)}
@@ -3012,9 +3059,9 @@ export default function HealthPolicyForm({
 
       {/* TAX HOUSEHOLD MEMBERS DYNAMIC SECTIONS */}
         {taxMemberCount > 1 && (
-          <div className="space-y-6 pt-6 border-t border-slate-100">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
+          <div className="pt-8 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-5">
+              <h4 className="text-[16px] font-semibold text-[#111827]">
                 Tax Household Members
               </h4>
               <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
@@ -3074,9 +3121,9 @@ export default function HealthPolicyForm({
               };
 
                 return (
-                  <div key={memberNumber} className="space-y-4 font-sans">
-                    <div className="flex items-center justify-between pb-2.5">
-                      <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  <div key={memberNumber} className="font-sans mt-8">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-[15px] font-semibold text-[#111827]">
                         Tax Household Member {memberNumber}
                       </h4>
                       <span className="text-[11px] font-medium text-slate-400">
@@ -3084,18 +3131,18 @@ export default function HealthPolicyForm({
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-sm font-sans">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
                       {/* LEFT COLUMN */}
                       <div className="space-y-0">
                         {/* 1. Coverage */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words text-right">Coverage</span>
+                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Coverage</span>
                           {editingTaxMemberField === `m_${memberNumber}_coverage` ? (
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
                               <select
                                 value={taxMemberDraftValue ? 'Yes' : 'No'}
                                 onChange={e => setTaxMemberDraftValue(e.target.value === 'Yes')}
-                                className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                                 autoFocus
                                 onKeyDown={e => {
                                   if (e.key === 'Escape') setEditingTaxMemberField(null);
@@ -3135,7 +3182,7 @@ export default function HealthPolicyForm({
                                 setTaxMemberDraftValue(member.coverage !== false);
                                 setTaxMemberFieldError(null);
                               }}
-                              className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                               title="Click to edit Coverage"
                             >
                               {member.coverage !== false ? 'Yes' : 'No'}
@@ -3144,16 +3191,16 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 2. Full Name */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words text-right">Full Name</span>
+                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Full Name</span>
                           {editingTaxMemberField === `m_${memberNumber}_fullName` ? (
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
                               <input
                                 type="text"
                                 value={taxMemberDraftValue}
                                 onChange={e => setTaxMemberDraftValue(e.target.value)}
                                 placeholder="Full name..."
-                                className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[260px]"
                                 autoFocus
                                 onKeyDown={e => {
                                   if (e.key === 'Escape') setEditingTaxMemberField(null);
@@ -3190,7 +3237,7 @@ export default function HealthPolicyForm({
                                 setTaxMemberDraftValue(member.full_name || '');
                                 setTaxMemberFieldError(null);
                               }}
-                              className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                               title="Click to edit Full Name"
                             >
                               {member.full_name || '—'}
@@ -3199,16 +3246,16 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 3. DOB */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words text-right">DOB</span>
+                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">DOB</span>
                           {editingTaxMemberField === `m_${memberNumber}_dob` ? (
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
                               <input
                                 type="text"
                                 value={taxMemberDraftValue}
                                 onChange={e => setTaxMemberDraftValue(formatAsDateInput(e.target.value))}
                                 placeholder="MM/DD/YYYY"
-                                className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+                                className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                                 autoFocus
                                 onKeyDown={e => {
                                   if (e.key === 'Escape') setEditingTaxMemberField(null);
@@ -3256,7 +3303,7 @@ export default function HealthPolicyForm({
                                 setTaxMemberDraftValue(member.date_of_birth ? formatDateForDisplay(member.date_of_birth) : '');
                                 setTaxMemberFieldError(null);
                               }}
-                              className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                               title="Click to edit Date of Birth"
                             >
                               {formatDateForDisplay(member.date_of_birth)}
@@ -3265,15 +3312,15 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 4. Age (Calculated read-only) */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words text-right">Age</span>
-                          <span className="text-slate-900 font-semibold select-none">
+                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Age</span>
+                          <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
                             {calculateAgeFromDob(member.date_of_birth) !== null ? calculateAgeFromDob(member.date_of_birth) : '—'}
                           </span>
                         </div>
 
                         {/* 5. SSN (Sensitive Field) */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
+                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
                           <TaxMemberSensitiveField
                             label="SSN"
                             healthPolicyId={initialPolicy?.id}
@@ -3291,14 +3338,14 @@ export default function HealthPolicyForm({
                       {/* RIGHT COLUMN */}
                       <div className="space-y-0">
                         {/* 1. Relationship to Applicant */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words text-right">Relationship to Applicant</span>
+                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Relationship to Applicant</span>
                           {editingTaxMemberField === `m_${memberNumber}_relationship` ? (
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
                               <select
                                 value={taxMemberDraftValue}
                                 onChange={e => setTaxMemberDraftValue(e.target.value)}
-                                className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                                 autoFocus
                                 onKeyDown={e => {
                                   if (e.key === 'Escape') setEditingTaxMemberField(null);
@@ -3339,7 +3386,7 @@ export default function HealthPolicyForm({
                                 setTaxMemberDraftValue(member.relationship_to_applicant || 'Spouse');
                                 setTaxMemberFieldError(null);
                               }}
-                              className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                               title="Click to edit Relationship"
                             >
                               {member.relationship_to_applicant || 'Spouse'}
@@ -3348,14 +3395,14 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 2. U.S. Citizen */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words text-right">U.S. Citizen</span>
+                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">U.S. Citizen</span>
                           {editingTaxMemberField === `m_${memberNumber}_usCitizen` ? (
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
                               <select
                                 value={taxMemberDraftValue ? 'Yes' : 'No'}
                                 onChange={e => setTaxMemberDraftValue(e.target.value === 'Yes')}
-                                className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                                 autoFocus
                                 onKeyDown={e => {
                                   if (e.key === 'Escape') setEditingTaxMemberField(null);
@@ -3395,7 +3442,7 @@ export default function HealthPolicyForm({
                                 setTaxMemberDraftValue(member.us_citizen !== false);
                                 setTaxMemberFieldError(null);
                               }}
-                              className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                               title="Click to edit U.S. Citizen"
                             >
                               {member.us_citizen !== false ? 'Yes' : 'No'}
@@ -3404,14 +3451,14 @@ export default function HealthPolicyForm({
                         </div>
 
                         {/* 3. Immigration Status */}
-                        <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px]">
-                          <span className="text-slate-500 font-medium leading-snug break-words text-right">Immigration Status</span>
+                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Immigration Status</span>
                           {editingTaxMemberField === `m_${memberNumber}_immigrationStatus` ? (
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
                               <select
                                 value={taxMemberDraftValue}
                                 onChange={e => setTaxMemberDraftValue(e.target.value)}
-                                className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
                                 autoFocus
                                 onKeyDown={e => {
                                   if (e.key === 'Escape') setEditingTaxMemberField(null);
@@ -3454,7 +3501,7 @@ export default function HealthPolicyForm({
                                 setTaxMemberDraftValue(member.immigration_status || '');
                                 setTaxMemberFieldError(null);
                               }}
-                              className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                               title="Click to edit Immigration Status"
                             >
                               {member.immigration_status || '—'}
@@ -3465,7 +3512,7 @@ export default function HealthPolicyForm({
                         {/* CONDITIONAL IMMIGRATION FIELDS: Work Permit */}
                         {member.immigration_status === 'Work Permit' && (
                           <>
-                            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
                               <TaxMemberSensitiveField
                                 label="Card Number"
                                 healthPolicyId={initialPolicy?.id}
@@ -3477,7 +3524,7 @@ export default function HealthPolicyForm({
                                 onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_card_number`]: val }))}
                               />
                             </div>
-                            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
                               <TaxMemberSensitiveField
                                 label="USCIS Number"
                                 healthPolicyId={initialPolicy?.id}
@@ -3489,10 +3536,10 @@ export default function HealthPolicyForm({
                                 onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_uscis_number`]: val }))}
                               />
                             </div>
-                            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
                               <span className="text-slate-500 font-medium">Category</span>
                               {editingTaxMemberField === `m_${memberNumber}_immigrationCategory` ? (
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                                   <input
                                     type="text"
                                     value={taxMemberDraftValue}
@@ -3535,23 +3582,23 @@ export default function HealthPolicyForm({
                                     setTaxMemberDraftValue(member.immigration_category || '');
                                     setTaxMemberFieldError(null);
                                   }}
-                                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                                   title="Click to edit Category"
                                 >
                                   {member.immigration_category || '—'}
                                 </span>
                               )}
                             </div>
-                            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
                               <span className="text-slate-500 font-medium">Expiration Date</span>
                               {editingTaxMemberField === `m_${memberNumber}_immigrationExpDate` ? (
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                                   <input
                                     type="text"
                                     value={taxMemberDraftValue}
                                     onChange={e => setTaxMemberDraftValue(formatAsDateInput(e.target.value))}
                                     placeholder="MM/DD/YYYY"
-                                    className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+                                    className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                                     autoFocus
                                     onKeyDown={e => {
                                       if (e.key === 'Escape') setEditingTaxMemberField(null);
@@ -3599,7 +3646,7 @@ export default function HealthPolicyForm({
                                     setTaxMemberDraftValue(member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : '');
                                     setTaxMemberFieldError(null);
                                   }}
-                                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                                   title="Click to edit Expiration Date"
                                 >
                                   {formatDateForDisplay(member.immigration_expiration_date)}
@@ -3612,7 +3659,7 @@ export default function HealthPolicyForm({
                         {/* CONDITIONAL IMMIGRATION FIELDS: Resident */}
                         {member.immigration_status === 'Resident' && (
                           <>
-                            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
                               <TaxMemberSensitiveField
                                 label="Alien Number"
                                 healthPolicyId={initialPolicy?.id}
@@ -3624,7 +3671,7 @@ export default function HealthPolicyForm({
                                 onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_alien_number`]: val }))}
                               />
                             </div>
-                            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
                               <TaxMemberSensitiveField
                                 label="Card Number"
                                 healthPolicyId={initialPolicy?.id}
@@ -3636,16 +3683,16 @@ export default function HealthPolicyForm({
                                 onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_card_number`]: val }))}
                               />
                             </div>
-                            <div className="py-2 flex items-center justify-between gap-4 min-h-[36px]">
+                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
                               <span className="text-slate-500 font-medium">Expiration Date</span>
                               {editingTaxMemberField === `m_${memberNumber}_immigrationExpDate` ? (
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0">
                                   <input
                                     type="text"
                                     value={taxMemberDraftValue}
                                     onChange={e => setTaxMemberDraftValue(formatAsDateInput(e.target.value))}
                                     placeholder="MM/DD/YYYY"
-                                    className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+                                    className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                                     autoFocus
                                     onKeyDown={e => {
                                       if (e.key === 'Escape') setEditingTaxMemberField(null);
@@ -3693,7 +3740,7 @@ export default function HealthPolicyForm({
                                     setTaxMemberDraftValue(member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : '');
                                     setTaxMemberFieldError(null);
                                   }}
-                                  className="text-slate-900 font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                                   title="Click to edit Expiration Date"
                                 >
                                   {formatDateForDisplay(member.immigration_expiration_date)}
@@ -3711,9 +3758,9 @@ export default function HealthPolicyForm({
         )}
 
       {/* SECTION 5 — Residence Information */}
-      <div className="space-y-4 font-sans">
-        <div className="pb-3">
-          <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
+      <div className="font-sans">
+        <div className="mb-5">
+          <h4 className="text-[16px] font-semibold text-[#111827]">
             Residence Information
           </h4>
           <p className="text-xs text-slate-400 font-medium mt-0.5">
@@ -3722,10 +3769,10 @@ export default function HealthPolicyForm({
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
           {/* 1. Street Address */}
-          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[32px]">
-            <span className="text-slate-500 font-medium leading-snug break-words text-right">Street Address</span>
+          <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Street Address</span>
             {editingResidenceField === 'address' ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-nowrap min-w-0">
                 <input
                   type="text"
                   value={residenceDraftValue}
@@ -3764,7 +3811,7 @@ export default function HealthPolicyForm({
                   setResidenceDraftValue(clientResidence?.address || '');
                   setResidenceFieldError(null);
                 }}
-                className="font-semibold text-slate-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                 title="Click to edit Street Address"
               >
                 {clientResidence?.address || '—'}
@@ -3773,16 +3820,16 @@ export default function HealthPolicyForm({
           </div>
 
           {/* 2. City */}
-          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[32px]">
-            <span className="text-slate-500 font-medium leading-snug break-words text-right">City</span>
+          <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">City</span>
             {editingResidenceField === 'city' ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-nowrap min-w-0">
                 <input
                   type="text"
                   value={residenceDraftValue}
                   onChange={e => setResidenceDraftValue(e.target.value)}
                   placeholder="City..."
-                  className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[260px]"
                   autoFocus
                   onKeyDown={e => {
                     if (e.key === 'Escape') setEditingResidenceField(null);
@@ -3815,7 +3862,7 @@ export default function HealthPolicyForm({
                   setResidenceDraftValue(clientResidence?.city || '');
                   setResidenceFieldError(null);
                 }}
-                className="font-semibold text-slate-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                 title="Click to edit City"
               >
                 {clientResidence?.city || '—'}
@@ -3824,10 +3871,10 @@ export default function HealthPolicyForm({
           </div>
 
           {/* 3. State */}
-          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[32px]">
-            <span className="text-slate-500 font-medium leading-snug break-words text-right">State</span>
+          <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">State</span>
             {editingResidenceField === 'state' ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-nowrap min-w-0">
                 <input
                   type="text"
                   value={residenceDraftValue}
@@ -3866,7 +3913,7 @@ export default function HealthPolicyForm({
                   setResidenceDraftValue(clientResidence?.state || '');
                   setResidenceFieldError(null);
                 }}
-                className="font-semibold text-slate-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                 title="Click to edit State"
               >
                 {clientResidence?.state || '—'}
@@ -3875,10 +3922,10 @@ export default function HealthPolicyForm({
           </div>
 
           {/* 4. Zip Code */}
-          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[32px]">
-            <span className="text-slate-500 font-medium leading-snug break-words text-right">Zip Code</span>
+          <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Zip Code</span>
             {editingResidenceField === 'zip_code' ? (
-              <div className="flex items-center gap-2">
+              <div className="h-[34px] w-full max-w-[180px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans">
                 <input
                   type="text"
                   value={residenceDraftValue}
@@ -3917,7 +3964,7 @@ export default function HealthPolicyForm({
                   setResidenceDraftValue(clientResidence?.zipCode || '');
                   setResidenceFieldError(null);
                 }}
-                className="font-semibold text-slate-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                 title="Click to edit Zip Code"
               >
                 {clientResidence?.zipCode || '—'}
@@ -3926,10 +3973,10 @@ export default function HealthPolicyForm({
           </div>
 
           {/* 5. County */}
-          <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[32px]">
-            <span className="text-slate-500 font-medium leading-snug break-words text-right">County</span>
+          <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">County</span>
             {editingResidenceField === 'county' ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-nowrap min-w-0">
                 <input
                   type="text"
                   value={residenceDraftValue}
@@ -3968,7 +4015,7 @@ export default function HealthPolicyForm({
                   setResidenceDraftValue(clientResidence?.county || '');
                   setResidenceFieldError(null);
                 }}
-                className="font-semibold text-slate-900 cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                 title="Click to edit County"
               >
                 {clientResidence?.county || '—'}

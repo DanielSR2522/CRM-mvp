@@ -330,20 +330,7 @@ export default function MedicareTab({
   }
 
   return (
-    <div className="flex flex-col w-full font-sans min-h-screen bg-white">
-      {/* 1. White Client Identity Header Bar */}
-      <HealthClientHeader
-        clientId={clientId}
-        clientName={clientName}
-        photoUrl={photoUrl}
-        lastUpdated={lastUpdated}
-        onSendEmail={onSendEmail}
-        onConsent={onConsent}
-        onDeleteProfile={onDeleteProfile}
-        isCompanyClient={isCompanyClient}
-        activeSection="medicare"
-        hideNavStrip={true}
-      />
+    <div className="flex flex-col w-full font-sans bg-white">
 
       {/* Toast Notification */}
       {toast && (
@@ -444,7 +431,7 @@ export default function MedicareTab({
           {activeSubtab === 'timeline' && (
             <div className="bg-white border border-slate-200/70 rounded-xl p-6 shadow-2xs space-y-4 animate-in fade-in duration-150 font-sans">
               <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">Medicare Activity Timeline</h3>
+                <h3 className="text-[16px] font-semibold text-[#111827] leading-6">Medicare Activity Timeline</h3>
                 <p className="text-xs text-slate-500 mt-0.5 font-medium">Chronological record of Medicare registrations and updates.</p>
               </div>
               <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 text-xs">
@@ -463,7 +450,7 @@ export default function MedicareTab({
           {activeSubtab === 'links' && (
             <div className="bg-white border border-slate-200/70 rounded-xl p-6 shadow-2xs space-y-4 animate-in fade-in duration-150 font-sans">
               <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">Saved Client Links</h3>
+                <h3 className="text-[16px] font-semibold text-[#111827] leading-6">Saved Client Links</h3>
                 <p className="text-xs text-slate-500 mt-0.5 font-medium">Quick reference links for Medicare portals and carrier tools.</p>
               </div>
               <p className="text-xs text-slate-600">

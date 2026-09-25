@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { revealHealthSecret } from '@/lib/health/health-service';
+import { revealHealthSecret, saveHealthSecret } from '@/lib/health/health-service';
 
 interface HealthSensitiveFieldProps {
   label: string;
@@ -11,6 +11,7 @@ interface HealthSensitiveFieldProps {
   onChange: (val: string) => void;
   type?: 'text' | 'password';
   onInlineSave?: () => void;
+  labelWidth?: number;
 }
 
 export default function HealthSensitiveField({
@@ -22,9 +23,9 @@ export default function HealthSensitiveField({
   value,
   onChange,
   type = 'text',
-  onInlineSave
+  onInlineSave,
+  labelWidth = 185
 }: HealthSensitiveFieldProps) {
-  const [revealed, setRevealed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInlineEditing, setIsInlineEditing] = useState(false);
@@ -34,41 +35,50 @@ export default function HealthSensitiveField({
     setDraftValue(value);
   }, [value]);
 
+  // Auto-fetch decrypted secret on mount if hasValue is true and value is not yet loaded
   useEffect(() => {
+    let active = true;
+    if (hasValue && !value && healthPolicyId) {
+      setLoading(true);
+      revealHealthSecret(healthPolicyId, fieldName)
+        .then(decrypted => {
+          if (active && decrypted) {
+            onChange(decrypted);
+            setDraftValue(decrypted);
+          }
+        })
+        .catch(err => {
+          if (active) {
+            console.error(`Failed to auto-decrypt ${fieldName}:`, err);
+          }
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }
     return () => {
-      setRevealed(false);
-      setError(null);
+      active = false;
     };
-  }, [disabled]);
+  }, [hasValue, value, healthPolicyId, fieldName]);
 
-  const handleReveal = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!healthPolicyId) return;
-    if (revealed) {
-      setRevealed(false);
-      onChange('');
+  const handleSave = async () => {
+    setError(null);
+    if (!healthPolicyId) {
+      setError('Policy ID is missing');
       return;
     }
-
     setLoading(true);
-    setError(null);
     try {
-      const plaintext = await revealHealthSecret(healthPolicyId, fieldName);
-      onChange(plaintext);
-      setDraftValue(plaintext);
-      setRevealed(true);
+      await saveHealthSecret(healthPolicyId, fieldName, draftValue);
+      onChange(draftValue);
+      setIsInlineEditing(false);
+      if (onInlineSave) onInlineSave();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to reveal';
+      const message = err instanceof Error ? err.message : 'Failed to save secret';
       setError(message);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleSave = () => {
-    setError(null);
-    setIsInlineEditing(false);
-    if (onInlineSave) onInlineSave();
   };
 
   const handleCancel = () => {
@@ -79,30 +89,32 @@ export default function HealthSensitiveField({
   };
 
   const getDisplayText = () => {
-    if (!hasValue && !value && !draftValue) {
-      return '—';
-    }
-    if (revealed || (value && !hasValue)) {
-      return value;
-    }
-    return '••••••••';
+    if (value) return value;
+    if (draftValue) return draftValue;
+    return '—';
   };
 
+  const gridClass = labelWidth === 150 ? 'grid-cols-[150px_minmax(0,1fr)]' : 'grid-cols-[185px_minmax(0,1fr)]';
+  const widthLabelClass = labelWidth === 150 ? 'w-[150px]' : 'w-[185px]';
+
+  const isLongText = fieldName === 'security_questions' || fieldName === 'marketplace_security_questions';
+  const editorWidthClass = isLongText ? 'w-full max-w-[320px]' : 'w-full max-w-[260px]';
+
   return (
-    <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px] font-sans w-full">
-      <span className="text-slate-500 font-medium text-xs truncate text-right">{label}</span>
+    <div className={`grid ${gridClass} items-center min-h-[38px] py-[3px] gap-x-[18px] font-sans w-full`}>
+      <span className={`text-[15px] font-normal text-[#52627A] text-right ${widthLabelClass} pr-[18px] leading-snug break-words shrink-0`}>{label}</span>
 
       {isInlineEditing ? (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-nowrap min-w-0">
           <input
-            type={type === 'password' ? 'password' : 'text'}
+            type="text"
             value={draftValue}
             onChange={e => {
               setDraftValue(e.target.value);
               onChange(e.target.value);
             }}
-            placeholder={hasValue ? '•••••••• (Type to overwrite)' : `Enter ${label}...`}
-            className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+            placeholder={`Enter ${label}...`}
+            className={`h-[34px] ${editorWidthClass} min-w-0 bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans`}
             autoFocus
             onKeyDown={e => {
               if (e.key === 'Escape') handleCancel();
@@ -111,8 +123,9 @@ export default function HealthSensitiveField({
           />
           <button
             type="button"
+            disabled={loading}
             onClick={handleSave}
-            className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+            className="w-6 h-6 rounded-md bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-xs transition-colors disabled:opacity-50"
             title="Save"
           >
             ✓
@@ -120,12 +133,12 @@ export default function HealthSensitiveField({
           <button
             type="button"
             onClick={handleCancel}
-            className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+            className="w-6 h-6 rounded-md bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center text-xs font-bold shrink-0 transition-colors"
             title="Cancel"
           >
             ✕
           </button>
-          {error && <span className="text-rose-500 text-[10px] pl-1">{error}</span>}
+          {error && <span className="text-rose-500 text-[10px] pl-1 shrink-0">{error}</span>}
         </div>
       ) : (
         <div className="flex items-center gap-2">
@@ -135,26 +148,16 @@ export default function HealthSensitiveField({
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
-              Decrypting...
+              Loading...
             </span>
           ) : (
             <span
               onClick={() => setIsInlineEditing(true)}
-              className="text-slate-900 text-xs font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+              className="text-[15px] font-normal text-[#253247] text-left leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors font-sans"
               title={`Click to edit ${label}`}
             >
               {getDisplayText()}
             </span>
-          )}
-
-          {hasValue && !loading && (
-            <button
-              type="button"
-              onClick={handleReveal}
-              className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-600 hover:text-blue-800 bg-blue-50/50 hover:bg-blue-50 border border-blue-100 rounded transition-all font-sans"
-            >
-              {revealed ? 'Hide' : 'Show'}
-            </button>
           )}
 
           {error && <span className="text-rose-500 text-[10px] pl-1">{error}</span>}

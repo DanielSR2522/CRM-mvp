@@ -1132,13 +1132,13 @@ export default function TicketDetailWorkspace({
 
         {/* Right Column: PROPIEDADES Panel (Part of Workspace Grid, NOT a Drawer) */}
         <div className="w-full lg:w-80 flex-shrink-0 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-4">
-          <h3 className="font-bold text-slate-900 uppercase tracking-wider text-[11px] border-b border-slate-200 pb-2">
+          <h3 className="font-semibold text-slate-800 text-xs border-b border-slate-200 pb-2">
             Propiedades
           </h3>
 
           <div className="space-y-3">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 uppercase mb-1">Estado</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Estado</label>
               <select
                 value={ticket.status}
                 disabled={isUpdatingAttr}
@@ -1155,7 +1155,7 @@ export default function TicketDetailWorkspace({
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 uppercase mb-1">Prioridad</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Prioridad</label>
               <select
                 value={ticket.priority}
                 disabled={isUpdatingAttr}
@@ -1170,7 +1170,7 @@ export default function TicketDetailWorkspace({
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 uppercase mb-1">Responsable / Asignado a</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Responsable / Asignado a</label>
               <select
                 value={ticket.assignedToId || ''}
                 disabled={isUpdatingAttr}
@@ -1187,7 +1187,7 @@ export default function TicketDetailWorkspace({
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 uppercase mb-1">Fecha Límite</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Fecha Límite</label>
               <div className="relative">
                 <div className="w-full rounded-lg border border-slate-300 bg-white py-1.5 px-2.5 text-xs font-medium text-slate-900 shadow-2xs flex items-center justify-between pointer-events-none">
                   <span>{ticket.dueAt ? formatDate(ticket.dueAt) : 'MM/DD/YYYY'}</span>
@@ -1207,7 +1207,7 @@ export default function TicketDetailWorkspace({
 
             {ticket.checklistTotal > 0 && (
               <div>
-                <span className="block text-[11px] font-semibold text-slate-600 uppercase mb-1">Progreso Checklist</span>
+                <span className="block text-xs font-semibold text-slate-600 mb-1.5">Progreso Checklist</span>
                 <div className="flex items-center gap-2">
                   <div className="flex-1 bg-slate-200 rounded-full h-2 overflow-hidden">
                     <div
@@ -1222,7 +1222,7 @@ export default function TicketDetailWorkspace({
 
             {ticket.tags && ticket.tags.length > 0 && (
               <div>
-                <span className="block text-[11px] font-semibold text-slate-600 uppercase mb-1">Etiquetas</span>
+                <span className="block text-xs font-semibold text-slate-600 mb-1.5">Etiquetas</span>
                 <div className="flex flex-wrap gap-1.5">
                   {ticket.tags.map((tag) => (
                     <span key={tag} className="rounded bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700">

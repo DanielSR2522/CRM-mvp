@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import InlineEditActions from './InlineEditActions';
 import GoogleAddressAutocomplete, { NormalizedAddress } from '@/components/address/GoogleAddressAutocomplete';
+import { US_STATES_52, normalizeStateToCode, getStateDisplayLabel } from '@/utils/usStates';
+import { BASE_INLINE_INPUT_CLASSES, BASE_INLINE_SELECT_CLASSES } from './editorStyles';
 
 export interface AddressGroupData {
   address: string;
@@ -33,7 +35,7 @@ export default function InlineEditableAddress({
   const [isEditing, setIsEditing] = useState(false);
   const [draftAddress, setDraftAddress] = useState(data.address || '');
   const [draftCity, setDraftCity] = useState(data.city || '');
-  const [draftState, setDraftState] = useState(data.state || '');
+  const [draftState, setDraftState] = useState(normalizeStateToCode(data.state));
   const [draftZip, setDraftZip] = useState(data.zip_code || '');
   const [draftCountry, setDraftCountry] = useState(data.country || 'United States');
   const [draftCounty, setDraftCounty] = useState(data.county || '');
@@ -44,7 +46,7 @@ export default function InlineEditableAddress({
   useEffect(() => {
     setDraftAddress(data.address || '');
     setDraftCity(data.city || '');
-    setDraftState(data.state || '');
+    setDraftState(normalizeStateToCode(data.state));
     setDraftZip(data.zip_code || '');
     setDraftCountry(data.country || 'United States');
     setDraftCounty(data.county || '');
@@ -54,7 +56,7 @@ export default function InlineEditableAddress({
     if (disabled) return;
     setDraftAddress(data.address || '');
     setDraftCity(data.city || '');
-    setDraftState(data.state || '');
+    setDraftState(normalizeStateToCode(data.state));
     setDraftZip(data.zip_code || '');
     setDraftCountry(data.country || 'United States');
     setDraftCounty(data.county || '');
@@ -65,7 +67,7 @@ export default function InlineEditableAddress({
   const handleCancel = () => {
     setDraftAddress(data.address || '');
     setDraftCity(data.city || '');
-    setDraftState(data.state || '');
+    setDraftState(normalizeStateToCode(data.state));
     setDraftZip(data.zip_code || '');
     setDraftCountry(data.country || 'United States');
     setDraftCounty(data.county || '');
@@ -76,7 +78,8 @@ export default function InlineEditableAddress({
   const handleGoogleAddressSelected = (normalized: NormalizedAddress) => {
     setDraftAddress(normalized.streetAddress || draftAddress);
     setDraftCity(normalized.city || draftCity);
-    setDraftState(normalized.state || draftState);
+    const code = normalizeStateToCode(normalized.state || draftState);
+    setDraftState(code);
     setDraftZip(normalized.postalCode || draftZip);
     setDraftCountry(normalized.country || draftCountry || 'United States');
     if (normalized.county) {
@@ -92,7 +95,7 @@ export default function InlineEditableAddress({
       await onSave({
         address: draftAddress.trim(),
         city: draftCity.trim(),
-        state: draftState.trim(),
+        state: normalizeStateToCode(draftState),
         zip_code: draftZip.trim(),
         country: draftCountry.trim(),
         county: draftCounty.trim(),
@@ -115,67 +118,79 @@ export default function InlineEditableAddress({
     }
   };
 
-  const formattedDisplay = [
-    data.address,
-    [data.city, data.state, data.zip_code].filter(Boolean).join(', '),
-    data.country,
-  ]
-    .filter(Boolean)
-    .join(' • ');
+  const stateLabel = getStateDisplayLabel(data.state);
 
   return (
     <div className={`w-full font-sans ${className}`}>
-      {label && <span className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{label}</span>}
+      {label && <span className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">{label}</span>}
 
       {isEditing ? (
-        <div className="space-y-3 p-3 bg-white border border-blue-500 ring-2 ring-blue-100 rounded-xl transition-all" onKeyDown={handleKeyDown}>
+        <div className="space-y-3 p-3 bg-white border border-slate-300 rounded-md transition-all" onKeyDown={handleKeyDown}>
           <div>
-            <label className="block text-[11px] font-bold text-slate-500 mb-1">Street Address</label>
+            <label className="block text-[13px] font-normal text-[#52627A] mb-1">Street Address</label>
             <GoogleAddressAutocomplete
               value={draftAddress}
               onChange={val => setDraftAddress(val)}
               onAddressSelected={handleGoogleAddressSelected}
               placeholder="Search or enter street address..."
               disabled={saving}
-              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-lg px-3 py-1.5 text-xs text-slate-900 font-semibold outline-none transition-all"
+              className={`${BASE_INLINE_INPUT_CLASSES} w-full max-w-[320px]`}
             />
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <div>
-              <label className="block text-[11px] font-bold text-slate-500 mb-1">City</label>
+              <label className="block text-[13px] font-normal text-[#52627A] mb-1">City</label>
               <input
                 type="text"
                 value={draftCity}
                 onChange={e => setDraftCity(e.target.value)}
                 disabled={saving}
-                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-lg px-2.5 py-1 text-xs text-slate-900 font-semibold outline-none transition-all"
+                className={`${BASE_INLINE_INPUT_CLASSES} w-full max-w-[260px]`}
               />
             </div>
             <div>
-              <label className="block text-[11px] font-bold text-slate-500 mb-1">State</label>
-              <input
-                type="text"
-                value={draftState}
+              <label className="block text-[13px] font-normal text-[#52627A] mb-1">State</label>
+              <select
+                value={normalizeStateToCode(draftState)}
                 onChange={e => setDraftState(e.target.value)}
                 disabled={saving}
-                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-lg px-2.5 py-1 text-xs text-slate-900 font-semibold outline-none transition-all"
-              />
+                className={`${BASE_INLINE_SELECT_CLASSES} w-full max-w-[260px]`}
+              >
+                <option value="">Select State...</option>
+                {US_STATES_52.map(s => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
-              <label className="block text-[11px] font-bold text-slate-500 mb-1">ZIP Code</label>
+              <label className="block text-[13px] font-normal text-[#52627A] mb-1">ZIP Code</label>
               <input
                 type="text"
                 value={draftZip}
                 onChange={e => setDraftZip(e.target.value)}
                 disabled={saving}
-                className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-lg px-2.5 py-1 text-xs text-slate-900 font-semibold outline-none transition-all"
+                className={`${BASE_INLINE_INPUT_CLASSES} w-full max-w-[180px]`}
               />
             </div>
           </div>
 
+          <div>
+            <label className="block text-[13px] font-normal text-[#52627A] mb-1">County</label>
+            <input
+              type="text"
+              value={draftCounty}
+              onChange={e => setDraftCounty(e.target.value)}
+              disabled={saving}
+              placeholder="County..."
+              className={`${BASE_INLINE_INPUT_CLASSES} w-full max-w-[260px]`}
+            />
+          </div>
+
           <div className="flex items-center justify-between pt-1">
-            <span className="text-[10px] text-slate-400 font-medium">Ctrl+Enter to save, Esc to cancel</span>
+            <span className="text-[11px] text-slate-400 font-normal">Ctrl+Enter to save, Esc to cancel</span>
             <InlineEditActions onSave={handleSave} onCancel={handleCancel} saving={saving} error={error} />
           </div>
         </div>
@@ -188,12 +203,12 @@ export default function InlineEditableAddress({
           }`}
         >
           <div className="space-y-0.5">
-            <div className="text-[15px] font-semibold text-slate-950">
+            <div className="text-[15px] font-normal text-[#253247]">
               {data.address || <span className="text-slate-400 font-normal italic">{emptyDisplay}</span>}
             </div>
-            {(data.city || data.state || data.zip_code) && (
-              <div className="text-[14px] text-slate-600 font-medium">
-                {[data.city, data.state, data.zip_code].filter(Boolean).join(', ')}
+            {(data.city || data.state || data.zip_code || data.county) && (
+              <div className="text-[14px] text-[#52627A] font-normal">
+                {[data.city, stateLabel !== '—' ? stateLabel : data.state, data.zip_code, data.county ? `${data.county} County` : ''].filter(Boolean).join(', ')}
               </div>
             )}
           </div>

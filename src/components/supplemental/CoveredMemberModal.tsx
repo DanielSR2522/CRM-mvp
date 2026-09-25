@@ -115,7 +115,7 @@ export default function CoveredMemberModal({
 
           {/* Full Name */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
               Full Name <span className="text-rose-500">*</span>
             </label>
             <input
@@ -129,7 +129,7 @@ export default function CoveredMemberModal({
 
           {/* Relationship */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
               Relationship
             </label>
             <select
@@ -145,7 +145,7 @@ export default function CoveredMemberModal({
 
           {/* Phone */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
               Phone Number
             </label>
             <input
@@ -170,7 +170,7 @@ export default function CoveredMemberModal({
 
           {/* Member ID Optional */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
               Member ID (Optional)
             </label>
             <input

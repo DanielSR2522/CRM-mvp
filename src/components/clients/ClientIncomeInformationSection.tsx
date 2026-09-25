@@ -30,7 +30,7 @@ interface ClientIncomeInformationSectionProps {
 export default function ClientIncomeInformationSection({
   clientId,
   onIncomeChanged,
-  containerClassName = 'relative font-sans space-y-4'
+  containerClassName = 'relative font-sans'
 }: ClientIncomeInformationSectionProps) {
   const [incomeList, setIncomeList] = useState<ClientIncomeInformation[]>([]);
   const [loadingIncome, setLoadingIncome] = useState(true);
@@ -163,10 +163,10 @@ export default function ClientIncomeInformationSection({
 
   return (
     <div className={containerClassName}>
-      <div className="flex items-center justify-between pb-4">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider font-sans">Income Information</h4>
-          <p className="text-xs text-slate-400 mt-0.5 font-sans">Manage client annual income sources (Shared canonical records)</p>
+          <h4 className="text-[16px] font-semibold text-[#111827]">Income Information</h4>
+          <p className="text-xs text-slate-400 mt-0.5 font-normal">Manage client annual income sources (Shared canonical records)</p>
         </div>
         <button
           type="button"
@@ -180,21 +180,17 @@ export default function ClientIncomeInformationSection({
         </button>
       </div>
 
-      <div className="pt-4">
+      <div>
         {loadingIncome ? (
-          <div className="flex justify-center items-center py-8">
+          <div className="flex justify-center items-center py-6">
             <svg className="animate-spin h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
           </div>
         ) : incomeList.length === 0 ? (
-          <div className="text-center py-8 border border-dashed border-slate-200 rounded-xl">
-            <svg className="w-8 h-8 text-slate-300 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <h4 className="text-xs font-bold text-slate-700">No income records registered</h4>
-            <p className="text-[11px] text-slate-400 mt-0.5">Click "+ Add Income" above to add income details.</p>
+          <div className="py-2">
+            <span className="text-[15px] font-normal text-[#52627A]">No income records registered. Click "+ Add Income" above to add income details.</span>
           </div>
         ) : (
           <div className="space-y-3">
@@ -284,7 +280,7 @@ export default function ClientIncomeInformationSection({
 
               <div className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Relationship</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Relationship</label>
                   <select
                     value={incomeRelationship}
                     onChange={e => setIncomeRelationship(e.target.value as any)}
@@ -300,7 +296,7 @@ export default function ClientIncomeInformationSection({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Income Type</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Income Type</label>
                   <select
                     value={incomeType}
                     onChange={e => setIncomeType(e.target.value as any)}
@@ -312,7 +308,7 @@ export default function ClientIncomeInformationSection({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer / Source</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Employer / Source</label>
                   <input
                     type="text"
                     value={incomeEmployerName}
@@ -323,7 +319,7 @@ export default function ClientIncomeInformationSection({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Employer Phone</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Employer Phone</label>
                   <PhoneInput
                     value={incomeEmployerPhone}
                     onChange={val => setIncomeEmployerPhone(val)}
@@ -331,7 +327,7 @@ export default function ClientIncomeInformationSection({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Annual Amount ($)</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Annual Amount ($)</label>
                   <input
                     type="number"
                     value={incomeAmount}

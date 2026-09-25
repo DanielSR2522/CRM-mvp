@@ -41,18 +41,18 @@ export default function BeneficiarySection({ policy, onOpenEditPolicy }: Props) 
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 text-xs">
           <div>
-            <span className="text-[10px] uppercase font-bold text-[#7C8799] block">Beneficiary Name</span>
-            <p className="font-extrabold text-[#172033] mt-0.5">{policy.beneficiary_name || '—'}</p>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Beneficiary Name</span>
+            <p className="font-semibold text-slate-900 mt-0.5">{policy.beneficiary_name || '—'}</p>
           </div>
 
           <div>
-            <span className="text-[10px] uppercase font-bold text-[#7C8799] block">Beneficiary Phone</span>
-            <p className="font-bold text-[#172033] mt-0.5">{policy.beneficiary_phone || '—'}</p>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Beneficiary Phone</span>
+            <p className="font-semibold text-slate-900 mt-0.5">{policy.beneficiary_phone || '—'}</p>
           </div>
 
           <div>
-            <span className="text-[10px] uppercase font-bold text-[#7C8799] block">Beneficiary Birth Date</span>
-            <p className="font-bold text-[#172033] mt-0.5">{formatIsoToUsDate(policy.beneficiary_birth_date)}</p>
+            <span className="text-[15px] font-normal text-[#52627A] leading-snug block mb-0.5">Beneficiary Birth Date</span>
+            <p className="font-semibold text-slate-900 mt-0.5">{formatIsoToUsDate(policy.beneficiary_birth_date)}</p>
           </div>
         </div>
       )}

@@ -45,6 +45,7 @@ const ALL_SCHEMA_FIELDS: AvailableFieldDefinition[] = [
   { group: 'client', groupLabel: 'Client Details', fieldId: 'state', fieldLabel: 'State' },
   { group: 'client', groupLabel: 'Client Details', fieldId: 'zip_code', fieldLabel: 'ZIP Code' },
   { group: 'client', groupLabel: 'Client Details', fieldId: 'agency_name', fieldLabel: 'Agency Name' },
+  { group: 'client', groupLabel: 'Client Details', fieldId: 'agent_id', fieldLabel: 'Assigned Agent / Profile ID' },
   { group: 'client', groupLabel: 'Client Details', fieldId: 'created_at', fieldLabel: 'Created Date' },
   { group: 'client', groupLabel: 'Client Details', fieldId: 'updated_at', fieldLabel: 'Modified Date' },
 
@@ -203,7 +204,7 @@ export default function ClientsLeftFilterSidebar({
       {cleanQuery ? (
         <div className="space-y-3 flex-1 animate-fadeIn">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <span className="text-[11px] font-extrabold text-blue-700 uppercase tracking-wider">
+            <span className="text-xs font-semibold text-blue-700">
               Matching Filter Fields ({matchingFields.length})
             </span>
             <button
@@ -223,7 +224,7 @@ export default function ClientsLeftFilterSidebar({
             <div className="space-y-3">
               {groupedMatchingFields.map(([groupLabel, items]) => (
                 <div key={groupLabel} className="space-y-1">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block px-1">
+                  <span className="text-xs font-semibold text-slate-500 block px-1">
                     {groupLabel}
                   </span>
                   <div className="space-y-1">
@@ -249,7 +250,7 @@ export default function ClientsLeftFilterSidebar({
         <>
           {/* QUICK FILTERS */}
           <div className="space-y-2 border-t border-slate-100 pt-3">
-            <span className="block text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
+            <span className="block text-xs font-semibold text-slate-500">
               Quick Filters
             </span>
             <div className="space-y-1">
@@ -280,7 +281,7 @@ export default function ClientsLeftFilterSidebar({
           {/* POLICY TYPE GROUP */}
           <div className="space-y-2.5 border-t border-slate-100 pt-3">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
+              <span className="text-xs font-semibold text-slate-500">
                 Policy Type
               </span>
               <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] font-bold">
@@ -333,7 +334,7 @@ export default function ClientsLeftFilterSidebar({
 
           {/* FILTER BY FIELDS ACCORDIONS */}
           <div className="space-y-2 border-t border-slate-100 pt-3 flex-1">
-            <span className="block text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
+            <span className="block text-xs font-semibold text-slate-500">
               Filter by Fields
             </span>
 

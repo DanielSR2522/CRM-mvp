@@ -16,7 +16,7 @@ export default function InlineEditActions({
   error = null,
 }: InlineEditActionsProps) {
   return (
-    <div className="flex items-center gap-1.5 ml-2 shrink-0">
+    <div className="flex items-center gap-1.5 shrink-0 flex-nowrap">
       <button
         type="button"
         onClick={(e) => {
@@ -25,7 +25,7 @@ export default function InlineEditActions({
         }}
         disabled={saving}
         title="Save (Enter)"
-        className="w-6 h-6 rounded-lg bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white flex items-center justify-center text-xs font-bold transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-6 h-6 rounded-md bg-blue-600 hover:bg-blue-700 active:scale-95 text-white flex items-center justify-center text-xs font-bold transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
       >
         {saving ? (
           <svg className="animate-spin w-3 h-3 text-white" fill="none" viewBox="0 0 24 24">
@@ -45,13 +45,13 @@ export default function InlineEditActions({
         }}
         disabled={saving}
         title="Cancel (Esc)"
-        className="w-6 h-6 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center text-xs font-bold transition-all disabled:opacity-50"
+        className="w-6 h-6 rounded-md bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center text-xs font-bold transition-all disabled:opacity-50 shrink-0"
       >
         ✕
       </button>
 
       {error && (
-        <span className="text-[10px] text-rose-600 font-semibold max-w-[120px] truncate" title={error}>
+        <span className="text-[10px] text-rose-600 font-semibold max-w-[120px] truncate shrink-0" title={error}>
           {error}
         </span>
       )}

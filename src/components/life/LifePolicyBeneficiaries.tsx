@@ -296,7 +296,7 @@ export default function LifePolicyBeneficiaries({ lifePolicyId, clientId, onBene
     <div className="space-y-3 font-sans">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 font-sans">Policy Beneficiaries</h4>
+          <h4 className="text-sm font-semibold text-slate-800">Policy Beneficiaries</h4>
           <p className="text-[11px] text-slate-400 font-normal">
             Draft policies allow allocations from 0% to 100%. Total cannot exceed 100%.
           </p>
@@ -407,7 +407,7 @@ export default function LifePolicyBeneficiaries({ lifePolicyId, clientId, onBene
       ) : (
         <div className="overflow-x-auto rounded-lg border border-slate-200/80">
           <table className="w-full text-left text-xs font-sans">
-            <thead className="bg-slate-50 border-b border-slate-200/80 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+            <thead className="bg-slate-50 border-b border-slate-200/80 text-slate-500 font-semibold text-xs">
               <tr>
                 <th className="p-2.5">Name</th>
                 <th className="p-2.5">Relationship</th>
@@ -478,7 +478,7 @@ export default function LifePolicyBeneficiaries({ lifePolicyId, clientId, onBene
             <form onSubmit={handleSaveBeneficiary} className="space-y-3.5 text-xs font-sans">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 <div className="md:col-span-2">
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Beneficiary Name *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Beneficiary Name *</label>
                   <input
                     type="text"
                     value={name}
@@ -490,7 +490,7 @@ export default function LifePolicyBeneficiaries({ lifePolicyId, clientId, onBene
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Relationship Grade</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Relationship Grade</label>
                   <select
                     value={relationshipGrade}
                     onChange={(e) => setRelationshipGrade(e.target.value)}
@@ -508,7 +508,7 @@ export default function LifePolicyBeneficiaries({ lifePolicyId, clientId, onBene
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Date of Birth</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Date of Birth</label>
                   <USDateInput
                     value={dob}
                     onChange={(isoVal) => setDob(isoVal)}
@@ -516,7 +516,7 @@ export default function LifePolicyBeneficiaries({ lifePolicyId, clientId, onBene
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Phone</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Phone</label>
                   <input
                     type="tel"
                     value={phone}
@@ -527,7 +527,7 @@ export default function LifePolicyBeneficiaries({ lifePolicyId, clientId, onBene
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Email</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Email</label>
                   <input
                     type="email"
                     value={email}
@@ -538,7 +538,7 @@ export default function LifePolicyBeneficiaries({ lifePolicyId, clientId, onBene
                 </div>
 
                 <div>
-                  <label className="block font-bold text-[10px] uppercase tracking-wider text-slate-500 mb-1">Benefit Percentage (%) *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Benefit Percentage (%) *</label>
                   <input
                     type="number"
                     step="0.01"

@@ -59,7 +59,7 @@ export default function TicketTableView({ tickets, selectedId, onSelectTicket }:
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-none">
       <table className="w-full text-left text-xs">
-        <thead className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-500 select-none">
+        <thead className="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold text-slate-500 select-none">
           <tr>
             <th className="px-3.5 py-2.5">Código</th>
             <th className="px-3.5 py-2.5">Asunto / Descripción</th>

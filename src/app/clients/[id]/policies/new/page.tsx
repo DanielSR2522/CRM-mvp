@@ -243,7 +243,8 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
   return (
     <DashboardLayout>
-      <CrmPageContainer>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <CrmPageContainer>
         
         {/* Navigation Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-slate-500">
@@ -299,7 +300,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
               <div className="space-y-4">
                 {/* 1. Line of Business */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Line of Business</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Line of Business</label>
                   <select
                     value={lob}
                     onChange={e => setLob(e.target.value)}
@@ -313,21 +314,23 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                   </select>
                 </div>
 
-                {/* Cargo */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Cargo</label>
-                  <input
-                    type="text"
-                    value={cargo}
-                    onChange={e => setCargo(e.target.value)}
-                    placeholder="e.g. Dry Van, Refrigerated, Auto Hauler"
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
-                  />
-                </div>
+                {/* Conditional Type of Cargo */}
+                {(lob === 'Cargo' || lob === 'Motor Truck Cargo') && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1.5">Type of Cargo</label>
+                    <input
+                      type="text"
+                      value={cargo}
+                      onChange={e => setCargo(e.target.value)}
+                      placeholder="e.g. Dry Van, Refrigerated, Auto Hauler"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-slate-800 placeholder-slate-400 text-sm outline-none transition-all"
+                    />
+                  </div>
+                )}
 
                 {/* 2. Company */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Company</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Company</label>
                   <input
                     type="text"
                     value={writingCompany}
@@ -339,7 +342,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
                 {/* 3. Policy Number */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Number</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Policy Number</label>
                   <input
                     type="text"
                     value={policyNumber}
@@ -412,7 +415,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Street Address</label>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-1">Street Address</label>
                       <input
                         type="text"
                         value={address}
@@ -422,7 +425,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                       />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">City</label>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-1">City</label>
                       <input
                         type="text"
                         value={city}
@@ -433,7 +436,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">State</label>
+                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">State</label>
                         <input
                           type="text"
                           value={state}
@@ -443,7 +446,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">ZIP Code</label>
+                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">ZIP Code</label>
                         <input
                           type="text"
                           value={zipCode}
@@ -461,10 +464,10 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
               <div className="space-y-4">
                 {/* 1. Policy Type (Read-Only) */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Type</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Policy Type</label>
                   <div className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-700 text-sm font-semibold flex items-center justify-between cursor-not-allowed select-none">
                     <span>{isCompanyClient ? 'Company' : 'Personal'}</span>
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-200 text-slate-600">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-200 text-slate-600">
                       Derived from Client Profile
                     </span>
                   </div>
@@ -472,7 +475,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
                 {/* 2. Policy Status */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Status</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Policy Status</label>
                   <select
                     value={policyStatus}
                     onChange={e => setPolicyStatus(e.target.value as any)}
@@ -488,7 +491,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
                 {/* 3. Total Premium */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Total Premium</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Total Premium</label>
                   <input
                     type="number"
                     value={totalPremium}
@@ -500,7 +503,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
                 {/* 4. Policy Payment Frequency */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Policy Payment Frequency</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Policy Payment Frequency</label>
                   <select
                     value={paymentFrequency}
                     onChange={e => setPaymentFrequency(e.target.value as any)}
@@ -514,7 +517,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
                 {/* 5. Billing Type */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Billing Type</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Billing Type</label>
                   <select
                     value={billingType}
                     onChange={e => setBillingType(e.target.value as any)}
@@ -528,7 +531,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
 
                 {/* 6. Broker Name */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Broker Name</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Broker Name</label>
                   <input
                     type="text"
                     value={brokerName}
@@ -542,6 +545,7 @@ export default function NewPolicyPage({ params }: { params: Promise<{ id: string
           </div>
         )}
       </CrmPageContainer>
+      </div>
     </DashboardLayout>
   );
 }

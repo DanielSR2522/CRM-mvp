@@ -130,7 +130,7 @@ interface ClientPersonalInformation {
   has_co_applicant: boolean;
   gender: 'Female' | 'Male' | '';
   marital_status: 'Single' | 'Married' | 'Divorced' | 'Widowed' | 'Separated' | '';
-  language_preference?: string;
+  preferred_language?: string;
   occupation?: string;
   born_in_usa: boolean | null;
   immigration_status: 'Resident' | 'Permanent Resident' | 'Work Permit' | 'US Citizen' | 'Citizen' | 'Other' | '';
@@ -180,6 +180,23 @@ interface ClientIncomeInformation {
   employer_phone: string;
   income: number;
 }
+
+const formatTimelineTag = (label: string | null | undefined): string => {
+  if (!label) return '';
+  const acronyms = new Set(['N/A', 'ID', 'P&C', 'SSN', 'DOB', 'SOA', 'MBI', 'NPN', 'CRM', 'API', 'URL', 'EIN', 'US', 'USA', 'W2', '1099']);
+  return label
+    .split(' | ')
+    .map(part => {
+      const trimmed = part.trim();
+      if (acronyms.has(trimmed.toUpperCase())) {
+        return trimmed.toUpperCase();
+      }
+      return trimmed
+        .toLowerCase()
+        .replace(/\b\w/g, c => c.toUpperCase());
+    })
+    .join(' | ');
+};
 
 export default function ClientProfilePage({ params }: { params: Promise<{ id: string }> }) {
   return (
@@ -968,9 +985,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   // Accordion Section States (Zoho-style layout for Personal Info)
   const [isPersonalInfoOpen, setIsPersonalInfoOpen] = useState(true);
-  const [isResidenceOpen, setIsResidenceOpen] = useState(false);
-  const [isIncomeOpen, setIsIncomeOpen] = useState(false);
-  const [isPaymentInfoOpen, setIsPaymentInfoOpen] = useState(false);
+  const [isResidenceOpen, setIsResidenceOpen] = useState(true);
+  const [isIncomeOpen, setIsIncomeOpen] = useState(true);
+  const [isPaymentInfoOpen, setIsPaymentInfoOpen] = useState(true);
 
   useEffect(() => {
     if (activeTab === 'documents') loadClientDocuments();
@@ -1639,6 +1656,10 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
 
     setResidenceForm(prev => ({ ...prev, ...patch }));
+    if (patch.address) {
+      await supabase.from('clients').update({ address: patch.address, updated_at: new Date().toISOString() }).eq('id', clientId);
+      setClient((prev: any) => prev ? { ...prev, address: patch.address } : prev);
+    }
   };
 
   const saveIncomeField = async (incomeId: string, fieldName: string, value: any) => {
@@ -1723,6 +1744,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           has_co_applicant: data.has_co_applicant || false,
           gender: data.gender || '',
           marital_status: data.marital_status || '',
+          preferred_language: data.preferred_language || '',
           born_in_usa: data.born_in_usa ?? null,
           immigration_status: data.immigration_status || '',
           alien_number: data.alien_number || '',
@@ -1744,6 +1766,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           has_co_applicant: false,
           gender: '',
           marital_status: '',
+          preferred_language: '',
           born_in_usa: null,
           immigration_status: '',
           alien_number: '',
@@ -2840,7 +2863,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
   return (
     <DashboardLayout>
-      {['overview', 'personal-info', 'documents', 'notes', 'timeline', 'policies', 'consents'].includes(activeTab) && client && (
+      {['overview', 'personal-info', 'health', 'medicare', 'supplemental', 'life', 'documents', 'notes', 'timeline', 'policies', 'consents', 'tickets'].includes(activeTab) && client && (
         <HealthClientHeader
           clientId={clientId}
           clientName={personalForm.full_name || client.full_name || 'Client Profile'}
@@ -2863,7 +2886,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           hideNavStrip={true}
         />
       )}
-      <CrmPageContainer className="p-0 bg-white space-y-0 font-sans flex-1 flex flex-col min-h-screen">
+      <CrmPageContainer className="p-0 bg-white space-y-0 font-sans flex-1 flex flex-col min-h-0 overflow-hidden h-full max-h-full flex-grow">
         {/* Navigation Breadcrumb */}
         {!isModernClientWorkspace && (
           <div className="flex items-center gap-2 text-sm text-slate-500 pl-4">
@@ -2881,7 +2904,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             </svg>
           </div>
         ) : (
-          <div className="flex flex-col lg:flex-row items-stretch w-full flex-1 min-h-[calc(100vh-120px)] bg-white">
+          <div className="flex flex-col lg:flex-row items-stretch w-full flex-1 min-h-0 overflow-hidden bg-white">
             
             {/* Left Sidebar Summary */}
             {!isOperationalWorkspace && (
@@ -3267,8 +3290,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               <div className="hidden lg:block w-2 shrink-0 bg-slate-100 self-stretch" />
             )}
 
-            <div className="flex-1 w-full min-w-0 bg-white flex flex-col flex-1 min-h-full">
-              {/* Profile Navigation Strip aligned at main content boundary (starting at vertical divider) */}
+            <div className="flex-1 w-full min-w-0 bg-white flex flex-col flex-1 min-h-0 overflow-hidden h-full">
               {!isOperationalWorkspace && (
                 <ClientProfileNavTabs
                   clientId={clientId}
@@ -3278,7 +3300,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               )}
 
               {/* Main Content Area starting directly below tabs */}
-              <div className={isOperationalWorkspace ? "flex-1 w-full min-w-0 bg-white flex flex-col min-h-full" : "p-6 flex-1 bg-white space-y-6 min-h-full"}>
+              <main id="crm-main-content-panel" className={isOperationalWorkspace ? "flex-1 w-full min-w-0 bg-white flex flex-col min-h-0 overflow-hidden h-full" : "p-6 flex-1 bg-white space-y-6 overflow-y-auto min-h-0 h-full"}>
                         {/* Tabs and Actions bar */}
               {!isModernClientWorkspace && (
                 <div className="crm-card p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -3438,7 +3460,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         {/* Active Policies Card */}
                         <div className="bg-emerald-50/60 border border-emerald-100/80 rounded-xl p-4 flex items-center justify-between">
                           <div>
-                            <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Active Policies</span>
+                            <span className="text-xs font-semibold text-emerald-700">Active Policies</span>
                             <span className="block text-2xl font-extrabold text-emerald-800 mt-1">{activeCount}</span>
                           </div>
                           <div className="p-2.5 bg-emerald-100/50 rounded-xl text-emerald-600">
@@ -3451,7 +3473,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         {/* Expiring Soon Card */}
                         <div className="bg-amber-50/60 border border-amber-100/80 rounded-xl p-4 flex items-center justify-between">
                           <div>
-                            <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">Expiring Soon (60d)</span>
+                            <span className="text-xs font-semibold text-amber-700">Expiring Soon (60d)</span>
                             <span className="block text-2xl font-extrabold text-amber-800 mt-1">{expiringSoonCount}</span>
                           </div>
                           <div className="p-2.5 bg-amber-100/50 rounded-xl text-amber-600">
@@ -3464,7 +3486,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                         {/* Pending Policies Card */}
                         <div className="bg-blue-50/60 border border-blue-100/80 rounded-xl p-4 flex items-center justify-between">
                           <div>
-                            <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">Pending Policies</span>
+                            <span className="text-xs font-semibold text-blue-700">Pending Policies</span>
                             <span className="block text-2xl font-extrabold text-blue-800 mt-1">{pendingCount}</span>
                           </div>
                           <div className="p-2.5 bg-blue-100/50 rounded-xl text-blue-600">
@@ -3916,32 +3938,20 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 )
               )}
 
-              {/* PERSONAL INFO TAB CONTENT (ZOHO-STYLE CASCADING ACCORDION) */}
+              {/* PERSONAL INFO TAB CONTENT — ONE CONTINUOUS FLAT SURFACE */}
               {activeTab === 'personal-info' && (
                 <div className="space-y-8 font-sans bg-white p-6 md:p-8 rounded-none border-none shadow-none">
                   
                   {/* SECTION 1: Personal or Company Information */}
                   <div className="space-y-4 relative font-sans">
-                    <div
-                      onClick={() => setIsPersonalInfoOpen(!isPersonalInfoOpen)}
-                      className="flex items-center justify-between pb-2 cursor-pointer select-none group"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
-                          {isPersonalInfoOpen ? (
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
-                          ) : (
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
-                          )}
-                        </span>
-                        <div>
-                          <h3 className="text-base font-bold text-slate-900">
-                            {isCompanyClient ? 'Company information' : 'Personal information'}
-                          </h3>
-                          <p className="text-xs text-slate-400 mt-0.5">
-                            {isCompanyClient ? 'Commercial P&C Entity Profile. Click any field to edit directly.' : 'Click any field to edit directly.'}
-                          </p>
-                        </div>
+                    <div className="flex items-center justify-between pb-2">
+                      <div>
+                        <h3 className="text-[16px] font-semibold text-[#111827] leading-6 font-sans">
+                          {isCompanyClient ? 'Company Information' : 'Personal Information'}
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {isCompanyClient ? 'Commercial P&C Entity Profile. Click any field to edit directly.' : 'Click any field to edit directly.'}
+                        </p>
                       </div>
                       {isCompanyClient && (
                         <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100">
@@ -3950,8 +3960,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       )}
                     </div>
 
-                    {isPersonalInfoOpen && (
-                      <div className="pt-2">
+                    <div className="pt-2">
                         {personalError && (
                           <div className="mb-4 p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 text-sm">
                             {personalError}
@@ -4129,13 +4138,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
                                 <InlineEditableSelect
                                   label="Preferred language"
-                                  value={personalForm.language_preference}
+                                  value={personalForm.preferred_language}
                                   options={[
                                     { label: 'Spanish', value: 'Spanish' },
                                     { label: 'English', value: 'English' },
                                     { label: 'Other', value: 'Other' },
                                   ]}
-                                  onSave={val => savePersonalField('language_preference', val)}
+                                  onSave={val => savePersonalField('preferred_language', val)}
                                 />
 
                                 <InlineEditableText
@@ -4407,89 +4416,57 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                           </div>
                         )}
                       </div>
-                    )}
                   </div>
 
-                  {/* SECTION 2: Residence Information Card */}
-                  <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative">
-                    <div
-                      onClick={() => setIsResidenceOpen(!isResidenceOpen)}
-                      className="flex items-center justify-between border-b border-slate-100 pb-4 cursor-pointer select-none group"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
-                          {isResidenceOpen ? (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
-                          ) : (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
-                          )}
-                        </span>
-                        <div>
-                          <h3 className="text-lg font-extrabold text-slate-900">Residence Information</h3>
-                          <p className="text-xs text-slate-400 mt-0.5">Click any field to edit directly.</p>
-                        </div>
-                      </div>
+                  {/* SECTION 2: Residence Information */}
+                  <div className="border-t border-slate-100 pt-8 mt-8 space-y-4 font-sans">
+                    <div>
+                      <h3 className="text-[16px] font-semibold text-[#111827] leading-6 font-sans">Residence Information</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">Click any field to edit directly.</p>
                     </div>
 
-                    {isResidenceOpen && (
-                      <div className="pt-6">
-                        {loadingResidence ? (
-                          <div className="flex justify-center items-center py-10">
-                            <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                            </svg>
-                          </div>
-                        ) : (
-                          <InlineEditableAddress
-                            label=""
-                            data={{
-                              address: residenceForm.address,
-                              city: residenceForm.city,
-                              state: residenceForm.state,
-                              zip_code: residenceForm.zip_code,
-                              county: residenceForm.county,
-                            }}
-                            onSave={async (newData) => {
-                              await saveResidenceField({
-                                address: newData.address,
-                                city: newData.city,
-                                state: newData.state,
-                                zip_code: newData.zip_code,
-                                county: newData.county || '',
-                              });
-                            }}
-                          />
-                        )}
-                      </div>
-                    )}
+                    <div className="pt-2">
+                      {loadingResidence ? (
+                        <div className="flex justify-center items-center py-10">
+                          <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                        </div>
+                      ) : (
+                        <InlineEditableAddress
+                          label=""
+                          data={{
+                            address: residenceForm.address,
+                            city: residenceForm.city,
+                            state: residenceForm.state,
+                            zip_code: residenceForm.zip_code,
+                            county: residenceForm.county,
+                          }}
+                          onSave={async (newData) => {
+                            await saveResidenceField({
+                              address: newData.address,
+                              city: newData.city,
+                              state: newData.state,
+                              zip_code: newData.zip_code,
+                              county: newData.county || '',
+                            });
+                          }}
+                        />
+                      )}
+                    </div>
                   </div>
 
                   {/* SECTION 3: Income Information moved canonically to Health workspace */}
 
-                  {/* SECTION 4: Payment Information Card */}
-                  <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 relative font-sans">
-                    <div
-                      onClick={() => setIsPaymentInfoOpen(!isPaymentInfoOpen)}
-                      className="flex items-center justify-between border-b border-slate-100 pb-4 cursor-pointer select-none group"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-slate-400 group-hover:text-slate-700 transition-colors">
-                          {isPaymentInfoOpen ? (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"/></svg>
-                          ) : (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"/></svg>
-                          )}
-                        </span>
-                        <div>
-                          <h3 className="text-lg font-extrabold text-slate-900 font-sans">Payment Information</h3>
-                          <p className="text-xs text-slate-400 mt-0.5 font-sans">Manage auto pay, payment day, bank account, and card details.</p>
-                        </div>
-                      </div>
+                  {/* SECTION 4: Payment Information */}
+                  <div className="border-t border-slate-100 pt-8 mt-8 space-y-4 font-sans">
+                    <div>
+                      <h3 className="text-[16px] font-semibold text-[#111827] leading-6 font-sans">Payment Information</h3>
+                      <p className="text-xs text-slate-400 mt-0.5 font-sans">Manage auto pay, payment day, bank account, and card details.</p>
                     </div>
 
-                    {isPaymentInfoOpen && (
-                      <div className="pt-6">
+                    <div className="pt-2">
                         {paymentInfoLoading ? (
                           <div className="flex justify-center items-center py-10">
                             <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
@@ -4514,7 +4491,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                             {/* STATIC / COMMON FIELDS */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                               <div>
-                                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Auto Pay</label>
+                                <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1.5">Auto Pay</label>
                                 <div className="flex items-center gap-3 pt-1">
                                   <label className="relative inline-flex items-center cursor-pointer">
                                     <input
@@ -4532,13 +4509,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                               </div>
 
                               <div>
-                                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Payment Day</label>
+                                <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1.5">Payment Day</label>
                                 <select
                                   value={paymentDayVal || ''}
                                   onChange={(e) => setPaymentDayVal(e.target.value === '' ? null : Number(e.target.value))}
                                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans"
                                 >
-                                  <option value="">Select Day (1â€“31)...</option>
+                                  <option value="">Select Day (1–31)...</option>
                                   {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
                                     <option key={day} value={day}>
                                       Day {day}
@@ -4548,7 +4525,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                               </div>
 
                               <div>
-                                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Associated Address</label>
+                                <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1.5">Associated Address</label>
                                 <input
                                   type="text"
                                   value={paymentAddress}
@@ -4559,7 +4536,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                               </div>
 
                               <div>
-                                <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">A Nombre De (Holder Name)</label>
+                                <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1.5">A Nombre De (Holder Name)</label>
                                 <input
                                   type="text"
                                   value={paymentHolderName}
@@ -4571,7 +4548,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                             </div>
 
                             <div className="border-t border-slate-100 pt-5 space-y-4">
-                              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 font-sans">Payment Methods</h4>
+                              <h4 className="text-[16px] font-semibold text-[#111827] leading-6">Payment Methods</h4>
 
                               {/* BANK ACCOUNT SUBSECTION */}
                               <div className="p-4 border border-slate-200 rounded-xl bg-slate-50/50 space-y-4">
@@ -4800,7 +4777,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                           </form>
                         )}
                       </div>
-                    )}
                   </div>
                 </div>
               )}
@@ -4992,8 +4968,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                   <div key={evt.id} className="bg-slate-50/80 border border-slate-200/80 rounded-xl p-3.5 space-y-1.5 shadow-2xs hover:shadow-xs transition-all font-sans">
                                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
                                       <div className="flex flex-wrap items-center gap-2">
-                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-blue-50 text-blue-700 border border-blue-100">
-                                          {evt.related_label}
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                                          {formatTimelineTag(evt.related_label)}
                                         </span>
                                         <h4 className="text-xs font-extrabold text-slate-800">
                                           {evt.title}
@@ -5289,7 +5265,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                   )}
                 </div>
               )}
-            </div>
+            </main>
           </div>
         </div>
       )}
@@ -5433,7 +5409,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             <form onSubmit={handleAddIncomeSubmit} className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Relationship *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Relationship *</label>
                   <select
                     value={incomeRelationship}
                     onChange={(e) => setIncomeRelationship(e.target.value as any)}
@@ -5450,7 +5426,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Income Type *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Income Type *</label>
                   <select
                     value={incomeType}
                     onChange={(e) => setIncomeType(e.target.value as any)}
@@ -5464,7 +5440,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Employer Name</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Employer Name</label>
                 <input
                   type="text"
                   value={incomeEmployerName}
@@ -5476,7 +5452,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Employer Phone</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Employer Phone</label>
                   <input
                     type="text"
                     value={incomeEmployerPhone}
@@ -5487,7 +5463,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Income Amount *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Income Amount *</label>
                   <input
                     type="number"
                     value={incomeAmount}
@@ -5545,7 +5521,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             <form onSubmit={handleEditIncomeSubmit} className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Relationship *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Relationship *</label>
                   <select
                     value={incomeRelationship}
                     onChange={(e) => setIncomeRelationship(e.target.value as any)}
@@ -5562,7 +5538,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Income Type *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Income Type *</label>
                   <select
                     value={incomeType}
                     onChange={(e) => setIncomeType(e.target.value as any)}
@@ -5576,7 +5552,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Employer Name</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Employer Name</label>
                 <input
                   type="text"
                   value={incomeEmployerName}
@@ -5588,7 +5564,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Employer Phone</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Employer Phone</label>
                   <input
                     type="text"
                     value={incomeEmployerPhone}
@@ -5599,7 +5575,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Income Amount *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Income Amount *</label>
                   <input
                     type="number"
                     value={incomeAmount}

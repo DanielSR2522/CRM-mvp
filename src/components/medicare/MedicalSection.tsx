@@ -307,19 +307,19 @@ export default function MedicalSection({
             <div key={med.id} className="p-3.5 bg-[#F8FAFC] border border-[#E8ECF2] rounded-xl flex items-start justify-between gap-3 group hover:border-[#CBD5E1] transition-all">
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 flex-1 min-w-0">
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-[#7C8799] block">Medication</span>
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug block">Medication</span>
                   <p className="text-xs font-bold text-[#172033] truncate mt-0.5">{med.name}</p>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-[#7C8799] block">Dosage</span>
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug block">Dosage</span>
                   <p className="text-xs text-[#556176] truncate mt-0.5">{med.dosage || '-'}</p>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-[#7C8799] block">Frequency</span>
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug block">Frequency</span>
                   <p className="text-xs text-[#556176] truncate mt-0.5">{med.frequency || '-'}</p>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-[#7C8799] block">Instructions</span>
+                  <span className="text-[15px] font-normal text-[#52627A] leading-snug block">Instructions</span>
                   <p className="text-xs text-[#556176] truncate mt-0.5">{med.instructions || '-'}</p>
                 </div>
               </div>

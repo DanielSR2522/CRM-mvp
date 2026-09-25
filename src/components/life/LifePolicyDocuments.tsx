@@ -224,7 +224,7 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
     <div className="space-y-3 font-sans">
       <div className="flex items-center justify-between border-b border-slate-100 pb-3">
         <div>
-          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 font-sans">Policy Documents</h4>
+          <h4 className="text-sm font-semibold text-slate-800">Policy Documents</h4>
           <p className="text-[11px] text-slate-400 font-normal">
             Upload and manage documents specific to this Life Policy
           </p>

@@ -107,7 +107,7 @@ export default function TicketFiltersBar({
 
       {/* Sorting & Clear Controls */}
       <div className="flex items-center gap-2">
-        <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider select-none">Orden:</span>
+        <span className="text-xs font-semibold text-slate-500 select-none">Orden:</span>
         <select
           value={sortBy}
           onChange={(e) => onSortByChange(e.target.value)}

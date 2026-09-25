@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import InlineEditActions from './InlineEditActions';
+import { BASE_INLINE_INPUT_CLASSES, getInlineEditorWidthClass, InlineFieldType } from './editorStyles';
 
 export interface InlineEditableTextProps {
   value: string | null | undefined;
@@ -13,6 +14,7 @@ export interface InlineEditableTextProps {
   className?: string;
   inputClassName?: string;
   type?: 'text' | 'email' | 'number';
+  fieldType?: InlineFieldType | string;
 }
 
 export default function InlineEditableText({
@@ -25,6 +27,7 @@ export default function InlineEditableText({
   className = '',
   inputClassName = '',
   type = 'text',
+  fieldType,
 }: InlineEditableTextProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [draftValue, setDraftValue] = useState(value || '');
@@ -81,10 +84,10 @@ export default function InlineEditableText({
 
   return (
     <div className={`w-full font-sans ${className}`}>
-      {label && <span className="block text-xs font-semibold text-slate-500 mb-1">{label}</span>}
+      {label && <span className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">{label}</span>}
 
       {isEditing ? (
-        <div className="flex items-center gap-1.5 w-full">
+        <div className="flex items-center gap-2">
           <input
             ref={inputRef}
             type={type}
@@ -96,7 +99,7 @@ export default function InlineEditableText({
             onKeyDown={handleKeyDown}
             disabled={saving}
             placeholder={placeholder}
-            className={`w-full bg-white border border-blue-500 ring-2 ring-blue-100 rounded-xl px-3 py-1.5 text-sm text-slate-900 font-bold outline-none transition-all ${inputClassName}`}
+            className={`${BASE_INLINE_INPUT_CLASSES} ${getInlineEditorWidthClass(fieldType || type)} ${inputClassName}`}
           />
           <InlineEditActions onSave={handleSave} onCancel={handleCancel} saving={saving} error={error} />
         </div>
@@ -108,7 +111,7 @@ export default function InlineEditableText({
             disabled ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:bg-slate-100/80 hover:text-blue-600'
           }`}
         >
-          <span className="text-[15px] font-semibold text-slate-950 truncate">
+          <span className="text-[15px] font-normal text-[#253247] leading-snug truncate">
             {value ? value : <span className="text-slate-400 font-normal italic">{emptyDisplay}</span>}
           </span>
           {!disabled && (

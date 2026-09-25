@@ -309,8 +309,8 @@ export default function ModuleDocumentsManager({
     <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6 font-sans">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-4">
         <div>
-          <h3 className="text-base font-extrabold text-slate-800">
-            {moduleLabel || (moduleType !== 'all' ? `${moduleType.toUpperCase().replace('_', ' & ')} DOCUMENTS` : 'CLIENT DOCUMENTS CENTER')}
+          <h3 className="text-[16px] font-semibold text-[#111827] leading-6">
+            {moduleLabel || (moduleType !== 'all' ? `${moduleType.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' & ')} Documents` : 'Client Documents Center')}
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
             {moduleType !== 'all' ? 'Upload, view, and manage documents for this module.' : 'Central repository for general and policy-specific client documents.'}
@@ -350,7 +350,7 @@ export default function ModuleDocumentsManager({
           {/* Module Selector if central mode */}
           {moduleType === 'all' && (
             <div>
-              <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
                 Module / Category
               </label>
               <select
@@ -374,7 +374,7 @@ export default function ModuleDocumentsManager({
           {/* Policy Selector if policies exist */}
           {!policyId && !healthPolicyId && selectedModuleType !== 'general' && (
             <div>
-              <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
                 Target Policy (Optional)
               </label>
               <select
@@ -393,7 +393,7 @@ export default function ModuleDocumentsManager({
           )}
 
           <div>
-            <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
+            <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
               Document Title / Name
             </label>
             <input
@@ -406,7 +406,7 @@ export default function ModuleDocumentsManager({
           </div>
 
           <div>
-            <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-1">
+            <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">
               Document Type
             </label>
             <select

@@ -118,15 +118,15 @@ export default function LifeProfileHeader({ clientId }: LifeProfileHeaderProps) 
             </svg>
           </div>
           <div>
-            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans">Client Life Profile</h3>
-            <p className="text-[10px] text-slate-400 font-normal">Financial & Health Overview</p>
+            <h3 className="text-sm font-semibold text-slate-800 font-sans">Client Life Profile</h3>
+            <p className="text-xs text-slate-400 font-normal">Financial & Health Overview</p>
           </div>
         </div>
       </div>
 
       <div className="space-y-3 pt-0.5 text-xs font-sans">
         <div>
-          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Health Rating Approved</span>
+          <span className="block text-xs font-semibold text-slate-500 mb-0.5">Health Rating Approved</span>
           <InlineEditableText
             value={profile?.health_rating_approved || ''}
             placeholder="e.g. Preferred Plus"
@@ -136,7 +136,7 @@ export default function LifeProfileHeader({ clientId }: LifeProfileHeaderProps) 
         </div>
 
         <div>
-          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Income</span>
+          <span className="block text-xs font-semibold text-slate-500 mb-0.5">Income</span>
           <InlineEditableText
             value={profile?.income !== null && profile?.income !== undefined ? formatCurrency(profile.income) : ''}
             placeholder="$0.00"
@@ -146,7 +146,7 @@ export default function LifeProfileHeader({ clientId }: LifeProfileHeaderProps) 
         </div>
 
         <div>
-          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Profits</span>
+          <span className="block text-xs font-semibold text-slate-500 mb-0.5">Profits</span>
           <InlineEditableText
             value={profile?.profits !== null && profile?.profits !== undefined ? formatCurrency(profile.profits) : ''}
             placeholder="$0.00"
@@ -156,7 +156,7 @@ export default function LifeProfileHeader({ clientId }: LifeProfileHeaderProps) 
         </div>
 
         <div>
-          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Company Name</span>
+          <span className="block text-xs font-semibold text-slate-500 mb-0.5">Company Name</span>
           <InlineEditableText
             value={profile?.company_name || ''}
             placeholder="Company Name"
@@ -166,7 +166,7 @@ export default function LifeProfileHeader({ clientId }: LifeProfileHeaderProps) 
         </div>
 
         <div>
-          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Owner / Employee</span>
+          <span className="block text-xs font-semibold text-slate-500 mb-0.5">Owner / Employee</span>
           <InlineEditableText
             value={profile?.owner_employee || ''}
             placeholder="e.g. Owner"
@@ -176,7 +176,7 @@ export default function LifeProfileHeader({ clientId }: LifeProfileHeaderProps) 
         </div>
 
         <div>
-          <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Net Worth</span>
+          <span className="block text-xs font-semibold text-slate-500 mb-0.5">Net Worth</span>
           <InlineEditableText
             value={profile?.net_worth !== null && profile?.net_worth !== undefined ? formatCurrency(profile.net_worth) : ''}
             placeholder="$0.00"

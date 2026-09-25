@@ -1,5 +1,8 @@
 import crypto from 'crypto';
-import 'server-only';
+
+if (typeof window !== 'undefined') {
+  throw new Error('encryption.ts holds secret keys and must only be executed on the server.');
+}
 
 /**
  * Validates the base64-encoded 32-byte key from environment variables.

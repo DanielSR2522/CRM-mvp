@@ -200,7 +200,7 @@ export default function LifeLeftRail({
 
             <form onSubmit={handleAddLink} className="space-y-3 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-1">Title *</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Title *</label>
                 <input
                   type="text"
                   value={newLinkTitle}
@@ -212,7 +212,7 @@ export default function LifeLeftRail({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 uppercase tracking-wider text-[10px] mb-1">URL *</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">URL *</label>
                 <input
                   type="text"
                   value={newLinkUrl}

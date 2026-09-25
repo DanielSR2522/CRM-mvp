@@ -79,10 +79,10 @@ export default function InlineEditableTextarea({
 
   return (
     <div className={`w-full font-sans ${className}`}>
-      {label && <span className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{label}</span>}
+      {label && <span className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">{label}</span>}
 
       {isEditing ? (
-        <div className="space-y-2 w-full">
+        <div className="space-y-2 w-full max-w-[320px] sm:max-w-[420px]">
           <textarea
             ref={textareaRef}
             rows={rows}
@@ -94,10 +94,10 @@ export default function InlineEditableTextarea({
             onKeyDown={handleKeyDown}
             disabled={saving}
             placeholder={placeholder}
-            className="w-full bg-white border border-blue-500 ring-2 ring-blue-100 rounded-xl p-3 text-xs text-slate-900 font-medium outline-none transition-all resize-y"
+            className="w-full bg-white border border-slate-300 rounded-md p-3 text-[15px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors resize-y font-sans"
           />
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-slate-400 font-medium">Ctrl+Enter to save, Esc to cancel</span>
+            <span className="text-[11px] text-slate-400 font-normal">Ctrl+Enter to save, Esc to cancel</span>
             <InlineEditActions onSave={handleSave} onCancel={handleCancel} saving={saving} error={error} />
           </div>
         </div>
@@ -109,7 +109,7 @@ export default function InlineEditableTextarea({
             disabled ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:bg-slate-100/80 hover:text-blue-600'
           }`}
         >
-          <span className="text-xs font-medium text-slate-800 whitespace-pre-wrap">
+          <span className="text-[15px] font-normal text-[#253247] leading-snug whitespace-pre-wrap">
             {value ? value : <span className="text-slate-400 font-normal italic">{emptyDisplay}</span>}
           </span>
           {!disabled && (

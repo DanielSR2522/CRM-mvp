@@ -6,3 +6,4 @@ export { default as InlineEditableDate } from './InlineEditableDate';
 export { default as InlineEditableSelect } from './InlineEditableSelect';
 export { default as InlineEditableTextarea } from './InlineEditableTextarea';
 export { default as InlineEditableAddress } from './InlineEditableAddress';
+export * from './editorStyles';

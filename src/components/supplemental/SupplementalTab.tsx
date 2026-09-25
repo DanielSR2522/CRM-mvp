@@ -184,20 +184,7 @@ export default function SupplementalTab({
   }
 
   return (
-    <div className="flex flex-col w-full font-sans min-h-screen bg-white">
-      {/* 1. White Client Identity Header Bar */}
-      <HealthClientHeader
-        clientId={clientId}
-        clientName={clientName}
-        photoUrl={photoUrl}
-        lastUpdated={lastUpdated}
-        onSendEmail={onSendEmail}
-        onConsent={onConsent}
-        onDeleteProfile={onDeleteProfile}
-        isCompanyClient={isCompanyClient}
-        activeSection="supplemental"
-        hideNavStrip={true}
-      />
+    <div className="flex flex-col w-full font-sans bg-white">
 
       {/* 2. Main Workspace Layout */}
       <div className="flex flex-col lg:flex-row items-stretch w-full flex-1 min-h-0">
@@ -297,7 +284,7 @@ export default function SupplementalTab({
           {activeSubtab === 'timeline' && (
             <div className="bg-white border border-slate-200/70 rounded-xl p-6 shadow-2xs space-y-4 animate-in fade-in duration-150 font-sans">
               <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
+                <h3 className="text-[16px] font-semibold text-[#111827] leading-6">
                   Supplemental Activity Timeline {selectedPolicy ? `— ${selectedPolicy.product_type}` : ''}
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5 font-medium">Chronological activity record for the selected supplemental policy.</p>
@@ -329,7 +316,7 @@ export default function SupplementalTab({
           {activeSubtab === 'links' && (
             <div className="bg-white border border-slate-200/70 rounded-xl p-6 shadow-2xs space-y-4 animate-in fade-in duration-150 font-sans">
               <div className="border-b border-slate-100 pb-3">
-                <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">Saved Client Links</h3>
+                <h3 className="text-[16px] font-semibold text-[#111827] leading-6">Saved Client Links</h3>
                 <p className="text-xs text-slate-500 mt-0.5 font-medium">Quick reference links for Supplemental portals and carrier tools.</p>
               </div>
               <p className="text-xs text-slate-600">

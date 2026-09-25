@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { revealTaxMemberSecret } from '@/lib/health/health-service';
-import { formatSsnInput, isValidSsn, normalizeSsn, maskSsn } from '@/utils/ssnUtils';
+import { revealTaxMemberSecret, saveTaxMemberSecret } from '@/lib/health/health-service';
+import { formatSsnInput, isValidSsn } from '@/utils/ssnUtils';
 
 interface TaxMemberSensitiveFieldProps {
   label: string;
@@ -27,7 +27,6 @@ export default function TaxMemberSensitiveField({
   placeholder,
   onInlineSave
 }: TaxMemberSensitiveFieldProps) {
-  const [revealed, setRevealed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInlineEditing, setIsInlineEditing] = useState(false);
@@ -37,37 +36,32 @@ export default function TaxMemberSensitiveField({
     setDraftValue(value);
   }, [value]);
 
+  // Auto-fetch decrypted tax member secret on mount if hasValue is true and value is not yet loaded
   useEffect(() => {
+    let active = true;
+    if (hasValue && !value && healthPolicyId) {
+      setLoading(true);
+      revealTaxMemberSecret(healthPolicyId, memberNumber, fieldName)
+        .then(plaintext => {
+          if (active && plaintext) {
+            const formatted = fieldName === 'ssn' ? formatSsnInput(plaintext) : plaintext;
+            onChange(formatted);
+            setDraftValue(formatted);
+          }
+        })
+        .catch(err => {
+          if (active) {
+            console.error(`Failed to auto-decrypt tax member field ${fieldName}:`, err);
+          }
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }
     return () => {
-      setRevealed(false);
-      setError(null);
+      active = false;
     };
-  }, [disabled]);
-
-  const handleReveal = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!healthPolicyId) return;
-    if (revealed) {
-      setRevealed(false);
-      onChange('');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const plaintext = await revealTaxMemberSecret(healthPolicyId, memberNumber, fieldName);
-      const formatted = fieldName === 'ssn' ? formatSsnInput(plaintext) : plaintext;
-      onChange(formatted);
-      setDraftValue(formatted);
-      setRevealed(true);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to reveal secret';
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [hasValue, value, healthPolicyId, memberNumber, fieldName]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
@@ -82,7 +76,7 @@ export default function TaxMemberSensitiveField({
     setError(null);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (fieldName === 'ssn' && draftValue.trim()) {
       if (!isValidSsn(draftValue, false)) {
         setError('SSN must be exactly 9 digits');
@@ -90,8 +84,23 @@ export default function TaxMemberSensitiveField({
       }
     }
     setError(null);
-    setIsInlineEditing(false);
-    if (onInlineSave) onInlineSave();
+    if (!healthPolicyId) {
+      setError('Policy ID is missing');
+      return;
+    }
+    setLoading(true);
+    try {
+      await saveTaxMemberSecret(healthPolicyId, memberNumber, fieldName, draftValue);
+      const formatted = fieldName === 'ssn' ? formatSsnInput(draftValue) : draftValue;
+      onChange(formatted);
+      setIsInlineEditing(false);
+      if (onInlineSave) onInlineSave();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save secret';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancel = () => {
@@ -101,34 +110,24 @@ export default function TaxMemberSensitiveField({
     setIsInlineEditing(false);
   };
 
-  // Display Text Logic
   const getDisplayText = () => {
-    if (!hasValue && !value && !draftValue) {
-      return '—';
-    }
-    if (fieldName === 'ssn') {
-      if (value) return formatSsnInput(value);
-      if (hasValue) return 'Saved';
-      return '—';
-    }
-    if (revealed || (value && !hasValue)) {
-      return value;
-    }
-    return '••••••••';
+    if (value) return fieldName === 'ssn' ? formatSsnInput(value) : value;
+    if (draftValue) return fieldName === 'ssn' ? formatSsnInput(draftValue) : draftValue;
+    return '—';
   };
 
   return (
-    <div className="py-2 grid grid-cols-[200px_minmax(0,1fr)] items-center gap-x-10 min-h-[36px] font-sans w-full">
-      <span className="text-slate-500 font-medium text-xs truncate text-right">{label}</span>
+    <div className="grid grid-cols-[185px_minmax(0,1fr)] items-center min-h-[38px] py-[3px] gap-x-[18px] font-sans w-full">
+      <span className="text-[15px] font-normal text-[#52627A] text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">{label}</span>
 
       {isInlineEditing ? (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-nowrap min-w-[320px]">
           <input
             type="text"
             value={draftValue}
             onChange={handleInputChange}
             placeholder={placeholder || (fieldName === 'ssn' ? '123-45-6789' : `Enter ${label}...`)}
-            className="w-36 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none font-sans"
+            className="h-[34px] w-[260px] max-w-[260px] min-w-[220px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
             autoFocus
             onKeyDown={e => {
               if (e.key === 'Escape') handleCancel();
@@ -137,8 +136,9 @@ export default function TaxMemberSensitiveField({
           />
           <button
             type="button"
+            disabled={loading}
             onClick={handleSave}
-            className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+            className="w-6 h-6 rounded-md bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-xs transition-colors disabled:opacity-50"
             title="Save"
           >
             ✓
@@ -146,12 +146,12 @@ export default function TaxMemberSensitiveField({
           <button
             type="button"
             onClick={handleCancel}
-            className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+            className="w-6 h-6 rounded-md bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center text-xs font-bold shrink-0 transition-colors"
             title="Cancel"
           >
             ✕
           </button>
-          {error && <span className="text-rose-500 text-[10px] pl-1">{error}</span>}
+          {error && <span className="text-rose-500 text-[10px] pl-1 shrink-0">{error}</span>}
         </div>
       ) : (
         <div className="flex items-center gap-2">
@@ -161,26 +161,16 @@ export default function TaxMemberSensitiveField({
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
-              Decrypting...
+              Loading...
             </span>
           ) : (
             <span
               onClick={() => setIsInlineEditing(true)}
-              className="text-slate-900 text-xs font-semibold cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+              className="text-[15px] font-normal text-[#253247] text-left leading-snug whitespace-nowrap cursor-pointer hover:text-blue-600 hover:underline transition-colors font-sans"
               title={`Click to edit ${label}`}
             >
               {getDisplayText()}
             </span>
-          )}
-
-          {hasValue && !loading && (
-            <button
-              type="button"
-              onClick={handleReveal}
-              className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-600 hover:text-blue-800 bg-blue-50/50 hover:bg-blue-50 border border-blue-100 rounded transition-all font-sans"
-            >
-              {revealed ? 'Hide' : 'Show'}
-            </button>
           )}
 
           {error && <span className="text-rose-500 text-[10px] pl-1">{error}</span>}

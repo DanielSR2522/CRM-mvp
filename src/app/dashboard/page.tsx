@@ -29,7 +29,6 @@ interface ClientRow {
   id: string;
   full_name: string;
   agent_id: string | null;
-  date_of_birth?: string | null;
 }
 
 export type SortableColumn =
@@ -166,7 +165,9 @@ export default function DashboardPage() {
   const clientMap = useMemo(() => {
     const map: Record<string, string> = {};
     clients.forEach((c) => {
-      map[c.id] = c.full_name;
+      if (c.full_name) {
+        map[c.id] = c.full_name;
+      }
     });
     return map;
   }, [clients]);
@@ -199,7 +200,7 @@ export default function DashboardPage() {
       // 2. Fetch Clients
       const { data: clientsData } = await supabase
         .from('clients')
-        .select('id, full_name, agent_id, date_of_birth');
+        .select('id, full_name, agent_id');
 
       setClients(clientsData || []);
 
@@ -741,8 +742,9 @@ export default function DashboardPage() {
   const mappedOpportunities = useMemo((): DashboardOpportunity[] => {
     const opps: DashboardOpportunity[] = [];
     clients.forEach((c) => {
-      if (c.date_of_birth) {
-        const age = new Date().getFullYear() - new Date(c.date_of_birth).getFullYear();
+      const dob = (c as any).date_of_birth;
+      if (dob) {
+        const age = new Date().getFullYear() - new Date(dob).getFullYear();
         if (age >= 64 && age <= 65) {
           opps.push({
             id: `opp-medicare-${c.id}`,
@@ -836,6 +838,7 @@ export default function DashboardPage() {
               policyMixItems={pcPolicyMixItems}
               totalPcPoliciesCount={totalPcPoliciesCount}
               topCarrierItems={pcTopCarriers}
+              clientMap={clientMap}
               displayedPolicies={displayedPcPolicies}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}

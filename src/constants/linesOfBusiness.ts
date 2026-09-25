@@ -4,6 +4,7 @@ export const LINES_OF_BUSINESS = [
   "Bond",
   "Builders Risk",
   "Business Owners",
+  "Cargo",
   "Commercial Package",
   "Commercial Property",
   "Comprehensive Personal Liability",
@@ -54,6 +55,6 @@ export const COMMERCIAL_LINES_OF_BUSINESS = LINES_OF_BUSINESS;
 export const PERSONAL_LINES_OF_BUSINESS = LINES_OF_BUSINESS;
 
 // Compile-time or load-time length safety check
-if (LINES_OF_BUSINESS.length !== 48) {
-  throw new Error(`Lines of Business array must contain exactly 48 options. Current length: ${LINES_OF_BUSINESS.length}`);
+if (LINES_OF_BUSINESS.length !== 49) {
+  throw new Error(`Lines of Business array must contain exactly 49 options. Current length: ${LINES_OF_BUSINESS.length}`);
 }

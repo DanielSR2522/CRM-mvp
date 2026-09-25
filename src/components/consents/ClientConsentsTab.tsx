@@ -105,8 +105,9 @@ export default function ClientConsentsTab({ clientId, clientName }: ClientConsen
   useEffect(() => {
     if (!clientId) return;
 
+    const channelName = `client_tab_${clientId}_${Math.random().toString(36).substring(2, 7)}`;
     const channel = supabase
-      .channel(`client_tab_${clientId}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
