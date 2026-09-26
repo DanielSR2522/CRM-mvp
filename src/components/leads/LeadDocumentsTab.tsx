@@ -7,6 +7,7 @@ import { validateLeadFile, formatBytes, getLeadFileSignedUrl, logTimelineEvent }
 import { formatIsoToUsDate } from '@/utils/dateUtils';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
+import { fetchOfficeDocumentPreview } from '@/lib/documents/fetch-preview';
 
 interface LeadDocumentsTabProps {
   lead: Lead;
@@ -211,18 +212,7 @@ export default function LeadDocumentsTab({ lead, onActivityLogged }: LeadDocumen
 
     if (isOffice) {
       try {
-        const res = await fetch('/api/documents/preview', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: 'lead', docId: doc.id }),
-        });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Failed to generate document preview.');
-        }
-
-        const officeData = await res.json();
+        const officeData = await fetchOfficeDocumentPreview('lead', doc.id);
         setLeadPreviewState((prev) => ({
           ...prev,
           loading: false,

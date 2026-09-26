@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabaseClient';
 import FileDropzone from '@/components/ui/FileDropzone';
 import { isoDateToMMDDYYYY } from '@/lib/formatters/date';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
+import { fetchOfficeDocumentPreview } from '@/lib/documents/fetch-preview';
 
 export interface LifePolicyDocument {
   id: string;
@@ -145,18 +146,7 @@ export default function LifePolicyDocuments({ lifePolicyId, onDocumentsChange }:
 
     if (isOffice) {
       try {
-        const res = await fetch('/api/documents/preview', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: 'life', docId: doc.id }),
-        });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Failed to generate document preview.');
-        }
-
-        const officeData = await res.json();
+        const officeData = await fetchOfficeDocumentPreview('life', doc.id);
         setPreviewState((prev) => ({
           ...prev,
           loading: false,

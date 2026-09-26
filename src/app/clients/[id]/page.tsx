@@ -15,6 +15,7 @@ import LifePolicyTab from '@/components/life/LifePolicyTab';
 import UnifiedNotesManager from '@/components/notes/UnifiedNotesManager';
 import ModuleDocumentsManager from '@/components/documents/ModuleDocumentsManager';
 import { getAssignedAgentDisplay } from '@/lib/auth/agentDisplay';
+import { fetchOfficeDocumentPreview } from '@/lib/documents/fetch-preview';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
 import { resolvePolicyAddress } from '@/utils/addressUtils';
@@ -777,18 +778,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
     if (isOffice) {
       try {
-        const res = await fetch('/api/documents/preview', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: doc.source, docId: doc.id }),
-        });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Failed to generate document preview.');
-        }
-
-        const officeData = await res.json();
+        const officeData = await fetchOfficeDocumentPreview(doc.source, doc.id);
         setUnifiedPreviewState((prev) => ({
           ...prev,
           loading: false,

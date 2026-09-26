@@ -22,6 +22,7 @@ import FileDropzone from '@/components/ui/FileDropzone';
 import DatePicker from '@/components/ui/DatePicker';
 import { useBusinessLines } from '@/contexts/BusinessLinesContext';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
+import { fetchOfficeDocumentPreview } from '@/lib/documents/fetch-preview';
 
 interface Policy {
   id: string;
@@ -1373,18 +1374,7 @@ export default function PolicyProfilePage({ params }: { params: Promise<{ id: st
 
     if (isOffice) {
       try {
-        const res = await fetch('/api/documents/preview', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: 'property_casualty', docId: doc.id }),
-        });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Failed to generate document preview.');
-        }
-
-        const officeData = await res.json();
+        const officeData = await fetchOfficeDocumentPreview('property_casualty', doc.id);
         setPcPreviewState((prev) => ({
           ...prev,
           loading: false,

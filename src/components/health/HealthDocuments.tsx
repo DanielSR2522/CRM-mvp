@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { HealthPolicyDocument, HealthPolicyDocumentSection } from '@/lib/health/types';
 import { fetchHealthSections, fetchHealthDocuments } from '@/lib/health/health-service';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
+import { fetchOfficeDocumentPreview } from '@/lib/documents/fetch-preview';
 
 interface HealthDocumentsProps {
   clientId: string;
@@ -258,25 +259,14 @@ export default function HealthDocuments({
 
     if (isOffice) {
       try {
-        const res = await fetch('/api/documents/preview', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: 'health', docId: doc.id }),
-        });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Failed to generate document preview.');
-        }
-
-        const officeData = await res.json();
+        const officeData = await fetchOfficeDocumentPreview('health', doc.id);
         setHealthPreviewState((prev) => ({
           ...prev,
           loading: false,
           officePreview: officeData,
         }));
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Could not retrieve preview URL.';
+        const message = err instanceof Error ? err.message : 'Unable to preview this document.';
         setHealthPreviewState((prev) => ({
           ...prev,
           loading: false,
