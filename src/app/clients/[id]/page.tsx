@@ -16,6 +16,7 @@ import UnifiedNotesManager from '@/components/notes/UnifiedNotesManager';
 import ModuleDocumentsManager from '@/components/documents/ModuleDocumentsManager';
 import { getAssignedAgentDisplay } from '@/lib/auth/agentDisplay';
 import { fetchOfficeDocumentPreview } from '@/lib/documents/fetch-preview';
+import { formatMaskedCardNumber, formatMaskedAccountNumber, formatMaskedRoutingNumber } from '@/lib/payments/formatters';
 import { supabase } from '@/lib/supabaseClient';
 import { formatIsoToUsDate, usDateToIso, formatAsDateInput } from '@/utils/dateUtils';
 import { resolvePolicyAddress } from '@/utils/addressUtils';
@@ -4594,7 +4595,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                           <label className="block text-xs font-bold text-slate-500 mb-1">Routing Number</label>
                                           <input
                                             type="text"
-                                            value="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                                            value={formatMaskedRoutingNumber()}
                                             disabled
                                             className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-500 font-mono"
                                           />
@@ -4603,7 +4604,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                           <label className="block text-xs font-bold text-slate-500 mb-1">Account Number</label>
                                           <input
                                             type="text"
-                                            value={`â€¢â€¢â€¢â€¢${bankLast4}`}
+                                            value={formatMaskedAccountNumber(bankLast4)}
                                             disabled
                                             className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold"
                                           />
@@ -4694,7 +4695,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                         <label className="block text-xs font-bold text-slate-500 mb-1">Card Number</label>
                                         <input
                                           type="text"
-                                          value={`â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ ${cardLast4Val}`}
+                                          value={formatMaskedCardNumber(cardLast4Val)}
                                           disabled
                                           className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold"
                                         />
