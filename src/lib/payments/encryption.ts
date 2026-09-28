@@ -1,12 +1,15 @@
 import crypto from 'crypto';
-import 'server-only';
+
+if (typeof window !== 'undefined') {
+  throw new Error('payments/encryption.ts holds secret keys and must only be executed on the server.');
+}
 
 /**
  * Validates the base64-encoded 32-byte key from environment variables.
  * Returns the raw key buffer. Throws if invalid or missing.
  */
 function getPaymentEncryptionKey(): Buffer {
-  const keyBase64 = process.env.PAYMENT_DATA_ENCRYPTION_KEY;
+  const keyBase64 = process.env.PAYMENT_DATA_ENCRYPTION_KEY || process.env.HEALTH_DATA_ENCRYPTION_KEY;
   if (!keyBase64) {
     throw new Error('PAYMENT_DATA_ENCRYPTION_KEY environment variable is not defined');
   }

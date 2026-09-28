@@ -2892,7 +2892,7 @@ export default function HealthPolicyForm({
                       className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                       title="Click to edit Expiration Date"
                     >
-                      {formatDateForDisplay(primaryApplicant?.immigrationExpirationDate)}
+                      {primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '—'}
                     </span>
                   )}
                 </div>
@@ -3047,7 +3047,7 @@ export default function HealthPolicyForm({
                       className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                       title="Click to edit Expiration Date"
                     >
-                      {formatDateForDisplay(primaryApplicant?.immigrationExpirationDate)}
+                      {primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '—'}
                     </span>
                   )}
                 </div>
@@ -3589,8 +3589,8 @@ export default function HealthPolicyForm({
                                 </span>
                               )}
                             </div>
-                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
-                              <span className="text-slate-500 font-medium">Expiration Date</span>
+                            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Expiration Date</span>
                               {editingTaxMemberField === `m_${memberNumber}_immigrationExpDate` ? (
                                 <div className="flex items-center gap-2 flex-nowrap min-w-0">
                                   <input
@@ -3600,7 +3600,7 @@ export default function HealthPolicyForm({
                                     placeholder="MM/DD/YYYY"
                                     className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                                     autoFocus
-                                    onKeyDown={e => {
+                                    onKeyDown={async e => {
                                       if (e.key === 'Escape') setEditingTaxMemberField(null);
                                       if (e.key === 'Enter') {
                                         const parsedIso = parseDisplayDate(taxMemberDraftValue);
@@ -3608,21 +3608,19 @@ export default function HealthPolicyForm({
                                           setTaxMemberFieldError('Invalid date (MM/DD/YYYY)');
                                           return;
                                         }
-                                        updateMember({ immigration_expiration_date: parsedIso });
-                                        setEditingTaxMemberField(null);
+                                        await updateMember({ immigration_expiration_date: parsedIso });
                                       }
                                     }}
                                   />
                                   <button
                                     type="button"
-                                    onClick={() => {
+                                    onClick={async () => {
                                       const parsedIso = parseDisplayDate(taxMemberDraftValue);
                                       if (taxMemberDraftValue && !parsedIso) {
                                         setTaxMemberFieldError('Invalid date (MM/DD/YYYY)');
                                         return;
                                       }
-                                      updateMember({ immigration_expiration_date: parsedIso });
-                                      setEditingTaxMemberField(null);
+                                      await updateMember({ immigration_expiration_date: parsedIso });
                                     }}
                                     className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
                                     title="Save"
@@ -3649,17 +3647,17 @@ export default function HealthPolicyForm({
                                   className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                                   title="Click to edit Expiration Date"
                                 >
-                                  {formatDateForDisplay(member.immigration_expiration_date)}
+                                  {member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : '—'}
                                 </span>
                               )}
                             </div>
                           </>
                         )}
 
-                        {/* CONDITIONAL IMMIGRATION FIELDS: Resident */}
-                        {member.immigration_status === 'Resident' && (
+                        {/* CONDITIONAL IMMIGRATION FIELDS: Resident & Permanent Resident */}
+                        {(member.immigration_status === 'Resident' || member.immigration_status === 'Permanent Resident') && (
                           <>
-                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
+                            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
                               <TaxMemberSensitiveField
                                 label="Alien Number"
                                 healthPolicyId={initialPolicy?.id}
@@ -3671,7 +3669,7 @@ export default function HealthPolicyForm({
                                 onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_alien_number`]: val }))}
                               />
                             </div>
-                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
+                            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
                               <TaxMemberSensitiveField
                                 label="Card Number"
                                 healthPolicyId={initialPolicy?.id}
@@ -3683,8 +3681,8 @@ export default function HealthPolicyForm({
                                 onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_card_number`]: val }))}
                               />
                             </div>
-                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
-                              <span className="text-slate-500 font-medium">Expiration Date</span>
+                            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+                              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Expiration Date</span>
                               {editingTaxMemberField === `m_${memberNumber}_immigrationExpDate` ? (
                                 <div className="flex items-center gap-2 flex-nowrap min-w-0">
                                   <input
@@ -3694,7 +3692,7 @@ export default function HealthPolicyForm({
                                     placeholder="MM/DD/YYYY"
                                     className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                                     autoFocus
-                                    onKeyDown={e => {
+                                    onKeyDown={async e => {
                                       if (e.key === 'Escape') setEditingTaxMemberField(null);
                                       if (e.key === 'Enter') {
                                         const parsedIso = parseDisplayDate(taxMemberDraftValue);
@@ -3702,21 +3700,19 @@ export default function HealthPolicyForm({
                                           setTaxMemberFieldError('Invalid date (MM/DD/YYYY)');
                                           return;
                                         }
-                                        updateMember({ immigration_expiration_date: parsedIso });
-                                        setEditingTaxMemberField(null);
+                                        await updateMember({ immigration_expiration_date: parsedIso });
                                       }
                                     }}
                                   />
                                   <button
                                     type="button"
-                                    onClick={() => {
+                                    onClick={async () => {
                                       const parsedIso = parseDisplayDate(taxMemberDraftValue);
                                       if (taxMemberDraftValue && !parsedIso) {
                                         setTaxMemberFieldError('Invalid date (MM/DD/YYYY)');
                                         return;
                                       }
-                                      updateMember({ immigration_expiration_date: parsedIso });
-                                      setEditingTaxMemberField(null);
+                                      await updateMember({ immigration_expiration_date: parsedIso });
                                     }}
                                     className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
                                     title="Save"
@@ -3743,7 +3739,7 @@ export default function HealthPolicyForm({
                                   className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
                                   title="Click to edit Expiration Date"
                                 >
-                                  {formatDateForDisplay(member.immigration_expiration_date)}
+                                  {member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : '—'}
                                 </span>
                               )}
                             </div>
