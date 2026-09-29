@@ -18,6 +18,46 @@ export function normalizeText(val?: string | null): string {
   return val.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+export function computeNameSimilarity(name1?: string | null, name2?: string | null): number {
+  if (!name1 || !name2) return 0;
+  const clean1 = name1.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const clean2 = name2.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  if (!clean1 || !clean2) return 0;
+  if (clean1 === clean2) return 1.0;
+
+  const tokens1 = clean1.split(' ').filter((t) => t.length > 1);
+  const tokens2 = clean2.split(' ').filter((t) => t.length > 1);
+
+  if (tokens1.length === 0 || tokens2.length === 0) return 0;
+
+  const set1 = new Set(tokens1);
+  const set2 = new Set(tokens2);
+
+  let common = 0;
+  set1.forEach((t) => {
+    if (set2.has(t)) common++;
+  });
+
+  const dice = (2 * common) / (set1.size + set2.size);
+
+  const isSubset1In2 = tokens1.every((t) => set2.has(t));
+  const isSubset2In1 = tokens2.every((t) => set1.has(t));
+  if ((isSubset1In2 || isSubset2In1) && Math.min(set1.size, set2.size) >= 2) {
+    return Math.max(0.85, dice);
+  }
+
+  return dice;
+}
+
+export function isCarrierMatch(carrier1?: string | null, carrier2?: string | null): boolean {
+  const norm1 = normalizeCarrier(carrier1);
+  const norm2 = normalizeCarrier(carrier2);
+  if (!norm1 || !norm2) return false;
+  if (norm1 === norm2) return true;
+  return norm1.includes(norm2) || norm2.includes(norm1);
+}
+
 interface DBClientRecord {
   id?: string;
   full_name?: string;
@@ -52,7 +92,6 @@ export async function matchExtractedRowsToCRM(
   isPrivileged: boolean = false,
   sourceBuffer?: Buffer
 ): Promise<ExtractedCommissionRow[]> {
-  // Query P&C policies (pc_policies table or fallback to policies table)
   let rawPolicies: DBPolicyRecord[] = [];
   const { data: pcPolicies, error: pcErr } = await supabase
     .from('pc_policies')
@@ -108,7 +147,6 @@ export async function matchExtractedRowsToCRM(
     return rows;
   }
 
-  // AGENT SCOPING: Restrict candidate policies to the authenticated agent's own or P&C shared assigned book unless privileged role
   const authorizedAgentIds = isPrivileged ? [] : await getPcSharedAgentIds(agentId, supabase);
   const scopedPolicies = rawPolicies.filter((p) => {
     if (isPrivileged || !agentId) return true;
@@ -118,12 +156,12 @@ export async function matchExtractedRowsToCRM(
 
   if (scopedPolicies.length === 0) {
     return rows.map((r) => {
-      const normRowPolicy = normalizePolicyNumber(r.membership_or_policy_number);
-      if (!normRowPolicy || r.confidence < 0.6) {
+      if (!r.payment_date) {
         return {
           ...r,
           match_status: 'REVIEW',
-          confidence_reason: 'OCR cannot read Member ID / Policy Number clearly',
+          confidence: 0.5,
+          confidence_reason: 'Payment date missing — verify before confirming',
         };
       }
       return {
@@ -160,60 +198,155 @@ export async function matchExtractedRowsToCRM(
   for (const row of rows) {
     let normRowPolicy = normalizePolicyNumber(row.membership_or_policy_number);
     let currentPolNumber = row.membership_or_policy_number;
+    const rowClient = row.client_name;
+    const rowCarrier = row.carrier;
 
-    if (!normRowPolicy || row.confidence < 0.6) {
+    if (!row.payment_date) {
       matchedRows.push({
         ...row,
         match_status: 'REVIEW',
-        confidence_reason: 'OCR cannot read Member ID / Policy Number clearly',
+        confidence: 0.5,
+        confidence_reason: 'Payment date missing — verify before confirming',
       });
       continue;
     }
 
-    // Attempt 1: Exact Member ID match against scoped policies
-    let match = policiesList.find((p) => p.norm_policy === normRowPolicy);
+    // Tier 1: Exact Policy Number Match
+    let exactMatch = normRowPolicy && normRowPolicy.length >= 3
+      ? policiesList.find((p) => p.norm_policy === normRowPolicy)
+      : undefined;
 
-    // Attempt 2: If no exact match and sourceBuffer + bbox available, run Focused 2nd Pass OCR
-    if (!match && sourceBuffer && row.bbox) {
-      console.log(`[Focused Member ID OCR] No exact CRM match for '${currentPolNumber}'. Triggering Pass 2 on bbox...`);
+    if (!exactMatch && sourceBuffer && row.bbox && normRowPolicy) {
+      console.log(`[Focused Member ID OCR] No exact CRM match for '${currentPolNumber}'. Triggering Pass 2...`);
       const focusedToken = await performFocusedMemberIdOcr(sourceBuffer, row.bbox);
       const normFocusedToken = normalizePolicyNumber(focusedToken);
 
       if (normFocusedToken && normFocusedToken !== normRowPolicy) {
-        console.log(`[Focused Member ID OCR] Pass 2 yielded refined token '${focusedToken}' (was '${currentPolNumber}')`);
         const focusedMatch = policiesList.find((p) => p.norm_policy === normFocusedToken);
-
         if (focusedMatch) {
-          console.log(`[Focused Member ID OCR] Pass 2 exact match SUCCESS for '${focusedToken}'!`);
-          match = focusedMatch;
+          exactMatch = focusedMatch;
           currentPolNumber = focusedToken;
           normRowPolicy = normFocusedToken;
         }
       }
     }
 
-    if (match) {
+    if (exactMatch) {
       matchedRows.push({
         ...row,
         membership_or_policy_number: currentPolNumber,
         match_status: 'MATCHED',
-        matched_client_id: match.client_id,
-        matched_client_name: match.client_name,
-        matched_agent_name: match.agent_name,
-        matched_policy_id: match.policy_id,
-        matched_policy_number: match.policy_number,
-        matched_carrier: match.carrier,
-        matched_effective_date: match.effective_date,
-        matched_premium_amount: match.premium_amount,
+        matched_client_id: exactMatch.client_id,
+        matched_client_name: exactMatch.client_name,
+        matched_agent_name: exactMatch.agent_name,
+        matched_policy_id: exactMatch.policy_id,
+        matched_policy_number: exactMatch.policy_number,
+        matched_carrier: exactMatch.carrier,
+        matched_effective_date: exactMatch.effective_date,
+        matched_premium_amount: exactMatch.premium_amount,
       });
-    } else {
+      continue;
+    }
+
+    // Tier 2: Containment Base Policy Match
+    const containmentCandidates = normRowPolicy && normRowPolicy.length >= 5
+      ? policiesList.filter((p) => p.norm_policy && p.norm_policy.length >= 5 && (p.norm_policy.includes(normRowPolicy) || normRowPolicy.includes(p.norm_policy)))
+      : [];
+
+    if (containmentCandidates.length > 0) {
+      const supportedCandidate = containmentCandidates.find((p) => {
+        const sim = computeNameSimilarity(rowClient, p.client_name);
+        const cMatch = isCarrierMatch(rowCarrier, p.carrier);
+        return sim >= 0.4 || cMatch;
+      }) || containmentCandidates[0];
+
       matchedRows.push({
         ...row,
         membership_or_policy_number: currentPolNumber,
-        match_status: 'UNMATCHED',
-        confidence_reason: 'No matching Member ID / Policy Number found in CRM',
+        match_status: 'REVIEW',
+        confidence: 0.7,
+        confidence_reason: containmentCandidates.length > 1
+          ? 'Multiple base policy match candidates found'
+          : 'Base policy number matched — verify policy suffix & client',
+        matched_client_id: supportedCandidate.client_id,
+        matched_client_name: supportedCandidate.client_name,
+        matched_agent_name: supportedCandidate.agent_name,
+        matched_policy_id: supportedCandidate.policy_id,
+        matched_policy_number: supportedCandidate.policy_number,
+        matched_carrier: supportedCandidate.carrier,
+        matched_effective_date: supportedCandidate.effective_date,
+        matched_premium_amount: supportedCandidate.premium_amount,
       });
+      continue;
     }
+
+    // Tier 3: Client Name + Carrier Agreement Match
+    const nameCarrierCandidates = policiesList.filter((p) => {
+      const cMatch = isCarrierMatch(rowCarrier, p.carrier);
+      const sim = computeNameSimilarity(rowClient, p.client_name);
+      return cMatch && sim >= 0.55;
+    });
+
+    if (nameCarrierCandidates.length > 0) {
+      const bestCandidate = nameCarrierCandidates.sort((a, b) => 
+        computeNameSimilarity(rowClient, b.client_name) - computeNameSimilarity(rowClient, a.client_name)
+      )[0];
+
+      matchedRows.push({
+        ...row,
+        membership_or_policy_number: currentPolNumber,
+        match_status: 'REVIEW',
+        confidence: 0.65,
+        confidence_reason: nameCarrierCandidates.length > 1
+          ? 'Multiple client & carrier match candidates found'
+          : 'Matched by client name and carrier — policy number differs',
+        matched_client_id: bestCandidate.client_id,
+        matched_client_name: bestCandidate.client_name,
+        matched_agent_name: bestCandidate.agent_name,
+        matched_policy_id: bestCandidate.policy_id,
+        matched_policy_number: bestCandidate.policy_number,
+        matched_carrier: bestCandidate.carrier,
+        matched_effective_date: bestCandidate.effective_date,
+        matched_premium_amount: bestCandidate.premium_amount,
+      });
+      continue;
+    }
+
+    // Tier 4: Strong Client Name Alone Match (similarity >= 0.75)
+    const nameCandidates = policiesList.filter((p) => computeNameSimilarity(rowClient, p.client_name) >= 0.75);
+
+    if (nameCandidates.length > 0) {
+      const bestCandidate = nameCandidates.sort((a, b) => 
+        computeNameSimilarity(rowClient, b.client_name) - computeNameSimilarity(rowClient, a.client_name)
+      )[0];
+
+      matchedRows.push({
+        ...row,
+        membership_or_policy_number: currentPolNumber,
+        match_status: 'REVIEW',
+        confidence: 0.6,
+        confidence_reason: nameCandidates.length > 1
+          ? 'Multiple matching client candidates found'
+          : 'Possible match by client name — verify policy details',
+        matched_client_id: bestCandidate.client_id,
+        matched_client_name: bestCandidate.client_name,
+        matched_agent_name: bestCandidate.agent_name,
+        matched_policy_id: bestCandidate.policy_id,
+        matched_policy_number: bestCandidate.policy_number,
+        matched_carrier: bestCandidate.carrier,
+        matched_effective_date: bestCandidate.effective_date,
+        matched_premium_amount: bestCandidate.premium_amount,
+      });
+      continue;
+    }
+
+    // Tier 6: Unmatched
+    matchedRows.push({
+      ...row,
+      membership_or_policy_number: currentPolNumber,
+      match_status: 'UNMATCHED',
+      confidence_reason: 'No matching Member ID / Policy Number or Client found in CRM',
+    });
   }
 
   return matchedRows;

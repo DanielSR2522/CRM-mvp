@@ -11,18 +11,27 @@ export async function GET(req: NextRequest) {
     }
 
     const admin = getSupabaseAdmin();
-    const { data: policies, error } = await admin
-      .from('policies')
-      .select('id, policy_number, company_name, policy_type, client_id, clients!inner(id, full_name, agent_id)');
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
     const authorizedAgentIds = await getPcSharedAgentIds(authAgent.agentId, admin);
 
-    const agentPolicies = (policies || [])
-      .filter((p: any) => p.clients?.agent_id && authorizedAgentIds.includes(p.clients.agent_id))
+    let rawPolicies: any[] = [];
+    const { data: pcData } = await admin
+      .from('pc_policies')
+      .select('id, policy_number, company_name, client_id, agent_id, clients(id, full_name, agent_id)');
+
+    if (pcData && pcData.length > 0) {
+      rawPolicies = pcData;
+    } else {
+      const { data: stdData } = await admin
+        .from('policies')
+        .select('id, policy_number, company_name, client_id, clients(id, full_name, agent_id)');
+      if (stdData) rawPolicies = stdData;
+    }
+
+    const agentPolicies = (rawPolicies || [])
+      .filter((p: any) => {
+        const pAgentId = p.agent_id || p.clients?.agent_id;
+        return pAgentId && authorizedAgentIds.includes(pAgentId);
+      })
       .map((p: any) => ({
         policy_id: p.id,
         policy_number: p.policy_number,
@@ -37,3 +46,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: err?.message || 'Failed to fetch policies.' }, { status: 500 });
   }
 }
+

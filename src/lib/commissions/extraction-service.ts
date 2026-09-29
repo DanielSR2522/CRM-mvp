@@ -1,7 +1,8 @@
 import { createWorker, PSM } from 'tesseract.js';
 import path from 'path';
 import sharp from 'sharp';
-import { ExtractedCommissionRow, StructuredExtractionResult } from '@/types/commissions';
+import * as XLSX from 'xlsx';
+import { ExtractedCommissionRow, StructuredExtractionResult, MatchStatus } from '@/types/commissions';
 import { GeminiVisionProvider } from './providers/gemini-vision-provider';
 import { IVisionExtractionProvider } from './providers/vision-provider-interface';
 
@@ -10,6 +11,132 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 interface PdfParseResult {
   text?: string;
+}
+
+function parseDateValue(val: any): string {
+  if (!val) return '';
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return val.toISOString().split('T')[0];
+  }
+  if (typeof val === 'number') {
+    try {
+      const dateObj = XLSX.SSF.parse_date_code(val);
+      if (dateObj) {
+        const y = dateObj.y;
+        const m = String(dateObj.m).padStart(2, '0');
+        const d = String(dateObj.d).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+    } catch (e) {}
+  }
+  const str = String(val).trim();
+  const dMatch = str.match(/\b(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\b/);
+  if (dMatch) return dMatch[1];
+  return '';
+}
+
+/**
+ * Parses XLSX / XLS / CSV spreadsheet files into ExtractedCommissionRow entries using header alias normalization.
+ */
+export function parseSpreadsheetDocument(fileBuffer: Buffer): ExtractedCommissionRow[] {
+  const workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: true });
+  const rows: ExtractedCommissionRow[] = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+
+    const rawGrid: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' });
+    if (!rawGrid || rawGrid.length === 0) continue;
+
+    let headerIdx = -1;
+    let colMap: { [key: string]: number } = {};
+
+    for (let i = 0; i < Math.min(15, rawGrid.length); i++) {
+      const row = rawGrid[i];
+      if (!Array.isArray(row)) continue;
+
+      const tempMap: { [key: string]: number } = {};
+      row.forEach((cell: any, cIdx: number) => {
+        const h = String(cell || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+        if (!h) return;
+
+        if (['date', 'paymentdate', 'transactiondate', 'paiddate', 'effectivedate', 'paydate', 'posteddate'].includes(h)) {
+          tempMap['date'] = cIdx;
+        } else if (['client', 'clientname', 'insured', 'insuredname', 'customer', 'customername', 'name'].includes(h)) {
+          tempMap['client'] = cIdx;
+        } else if (['policy', 'policynumber', 'policy#', 'policyno', 'memberid', 'membershipid', 'membernumber'].includes(h)) {
+          tempMap['policy'] = cIdx;
+        } else if (['carrier', 'company', 'insurancecompany', 'writingcompany', 'carriername', 'companyname'].includes(h)) {
+          tempMap['carrier'] = cIdx;
+        } else if (['transaction', 'transactioncode', 'transcode', 'type', 'code', 'txcode'].includes(h)) {
+          tempMap['transaction'] = cIdx;
+        } else if (['amount', 'commission', 'commissionamount', 'commissionearned', 'paidamount', 'earnedamount', 'grossamount', 'commamount'].includes(h)) {
+          tempMap['amount'] = cIdx;
+        }
+      });
+
+      if ('amount' in tempMap || 'policy' in tempMap || 'client' in tempMap) {
+        headerIdx = i;
+        colMap = tempMap;
+        break;
+      }
+    }
+
+    const startRow = headerIdx >= 0 ? headerIdx + 1 : 0;
+    for (let i = startRow; i < rawGrid.length; i++) {
+      const row = rawGrid[i];
+      if (!Array.isArray(row) || row.length === 0) continue;
+
+      const rawDate = colMap['date'] !== undefined ? row[colMap['date']] : '';
+      const rawClient = colMap['client'] !== undefined ? row[colMap['client']] : '';
+      const rawPolicy = colMap['policy'] !== undefined ? row[colMap['policy']] : '';
+      const rawCarrier = colMap['carrier'] !== undefined ? row[colMap['carrier']] : '';
+      const rawTx = colMap['transaction'] !== undefined ? row[colMap['transaction']] : '';
+      const rawAmount = colMap['amount'] !== undefined ? row[colMap['amount']] : '';
+
+      const payment_date = parseDateValue(rawDate);
+      const client_name = String(rawClient || '').trim() || 'Extracted Client';
+      const membership_or_policy_number = String(rawPolicy || '').trim().replace(/[^A-Za-z0-9-]/g, '').toUpperCase();
+      const carrier = String(rawCarrier || '').trim() || 'P&C Carrier';
+      const transaction_code = String(rawTx || '').trim().toUpperCase();
+      
+      const parsedAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount).replace(/[^0-9.-]/g, ''));
+      const commission_amount = isNaN(parsedAmount) ? 0 : parsedAmount;
+
+      if (!membership_or_policy_number && !client_name && commission_amount === 0) {
+        continue;
+      }
+
+      const warnings: string[] = [];
+      let match_status: MatchStatus = 'UNMATCHED';
+      let confidence = 0.9;
+      let confidence_reason: string | undefined;
+
+      if (!payment_date) {
+        match_status = 'REVIEW';
+        confidence = 0.5;
+        confidence_reason = 'Payment date could not be read. Please verify.';
+        warnings.push('Payment date missing');
+      }
+
+      rows.push({
+        id: `excel-row-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 7)}`,
+        payment_date,
+        client_name,
+        membership_or_policy_number,
+        carrier,
+        transaction_code,
+        commission_amount,
+        confidence,
+        confidence_reason,
+        warnings,
+        match_status,
+      });
+    }
+  }
+
+  return rows;
 }
 
 function preprocessOcrLines(rawText: string): string[] {
@@ -30,7 +157,6 @@ function preprocessOcrLines(rawText: string): string[] {
     const nextHasAmount = nextLine ? /\$?\s*\d{1,7}\.\d{2}\b/.test(nextLine) : false;
     const nextHasPolicy = nextLine ? /\b([A-Z0-9]{2,6}[0-9]{4,10}(?:-[A-Z0-9-]+)?|\d{6,12})\b/i.test(nextLine) : false;
 
-    // If current line has a date but no amount, and next line has an amount or policy number, join them!
     if (currentHasDate && !currentHasAmount && nextLine && (nextHasAmount || nextHasPolicy)) {
       combinedLines.push(`${currentLine} ${nextLine}`);
       i += 2;
@@ -45,7 +171,7 @@ function preprocessOcrLines(rawText: string): string[] {
 
 /**
  * Parses raw text extracted from documents/images line-by-line using layout heuristics into ExtractedCommissionRow entries.
- * NOTE: Contains NO hardcoded carrier lists or source-specific shortcuts.
+ * NOTE: Never invents missing dates. If date is missing, sets payment_date = '' and match_status = 'REVIEW'.
  */
 export function parseCommissionRowsFromText(
   rawText: string,
@@ -58,23 +184,20 @@ export function parseCommissionRowsFromText(
   for (let idx = 0; idx < lines.length; idx++) {
     const line = lines[idx];
 
-    // Ignore headers, chat system messages, and generic conversational lines
     if (
       /^\s*(Commission Earned|ClientPolicy|hola\.\.\.aqui|please verify|Buenos dias|Hi Laura|Repase Los|Message)/i.test(line)
     ) {
       continue;
     }
 
-    // Regex for date: MM/DD/YYYY, M/D/YYYY, YYYY-MM-DD
     const dateMatch = line.match(/\b(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\b/);
-    // Regex for currency amount: $123.45 or 123.45
     const amountMatch = line.match(/\$?\s*(\d{1,7}\.\d{2})\b/);
 
     if (!dateMatch && !amountMatch) {
       continue;
     }
 
-    const payment_date = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
+    const payment_date = dateMatch ? dateMatch[1] : '';
     const commission_amount = amountMatch ? parseFloat(amountMatch[1]) : 0;
 
     let remaining = line;
@@ -84,7 +207,6 @@ export function parseCommissionRowsFromText(
     remaining = remaining.replace(/\$/g, '').replace(/[«’'`;,]/g, ' ').replace(/\s+/g, ' ').trim();
 
     let transaction_code = '';
-    // Extract 2-3 letter uppercase transaction codes like DV or LA at word boundary
     const txMatch = remaining.match(/\b(DV|LA|BOP|COMM)\b/);
     if (txMatch) {
       transaction_code = txMatch[1];
@@ -94,14 +216,12 @@ export function parseCommissionRowsFromText(
     let policy_or_membership_number = '';
     let carrier = '';
 
-    // Handle concatenated tokens like "864824912Progressive" or "TRV102938Travelers"
     const concatMatch = remaining.match(/([A-Z0-9-]{6,16})\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
     if (concatMatch && /\d/.test(concatMatch[1])) {
       policy_or_membership_number = concatMatch[1];
       carrier = concatMatch[2];
       remaining = remaining.replace(concatMatch[0], '').trim();
     } else {
-      // Find policy number token
       const polMatch = remaining.match(/\b([A-Z0-9]{2,6}[0-9]{4,10}(?:-[A-Z0-9-]+)?|\d{6,12})\b/i);
       if (polMatch) {
         policy_or_membership_number = polMatch[1];
@@ -109,14 +229,11 @@ export function parseCommissionRowsFromText(
       }
     }
 
-    // Dynamic carrier extraction from remaining tokens if not already found from concatenated match
     const tokens = remaining.split(' ').filter(Boolean);
 
     if (!carrier && tokens.length > 0) {
-      // If last 1 or 2 tokens start with an uppercase letter, treat them as dynamic carrier (e.g., Travelers, US Assure, Slide)
       const lastToken = tokens[tokens.length - 1];
       if (/^[A-Z][a-zA-Z0-9&.-]+$/i.test(lastToken) && tokens.length >= 2) {
-        // If second to last is also capitalized (e.g. US Assure, United Auto)
         const secondLast = tokens[tokens.length - 2];
         if (/^[A-Z][a-zA-Z0-9&.-]+$/i.test(secondLast) && tokens.length >= 3) {
           carrier = `${secondLast} ${lastToken}`;
@@ -134,7 +251,6 @@ export function parseCommissionRowsFromText(
       carrier = 'P&C Carrier';
     }
 
-    // Match bounding box if available
     let bbox: TokenBbox | undefined = undefined;
     if (policy_or_membership_number && words && words.length > 0) {
       const normPol = policy_or_membership_number.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -147,14 +263,18 @@ export function parseCommissionRowsFromText(
       }
     }
 
-    // Confidence scoring
     let confidence = 1.0;
     let confidence_reason: string | undefined = undefined;
+    let match_status: MatchStatus = 'UNMATCHED';
 
-    if (!policy_or_membership_number) {
+    if (!payment_date) {
+      match_status = 'REVIEW';
+      confidence = 0.5;
+      confidence_reason = 'Payment date could not be read. Please verify.';
+    } else if (!policy_or_membership_number) {
       confidence = 0.4;
       confidence_reason = 'Missing policy or member ID in source document line';
-    } else if (client_name === 'Extracted Client' || !dateMatch) {
+    } else if (client_name === 'Extracted Client') {
       confidence = 0.6;
       confidence_reason = 'Partial line extraction - verify client details';
     }
@@ -171,7 +291,7 @@ export function parseCommissionRowsFromText(
       confidence_reason,
       raw_text: line,
       bbox,
-      match_status: 'UNMATCHED',
+      match_status,
     });
   }
 
@@ -203,11 +323,6 @@ export interface TokenBbox {
   y1: number;
 }
 
-/**
- * Focused Second OCR Pass on Member ID Region/Cell
- * Upscales the region significantly with Sharp, enhances contrast/sharpness,
- * and recognizes using Tesseract token mode with alphanumeric character whitelist.
- */
 export async function performFocusedMemberIdOcr(
   fileBuffer: Buffer,
   bbox: TokenBbox
@@ -274,13 +389,29 @@ interface TesseractRecognizeData {
 
 async function runOcrOnBuffer(buffer: Buffer): Promise<{ rawText: string; words: Array<{ text: string; bbox: TokenBbox }> }> {
   console.log('[OCR Fallback] Started');
-  console.log('[OCR Fallback] Initializing Tesseract worker...');
 
+  let processedBuffer = buffer;
+  try {
+    const meta = await sharp(buffer).metadata();
+    const targetWidth = Math.min(2500, (meta.width || 1200) * 2);
+    processedBuffer = await sharp(buffer)
+      .rotate()
+      .grayscale()
+      .normalize()
+      .sharpen()
+      .resize({ width: targetWidth, fit: 'inside' })
+      .toBuffer();
+    console.log(`[OCR Preprocessing] Image preprocessed with Sharp (${processedBuffer.length} bytes)`);
+  } catch (sharpErr) {
+    console.warn('[OCR Preprocessing] Sharp preprocessing skipped:', sharpErr);
+  }
+
+  console.log('[OCR Fallback] Initializing Tesseract worker...');
   const worker = await createWorker('eng', 1);
   console.log('[OCR Fallback] Worker ready');
 
   console.log('[OCR Fallback] Recognizing buffer image text with bounding boxes...');
-  const result = await worker.recognize(buffer, {}, { blocks: true } as unknown as Record<string, unknown>);
+  const result = await worker.recognize(processedBuffer, {}, { blocks: true } as unknown as Record<string, unknown>);
   console.log('[OCR Fallback] Recognition complete');
 
   await worker.terminate();
@@ -313,30 +444,43 @@ async function runOcrOnBuffer(buffer: Buffer): Promise<{ rawText: string; words:
 }
 
 /**
- * Main Hybrid Multimodal Document Extractor Entry Point
- * Tries Vision AI primary provider (Gemini Flash Vision) if available, falling back to OCR if missing, timed out, or errored.
+ * Main Document Extractor Entry Point
+ * Tries Vision AI primary provider if available, falling back to Sharp-preprocessed OCR / Excel parsing.
  */
 export async function extractCommissionDocument(
   fileBuffer: Buffer,
   mimeType: string,
   filename: string
 ): Promise<StructuredExtractionResult> {
-  // 1. Production Safety Checks: File Size & Type
   if (fileBuffer.length > MAX_FILE_SIZE_BYTES) {
     throw new Error(`File size exceeds 10MB limit (${(fileBuffer.length / (1024 * 1024)).toFixed(2)}MB).`);
   }
 
   const ext = filename.split('.').pop()?.toLowerCase() || '';
+  const isSpreadsheet = ['xlsx', 'xls', 'csv'].includes(ext) || mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv');
   const isPdf = ext === 'pdf' || mimeType.includes('pdf');
   const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) || mimeType.startsWith('image/');
 
-  if (!isPdf && !isImage) {
-    throw new Error('Unsupported file format. Supported formats: JPG, JPEG, PNG, WEBP, PDF.');
+  if (!isSpreadsheet && !isPdf && !isImage) {
+    throw new Error('Unsupported file format. Supported formats: XLSX, XLS, CSV, JPG, JPEG, PNG, WEBP, PDF.');
   }
 
   const document_warnings: string[] = [];
 
-  // 2. Multimodal Vision Provider Primary Pipeline
+  if (isSpreadsheet) {
+    console.log(`[Extraction Pipeline] Parsing spreadsheet file: ${filename}`);
+    const rows = parseSpreadsheetDocument(fileBuffer);
+    if (rows.length === 0) {
+      document_warnings.push('No structured commission rows found in spreadsheet.');
+    }
+    return {
+      document_type: 'structured_table',
+      rows,
+      document_warnings,
+      extraction_method: 'structured_file',
+    };
+  }
+
   const visionProvider: IVisionExtractionProvider = new GeminiVisionProvider();
 
   if (visionProvider.isAvailable()) {
@@ -349,16 +493,14 @@ export async function extractCommissionDocument(
       }
     } catch (visionErr: unknown) {
       const msg = visionErr instanceof Error ? visionErr.message : String(visionErr);
-      console.warn(`[Extraction Pipeline] Gemini Vision unavailable. Logged server details: ${msg}`);
-      // User-facing message should ONLY be "Vision AI unavailable — processing locally."
-      document_warnings.push('Vision AI unavailable — processing locally.');
+      console.warn(`[Extraction Pipeline] Vision AI notice: ${msg}`);
+      document_warnings.push('Processed locally.');
     }
   } else {
-    console.log('[Extraction Pipeline] GEMINI_API_KEY missing or vision provider unavailable. Using OCR fallback.');
-    document_warnings.push('Vision AI unavailable — processing locally.');
+    console.log('[Extraction Pipeline] Vision AI unavailable or unconfigured. Using local processing.');
+    document_warnings.push('Processed locally.');
   }
 
-  // 3. Fallback Pipeline: Tesseract OCR / PDF Text Parsing
   let rawText = '';
   let words: Array<{ text: string; bbox: TokenBbox }> = [];
 
@@ -413,7 +555,6 @@ export async function extractCommissionDocument(
   };
 }
 
-// Backward compatibility helper
 export async function extractCommissionsFromFile(
   buffer: Buffer,
   mimeType: string,

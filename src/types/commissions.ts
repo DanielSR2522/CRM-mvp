@@ -29,7 +29,7 @@ export interface StructuredExtractionResult {
   document_type: 'structured_table' | 'whatsapp_chat' | 'statement_photo' | 'pdf_document' | 'unknown';
   rows: ExtractedCommissionRow[];
   document_warnings: string[];
-  extraction_method: 'vision_ai' | 'ocr_fallback';
+  extraction_method: 'vision_ai' | 'ocr_fallback' | 'structured_file' | 'manual_entry';
 }
 
 export type LedgerStatus = 'Pending payment' | 'Review' | 'Paid' | 'Unmatched' | 'Imported' | 'Matched' | 'Confirmed' | 'Reconciled';
@@ -63,7 +63,7 @@ export interface CommissionPayment {
   amount: number;
   payment_date: string;
   transaction_code?: string;
-  extraction_method?: 'vision_ai' | 'ocr_fallback';
+  extraction_method?: 'vision_ai' | 'ocr_fallback' | 'structured_file' | 'manual_entry';
   extraction_confidence?: number;
   match_status?: MatchStatus;
   status: LedgerStatus;
