@@ -77,135 +77,126 @@ CRITICAL EXTRACTION RULES:
 }
 `;
 
-    // Model configured specifically with gemini-2.5-flash-lite primary and active flash fallbacks
-    const modelsToTry = ['gemini-2.5-flash-lite', 'gemini-1.5-flash-002', 'gemini-1.5-flash-001', 'gemini-2.0-flash'];
+    // Cost control: exactly one Gemini request per image upload.
+    // If this single call fails or times out, the caller falls back to local OCR.
+    const model = 'gemini-2.5-flash-lite';
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-    let lastErrorText = '';
-    let lastStatus = 500;
+    console.log(`[Gemini Vision] Model: ${model}`);
+    console.log(`[Gemini Vision] Endpoint: ${endpoint}`);
 
-    for (const model of modelsToTry) {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-      console.log(`[Gemini Vision] Model: ${model}`);
-      console.log(`[Gemini Vision] Endpoint: ${endpoint}`);
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-      try {
-        const response = await fetch(`${endpoint}?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  { text: promptText },
-                  {
-                    inline_data: {
-                      mime_type: effectiveMimeType,
-                      data: base64Data,
-                    },
+    try {
+      const response = await fetch(`${endpoint}?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: promptText },
+                {
+                  inline_data: {
+                    mime_type: effectiveMimeType,
+                    data: base64Data,
                   },
-                ],
-              },
-            ],
-            generationConfig: {
-              response_mime_type: 'application/json',
-              temperature: 0.0,
+                },
+              ],
             },
-          }),
-        });
+          ],
+          generationConfig: {
+            response_mime_type: 'application/json',
+            temperature: 0.0,
+          },
+        }),
+      });
 
-        clearTimeout(timeoutId);
-        lastStatus = response.status;
-        console.log(`[Gemini Vision] Response status: ${response.status}`);
+      clearTimeout(timeoutId);
+      console.log(`[Gemini Vision] Response status: ${response.status}`);
 
-        if (response.ok) {
-          const resData = await response.json();
-          const rawJsonText =
-            resData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-          if (!rawJsonText.trim()) {
-            throw new Error('Empty text response from Gemini Vision API.');
-          }
-
-          const cleanJson = rawJsonText.replace(/```json/g, '').replace(/```/g, '').trim();
-          const parsed: GeminiParsedResponse = JSON.parse(cleanJson);
-
-          const validDocTypes: DocumentType[] = ['structured_table', 'whatsapp_chat', 'statement_photo', 'pdf_document', 'unknown'];
-          const rawDocType = (parsed.document_type || 'unknown') as DocumentType;
-          const document_type: DocumentType = validDocTypes.includes(rawDocType) ? rawDocType : 'unknown';
-
-          const document_warnings = parsed.document_warnings || [];
-          const parsedRows: GeminiParsedRow[] = parsed.rows || [];
-
-          const rows: ExtractedCommissionRow[] = parsedRows.map((r, idx: number) => {
-            const polNum = (r.membership_or_policy_number || '').trim();
-            const rawDate = (r.date || '').trim();
-            const dateMatch = rawDate.match(/\b(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\b/);
-            const payment_date = dateMatch ? dateMatch[1] : '';
-
-            let amt = 0;
-            if (typeof r.amount === 'number') {
-              amt = r.amount;
-            } else if (typeof r.amount === 'string') {
-              const rawAmt = r.amount.trim();
-              const isNegative = rawAmt.includes('(') || rawAmt.startsWith('-');
-              const cleanAmt = parseFloat(rawAmt.replace(/[^0-9.]/g, ''));
-              if (!isNaN(cleanAmt)) {
-                amt = isNegative ? -cleanAmt : cleanAmt;
-              }
-            }
-
-            let match_status: MatchStatus = 'UNMATCHED';
-            let conf = typeof r.confidence === 'number' ? r.confidence : polNum ? 0.95 : 0.4;
-            let confidence_reason = r.confidence_reason;
-
-            if (!payment_date) {
-              match_status = 'REVIEW';
-              conf = Math.min(conf, 0.5);
-              confidence_reason = confidence_reason || 'Payment date missing — verify before confirming';
-            } else if (!polNum) {
-              conf = Math.min(conf, 0.4);
-              confidence_reason = confidence_reason || 'Missing policy number in line';
-            }
-
-            return {
-              id: `vision-row-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`,
-              payment_date,
-              client_name: r.client_name || 'Extracted Client',
-              membership_or_policy_number: polNum,
-              carrier: r.carrier || 'P&C Carrier',
-              transaction_code: r.transaction_code || '',
-              commission_amount: amt,
-              confidence: Math.max(0.0, Math.min(1.0, conf)),
-              confidence_reason,
-              warnings: r.warnings || [],
-              raw_text: `${payment_date} ${r.client_name || ''} ${polNum} ${r.carrier || ''} ${amt}`,
-              match_status,
-            };
-          });
-
-          return {
-            document_type,
-            rows,
-            document_warnings,
-            extraction_method: 'vision_ai',
-          };
-        } else {
-          lastErrorText = await response.text();
-          console.warn(`[Gemini Vision] Model ${model} returned status ${response.status}: ${lastErrorText}`);
-        }
-      } catch (fetchErr: unknown) {
-        clearTimeout(timeoutId);
-        lastErrorText = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-        console.warn(`[Gemini Vision] Error calling model ${model}:`, lastErrorText);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Gemini Vision API error (${response.status}): ${errorText}`);
       }
-    }
 
-    throw new Error(`Gemini Vision API error (${lastStatus}): ${lastErrorText}`);
+      const resData = await response.json();
+      const rawJsonText =
+        resData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+      if (!rawJsonText.trim()) {
+        throw new Error('Empty text response from Gemini Vision API.');
+      }
+
+      const cleanJson = rawJsonText.replace(/```json/g, '').replace(/```/g, '').trim();
+      const parsed: GeminiParsedResponse = JSON.parse(cleanJson);
+
+      const validDocTypes: DocumentType[] = ['structured_table', 'whatsapp_chat', 'statement_photo', 'pdf_document', 'unknown'];
+      const rawDocType = (parsed.document_type || 'unknown') as DocumentType;
+      const document_type: DocumentType = validDocTypes.includes(rawDocType) ? rawDocType : 'unknown';
+
+      const document_warnings = parsed.document_warnings || [];
+      const parsedRows: GeminiParsedRow[] = parsed.rows || [];
+
+      const rows: ExtractedCommissionRow[] = parsedRows.map((r, idx: number) => {
+        const polNum = (r.membership_or_policy_number || '').trim();
+        const rawDate = (r.date || '').trim();
+        const dateMatch = rawDate.match(/\b(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\b/);
+        const payment_date = dateMatch ? dateMatch[1] : '';
+
+        let amt = 0;
+        if (typeof r.amount === 'number') {
+          amt = r.amount;
+        } else if (typeof r.amount === 'string') {
+          const rawAmt = r.amount.trim();
+          const isNegative = rawAmt.includes('(') || rawAmt.startsWith('-');
+          const cleanAmt = parseFloat(rawAmt.replace(/[^0-9.]/g, ''));
+          if (!isNaN(cleanAmt)) {
+            amt = isNegative ? -cleanAmt : cleanAmt;
+          }
+        }
+
+        let match_status: MatchStatus = 'UNMATCHED';
+        let conf = typeof r.confidence === 'number' ? r.confidence : polNum ? 0.95 : 0.4;
+        let confidence_reason = r.confidence_reason;
+
+        if (!payment_date) {
+          match_status = 'REVIEW';
+          conf = Math.min(conf, 0.5);
+          confidence_reason = confidence_reason || 'Payment date missing — verify before confirming';
+        } else if (!polNum) {
+          conf = Math.min(conf, 0.4);
+          confidence_reason = confidence_reason || 'Missing policy number in line';
+        }
+
+        return {
+          id: `vision-row-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`,
+          payment_date,
+          client_name: r.client_name || 'Extracted Client',
+          membership_or_policy_number: polNum,
+          carrier: r.carrier || 'P&C Carrier',
+          transaction_code: r.transaction_code || '',
+          commission_amount: amt,
+          confidence: Math.max(0.0, Math.min(1.0, conf)),
+          confidence_reason,
+          warnings: r.warnings || [],
+          raw_text: `${payment_date} ${r.client_name || ''} ${polNum} ${r.carrier || ''} ${amt}`,
+          match_status,
+        };
+      });
+
+      return {
+        document_type,
+        rows,
+        document_warnings,
+        extraction_method: 'vision_ai',
+      };
+    } catch (fetchErr: unknown) {
+      clearTimeout(timeoutId);
+      throw fetchErr instanceof Error ? fetchErr : new Error(String(fetchErr));
+    }
   }
 }
 
