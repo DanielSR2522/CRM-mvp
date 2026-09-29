@@ -197,14 +197,31 @@ export default function DashboardPage() {
         email: session.user.email || 'Agent',
       });
 
-      // 2. Fetch Clients
-      const { data: clientsData } = await supabase
-        .from('clients')
-        .select('id, full_name, agent_id');
+      // 2. Fetch Accessible Clients (Direct ownership + shared access)
+      const [{ data: ownedClientsData }, { data: sharedAccessData }] = await Promise.all([
+        supabase.from('clients').select('id, full_name, agent_id').eq('agent_id', userId),
+        supabase.from('agent_shared_access').select('owner_agent_id').eq('grantee_agent_id', userId)
+      ]);
 
-      setClients(clientsData || []);
+      let allAccessibleClients: ClientRow[] = ownedClientsData || [];
+      let queryClientIds = allAccessibleClients.map((c) => c.id);
 
-      const clientIds = (clientsData || []).map((c) => c.id);
+      if (sharedAccessData && sharedAccessData.length > 0) {
+        const sharedOwnerIds = sharedAccessData.map((s) => s.owner_agent_id);
+        const { data: sharedClients } = await supabase
+          .from('clients')
+          .select('id, full_name, agent_id')
+          .in('agent_id', sharedOwnerIds);
+        if (sharedClients && sharedClients.length > 0) {
+          allAccessibleClients = [...allAccessibleClients, ...sharedClients];
+          queryClientIds = Array.from(new Set(allAccessibleClients.map((c) => c.id)));
+        }
+      }
+
+      setClients(allAccessibleClients);
+
+      // Fallback empty UUID to prevent empty array SQL syntax error if 0 clients
+      const safeQueryClientIds = queryClientIds.length > 0 ? queryClientIds : ['00000000-0000-0000-0000-000000000000'];
 
       // 3. Parallel Queries for All Policy Books & Operations
       const [
@@ -220,27 +237,32 @@ export default function DashboardPage() {
         // P&C Policies (policies table excluding health, life, supplemental)
         supabase
           .from('policies')
-          .select('id, client_id, policy_type, policy_number, company_name, writing_company, effective_date, expiration_date, premium, total_premium, annual_premium, status, created_at'),
+          .select('id, client_id, policy_type, policy_number, company_name, writing_company, effective_date, expiration_date, premium, total_premium, annual_premium, status, created_at')
+          .in('client_id', safeQueryClientIds),
 
-        // Health Policies
+        // Health Policies (health_policies)
         supabase
           .from('health_policies')
-          .select('id, client_id, company_2026, plan_name, effective_date, created_at, status, members'),
+          .select('id, client_id, active, company_2026, plan_name, effective_date, created_at, status, renovation_status, number_of_people_on_tax_return, coverage_members_count')
+          .in('client_id', safeQueryClientIds),
 
-        // Medicare Policies
+        // Medicare Policies (client_medicare_information)
         supabase
-          .from('medicare_policies')
-          .select('id, client_id, carrier, plan_name, policy_number, effective_date, created_at, status'),
+          .from('client_medicare_information')
+          .select('id, client_id, company_name, plan_name, policy_number, effective_date, created_at, status')
+          .in('client_id', safeQueryClientIds),
 
-        // Supplemental Policies
+        // Supplemental Policies (client_supplemental_policies)
         supabase
-          .from('supplemental_policies')
-          .select('id, client_id, carrier, policy_type, policy_number, effective_date, created_at, status'),
+          .from('client_supplemental_policies')
+          .select('id, client_id, company_name, policy_type, policy_number, effective_date, created_at, status')
+          .in('client_id', safeQueryClientIds),
 
-        // Life Policies
+        // Life Policies (life_policies & life_policy_products)
         supabase
           .from('life_policies')
-          .select('id, client_id, carrier, policy_type, policy_number, effective_date, created_at, status'),
+          .select('id, client_id, status, effective_date, created_at, life_policy_products(company, product_type, product_name, face_amount, monthly_premium)')
+          .in('client_id', safeQueryClientIds),
 
         // Today's Calendar Appointments
         supabase
@@ -250,17 +272,19 @@ export default function DashboardPage() {
           .eq('status', 'scheduled')
           .order('starts_at', { ascending: true }),
 
-        // Activity Events
+        // Activity Events for accessible clients
         supabase
           .from('activity_events')
           .select('id, client_id, policy_id, health_policy_id, actor_id, event_type, description, created_at')
+          .in('client_id', safeQueryClientIds)
           .order('created_at', { ascending: false })
           .limit(20),
 
         // P&C Commission Payments
         supabase
           .from('pc_commission_payments')
-          .select('id, amount, payment_date, carrier, policy_number, status, agent_id'),
+          .select('id, amount, payment_date, carrier, policy_number, status, agent_id')
+          .eq('agent_id', userId),
       ]);
 
       // Filter P&C Policies
@@ -310,13 +334,18 @@ export default function DashboardPage() {
   const in30DaysIso = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30).toISOString().split('T')[0];
 
   // NON-P&C KPI COMPUTATIONS
-  const healthCount = healthPolicies.length;
+  const activeHealthPolicies = useMemo(() => {
+    const activeOnly = healthPolicies.filter((p) => p.active === true);
+    return activeOnly.length > 0 ? activeOnly : healthPolicies;
+  }, [healthPolicies]);
+
+  const healthCount = activeHealthPolicies.length;
   const healthNewThisWeek = useMemo(() => {
-    return healthPolicies.filter((p) => {
+    return activeHealthPolicies.filter((p) => {
       const d = p.created_at || p.effective_date;
       return d && new Date(d).getTime() >= in7DaysMs;
     }).length;
-  }, [healthPolicies, in7DaysMs]);
+  }, [activeHealthPolicies, in7DaysMs]);
 
   const medicareCount = medicarePolicies.length;
   const medicareNewThisWeek = useMemo(() => {
@@ -342,14 +371,13 @@ export default function DashboardPage() {
     }).length;
   }, [lifePolicies, in7DaysMs]);
 
-  // Health Members Count: sum members count or default 1 per policy
+  // Health Members Count: sum of covered members across active health policies
   const healthMembersCount = useMemo(() => {
-    return healthPolicies.reduce((acc, p) => {
-      if (Array.isArray(p.members)) return acc + p.members.length;
-      if (typeof p.members === 'number') return acc + p.members;
-      return acc + 1; // Default 1 primary member per policy
+    return activeHealthPolicies.reduce((acc, p) => {
+      const cnt = p.coverage_members_count ?? p.number_of_people_on_tax_return ?? 1;
+      return acc + Number(cnt);
     }, 0);
-  }, [healthPolicies]);
+  }, [activeHealthPolicies]);
 
   // NON-P&C POLICY MIX (Health 🩺, Medicare 👤, Supplemental 🛡️, Life ❤️)
   const totalNonPcPoliciesCount = healthCount + medicareCount + supplementalCount + lifeCount;
@@ -402,20 +430,22 @@ export default function DashboardPage() {
   const nonPcTopCarriers = useMemo((): TopCarrierItem[] => {
     const carrierCounts = new Map<string, number>();
 
-    healthPolicies.forEach((p) => {
-      const c = (p.company_2026 || p.plan_name || 'Health Carrier').trim();
+    activeHealthPolicies.forEach((p) => {
+      const c = (p.company_2026 || p.plan_name || '').trim();
       if (c) carrierCounts.set(c, (carrierCounts.get(c) || 0) + 1);
     });
     medicarePolicies.forEach((p) => {
-      const c = (p.carrier || p.plan_name || 'Medicare Carrier').trim();
+      const c = (p.company_name || p.plan_name || '').trim();
       if (c) carrierCounts.set(c, (carrierCounts.get(c) || 0) + 1);
     });
     supplementalPolicies.forEach((p) => {
-      const c = (p.carrier || 'Supplemental Carrier').trim();
+      const c = (p.company_name || p.carrier || '').trim();
       if (c) carrierCounts.set(c, (carrierCounts.get(c) || 0) + 1);
     });
     lifePolicies.forEach((p) => {
-      const c = (p.carrier || 'Life Carrier').trim();
+      const prods = p.life_policy_products || [];
+      const mainProd = prods[0];
+      const c = (mainProd?.company || mainProd?.product_name || mainProd?.product_type || '').trim();
       if (c) carrierCounts.set(c, (carrierCounts.get(c) || 0) + 1);
     });
 
@@ -431,7 +461,7 @@ export default function DashboardPage() {
       percentage: totalNonPcPoliciesCount > 0 ? Math.round((count / totalNonPcPoliciesCount) * 100) : 0,
       barColor: colors[idx % colors.length],
     }));
-  }, [healthPolicies, medicarePolicies, supplementalPolicies, lifePolicies, totalNonPcPoliciesCount]);
+  }, [activeHealthPolicies, medicarePolicies, supplementalPolicies, lifePolicies, totalNonPcPoliciesCount]);
 
   // P&C KPI COMPUTATIONS
   const activePcPolicies = useMemo(() => pcPolicies.filter((p) => p.status === 'Active' || !p.status), [pcPolicies]);
