@@ -243,7 +243,7 @@ export default function DashboardPage() {
         // Health Policies (health_policies)
         supabase
           .from('health_policies')
-          .select('id, client_id, active, company_2026, plan_name, effective_date, created_at, status, renovation_status, number_of_people_on_tax_return, coverage_members_count')
+          .select('id, client_id, active, company_2026, plan_name, effective_date, created_at, policy_status, renovation_status, number_of_people_on_tax_return, coverage_members_count')
           .in('client_id', safeQueryClientIds),
 
         // Medicare Policies (client_medicare_information)
@@ -286,6 +286,12 @@ export default function DashboardPage() {
           .select('id, amount, payment_date, carrier, policy_number, status, agent_id')
           .eq('agent_id', userId),
       ]);
+
+      if (pcRes.error) console.error('Dashboard PC query failed:', pcRes.error);
+      if (healthRes.error) console.error('Dashboard Health query failed:', healthRes.error);
+      if (medicareRes.error) console.error('Dashboard Medicare query failed:', medicareRes.error);
+      if (suppRes.error) console.error('Dashboard Supplemental query failed:', suppRes.error);
+      if (lifeRes.error) console.error('Dashboard Life query failed:', lifeRes.error);
 
       // Filter P&C Policies
       const filteredPc = (pcRes.data || []).filter((p: any) => {

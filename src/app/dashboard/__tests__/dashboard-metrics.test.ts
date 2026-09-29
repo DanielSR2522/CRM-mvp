@@ -133,4 +133,20 @@ describe('Non-P&C Dashboard Metric Computations', () => {
     assert.deepEqual(loniHealth.map(p => p.id), ['hp-1', 'hp-2']);
     assert.deepEqual(decireHealth.map(p => p.id), ['hp-3', 'hp-4', 'hp-5']);
   });
+
+  it('queries health_policies using policy_status column instead of invalid status column', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const pagePath = path.resolve(process.cwd(), 'src/app/dashboard/page.tsx');
+    const pageContent = fs.readFileSync(pagePath, 'utf8');
+
+    // Verify health_policies select statement contains policy_status and NOT status
+    const healthSelectRegex = /\.from\('health_policies'\)\s*\.select\('([^']+)'\)/;
+    const match = pageContent.match(healthSelectRegex);
+    assert.ok(match, 'health_policies select call not found in page.tsx');
+    const selectFields = match[1].split(',').map((f) => f.trim());
+
+    assert.ok(selectFields.includes('policy_status'), 'policy_status column must be in health_policies select');
+    assert.ok(!selectFields.includes('status'), 'invalid status column must NOT be in health_policies select');
+  });
 });
