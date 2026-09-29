@@ -521,6 +521,7 @@ export interface PolicyMergeData {
   npn?: string | null;
   // Life fields
   product_type?: string | null;
+  product_name?: string | null;
   policy_date?: string | null;
   face_amount?: number | null;
   time_to_pay_premium?: string | null;

@@ -165,9 +165,9 @@ export default function GlobalCrmSearch() {
 
           const { data: prods } = await supabase
             .from('life_policy_products')
-            .select('id, life_policy_id, product_type, company, policy_number')
+            .select('id, life_policy_id, product_type, product_name, company, policy_number')
             .in('life_policy_id', lifePolicyIds)
-            .or(`product_type.ilike.%${q}%,company.ilike.%${q}%,policy_number.ilike.%${q}%`)
+            .or(`product_type.ilike.%${q}%,product_name.ilike.%${q}%,company.ilike.%${q}%,policy_number.ilike.%${q}%`)
             .limit(5);
 
           if (prods) {

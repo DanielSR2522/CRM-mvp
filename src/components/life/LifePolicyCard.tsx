@@ -115,7 +115,7 @@ export default function LifePolicyCard({
             </div>
             <h4 className="text-sm font-extrabold text-slate-900 mt-0.5">
               {products.length > 0
-                ? `${products[0].company || products[0].product_type} (${products[0].product_type})`
+                ? `${products[0].company || products[0].product_name || products[0].product_type}${products[0].product_name && products[0].company ? ` — ${products[0].product_name}` : ''} (${products[0].product_type})`
                 : 'Life Policy Record'}
             </h4>
           </div>

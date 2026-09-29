@@ -4,19 +4,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { isoDateToMMDDYYYY } from '@/lib/formatters/date';
 import USDateInput from '@/components/shared/USDateInput';
+import { LIFE_PRODUCT_TYPES, LifeProductType } from '@/lib/constants/life-products';
 
-export type LifeProductType =
-  | 'Term'
-  | 'IUL'
-  | 'Whole Life'
-  | 'VUL'
-  | 'Term - Disability'
-  | 'Costumer Whole Life';
+export type { LifeProductType };
 
 export interface LifePolicyProduct {
   id: string;
   life_policy_id: string;
   product_type: LifeProductType;
+  product_name: string | null;
   company: string | null;
   policy_number: string | null;
   policy_date: string | null;
@@ -33,15 +29,6 @@ interface LifePolicyProductsProps {
   onProductsChange?: () => void;
 }
 
-const PRODUCT_OPTIONS: LifeProductType[] = [
-  'Term',
-  'IUL',
-  'Whole Life',
-  'VUL',
-  'Term - Disability',
-  'Costumer Whole Life',
-];
-
 export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: LifePolicyProductsProps) {
   const [products, setProducts] = useState<LifePolicyProduct[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -51,7 +38,8 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
   const [formError, setFormError] = useState<string | null>(null);
 
   // Form State
-  const [productType, setProductType] = useState<LifeProductType>('Term');
+  const [productType, setProductType] = useState<LifeProductType>('Term Life');
+  const [productName, setProductName] = useState<string>('');
   const [company, setCompany] = useState<string>('');
   const [policyNumber, setPolicyNumber] = useState<string>('');
   const [policyDate, setPolicyDate] = useState<string>('');
@@ -96,7 +84,8 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
 
   const openAddModal = () => {
     setEditingProduct(null);
-    setProductType('Term');
+    setProductType('Term Life');
+    setProductName('');
     setCompany('');
     setPolicyNumber('');
     setPolicyDate('');
@@ -112,6 +101,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
   const openEditModal = (p: LifePolicyProduct) => {
     setEditingProduct(p);
     setProductType(p.product_type);
+    setProductName(p.product_name || '');
     setCompany(p.company || '');
     setPolicyNumber(p.policy_number || '');
     setPolicyDate(p.policy_date || '');
@@ -133,6 +123,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
       const payload = {
         life_policy_id: lifePolicyId,
         product_type: productType,
+        product_name: productName.trim() || null,
         company: company.trim() || null,
         policy_number: policyNumber.trim() || null,
         policy_date: policyDate || null,
@@ -223,7 +214,8 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
           <table className="w-full text-left text-xs font-sans">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-slate-500 font-semibold text-xs">
               <tr>
-                <th className="p-2.5">Product</th>
+                <th className="p-2.5">Product Type</th>
+                <th className="p-2.5">Product Name</th>
                 <th className="p-2.5">Company</th>
                 <th className="p-2.5">Policy #</th>
                 <th className="p-2.5">Policy Date</th>
@@ -237,6 +229,7 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
               {products.map((p) => (
                 <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
                   <td className="p-2.5 font-bold text-slate-900">{p.product_type}</td>
+                  <td className="p-2.5 font-medium text-slate-800">{p.product_name || '-'}</td>
                   <td className="p-2.5">{p.company || '-'}</td>
                   <td className="p-2.5 font-mono">{p.policy_number || '-'}</td>
                   <td className="p-2.5 font-semibold text-slate-800">{isoDateToMMDDYYYY(p.policy_date) || '-'}</td>
@@ -298,10 +291,21 @@ export default function LifePolicyProducts({ lifePolicyId, onProductsChange }: L
                     onChange={(e) => setProductType(e.target.value as LifeProductType)}
                     className="w-full border border-slate-200 rounded-lg p-2 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 text-xs font-semibold"
                   >
-                    {PRODUCT_OPTIONS.map((opt) => (
+                    {LIFE_PRODUCT_TYPES.map((opt) => (
                       <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Product Name</label>
+                  <input
+                    type="text"
+                    value={productName}
+                    onChange={(e) => setProductName(e.target.value)}
+                    placeholder="e.g. Level Prem Convertible Term-10 Yr"
+                    className="w-full border border-slate-200 rounded-lg p-2 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 text-xs"
+                  />
                 </div>
 
                 <div>

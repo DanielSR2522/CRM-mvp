@@ -8,6 +8,8 @@ import GoogleAddressAutocomplete, { NormalizedAddress } from '@/components/addre
 import { parseDisplayDate, formatAsDateInput, isValidDisplayDate } from '@/utils/dateUtils';
 import { formatEIN } from '@/lib/formatters/ein';
 
+import { LIFE_PRODUCT_TYPES, LifeProductType } from '@/lib/constants/life-products';
+
 interface NewClientWizardModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -17,7 +19,7 @@ interface NewClientWizardModalProps {
 export type PolicyType = 'property_casualty' | 'health' | 'life' | 'medicare' | 'supplemental';
 export type PcClientType = 'individual' | 'company';
 export type HealthEnrollmentType = 'new_enrollment' | 'renewal';
-export type LifeProductType = 'Term' | 'IUL' | 'Whole Life' | 'VUL' | 'Term - Disability' | 'Costumer Whole Life';
+export type { LifeProductType };
 export type MedicareType = 'Medicare Advantage' | 'Supplement' | 'Part D';
 export type SupplementalType = 'Accident' | 'Critical Illness' | 'Hospital Indemnity';
 
@@ -36,6 +38,7 @@ export default function NewClientWizardModal({
   const [pcClientType, setPcClientType] = useState<PcClientType | ''>('');
   const [healthEnrollmentType, setHealthEnrollmentType] = useState<HealthEnrollmentType | ''>('');
   const [lifeProductType, setLifeProductType] = useState<LifeProductType | ''>('');
+  const [lifeProductName, setLifeProductName] = useState<string>('');
   const [medicareType, setMedicareType] = useState<MedicareType | ''>('');
   const [supplementalType, setSupplementalType] = useState<SupplementalType | ''>('');
 
@@ -110,6 +113,7 @@ export default function NewClientWizardModal({
     setPcClientType('');
     setHealthEnrollmentType('');
     setLifeProductType('');
+    setLifeProductName('');
     setMedicareType('');
     setSupplementalType('');
     setFullName('');
@@ -290,7 +294,8 @@ export default function NewClientWizardModal({
             .from('life_policy_products')
             .insert({
               life_policy_id: lifePol.id,
-              product_type: lifeProductType
+              product_type: lifeProductType,
+              product_name: lifeProductName.trim() || null
             });
         }
 
@@ -536,19 +541,12 @@ export default function NewClientWizardModal({
                   <p className="text-sm text-slate-500">Choose the initial Life product category for this client.</p>
 
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-2">
-                    {[
-                      'Term',
-                      'IUL',
-                      'Whole Life',
-                      'VUL',
-                      'Term - Disability',
-                      'Costumer Whole Life'
-                    ].map((pType) => (
+                    {LIFE_PRODUCT_TYPES.map((pType) => (
                       <button
                         key={pType}
                         type="button"
                         onClick={() => {
-                          setLifeProductType(pType as LifeProductType);
+                          setLifeProductType(pType);
                           setFormError(null);
                         }}
                         className={`p-4 rounded-xl border-2 text-center transition-all ${
@@ -561,6 +559,19 @@ export default function NewClientWizardModal({
                       </button>
                     ))}
                   </div>
+
+                  {lifeProductType !== '' && (
+                    <div className="pt-2">
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Product Name (Optional)</label>
+                      <input
+                        type="text"
+                        value={lifeProductName}
+                        onChange={(e) => setLifeProductName(e.target.value)}
+                        placeholder="e.g. Level Prem Convertible Term-10 Yr"
+                        className="w-full border border-slate-200 rounded-xl p-2.5 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-purple-500 text-xs text-slate-800 font-sans"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 

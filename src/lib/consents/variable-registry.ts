@@ -155,6 +155,7 @@ export const VARIABLE_REGISTRY: RegistryGroup[] = [
     icon: '❤️',
     variables: [
       { token: 'life.product_type', label: 'Life Product Type', group: 'Life Policy', sourceTable: 'life_policy_products', sourceField: 'product_type', example: 'Term Life', requiresPolicy: true, policyCategory: 'life' },
+      { token: 'life.product_name', label: 'Life Product Name', group: 'Life Policy', sourceTable: 'life_policy_products', sourceField: 'product_name', example: 'Level Prem Convertible Term-10 Yr', requiresPolicy: true, policyCategory: 'life' },
       { token: 'life.company', label: 'Life Carrier Company', group: 'Life Policy', sourceTable: 'life_policy_products', sourceField: 'company', example: 'Mutual of Omaha', requiresPolicy: true, policyCategory: 'life' },
       { token: 'life.policy_number', label: 'Life Policy Number', group: 'Life Policy', sourceTable: 'life_policies', sourceField: 'policy_number', example: 'LF-9920148', requiresPolicy: true, policyCategory: 'life' },
       { token: 'life.policy_date', label: 'Life Policy Effective Date', group: 'Life Policy', sourceTable: 'life_policies', sourceField: 'effective_date', example: '03/15/2026', requiresPolicy: true, policyCategory: 'life' },

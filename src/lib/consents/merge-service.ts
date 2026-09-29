@@ -267,6 +267,7 @@ export async function getPolicyMergeData(
         full_premium: primaryProd?.monthly_premium ? Number(primaryProd.monthly_premium) * 12 : null,
         monthly_premium: primaryProd?.monthly_premium ? Number(primaryProd.monthly_premium) : null,
         product_type: primaryProd?.product_type ?? null,
+        product_name: primaryProd?.product_name ?? null,
         policy_date: primaryProd?.policy_date ?? lpData.effective_date ?? null,
         face_amount: primaryProd?.face_amount ? Number(primaryProd.face_amount) : null,
         time_to_pay_premium: primaryProd?.time_to_pay_premium ?? null,
