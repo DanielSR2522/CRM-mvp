@@ -1220,11 +1220,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     return cards.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
   })();
 
-  // Google Autocomplete States
-  const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false);
-  const [googleMapsWarning, setGoogleMapsWarning] = useState<string | null>(null);
-  const autocompleteInputRef = useRef<HTMLInputElement | null>(null);
-
   // Income States
   const [incomeList, setIncomeList] = useState<ClientIncomeInformation[]>([]);
   const [isAddIncomeOpen, setIsAddIncomeOpen] = useState(false);
@@ -1287,85 +1282,6 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
     return age >= 0 ? age : '-';
   };
-
-  // Google Maps Dynamic Script Injection
-  useEffect(() => {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-    if (!apiKey) {
-      setGoogleMapsWarning('Google Maps API key is missing. Address Autocomplete is disabled; please enter details manually.');
-      return;
-    }
-
-    const scriptId = 'google-maps-places-script';
-    let script = document.getElementById(scriptId) as HTMLScriptElement;
-    
-    if (!script) {
-      script = document.createElement('script');
-      script.id = scriptId;
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
-      script.async = true;
-      script.defer = true;
-      script.onload = () => setGoogleMapsLoaded(true);
-      script.onerror = () => setGoogleMapsWarning('Failed to load Google Maps script. Address Autocomplete is disabled.');
-      document.head.appendChild(script);
-    } else {
-      if (window.google?.maps?.places) {
-        setGoogleMapsLoaded(true);
-      } else {
-        script.addEventListener('load', () => setGoogleMapsLoaded(true));
-      }
-    }
-  }, []);
-
-  // Google Places Autocomplete Listener
-  useEffect(() => {
-    if (!googleMapsLoaded || !isEditingResidence || !autocompleteInputRef.current) return;
-
-    const autocomplete = new window.google.maps.places.Autocomplete(autocompleteInputRef.current, {
-      types: ['address'],
-      fields: ['address_components', 'formatted_address'],
-    });
-
-    autocomplete.addListener('place_changed', () => {
-      const place = autocomplete.getPlace();
-      if (!place.address_components) return;
-
-      let streetNumber = '';
-      let route = '';
-      let city = '';
-      let zip = '';
-      let county = '';
-
-      for (const component of place.address_components) {
-        const types = component.types;
-        if (types.includes('street_number')) {
-          streetNumber = component.long_name;
-        }
-        if (types.includes('route')) {
-          route = component.long_name;
-        }
-        if (types.includes('locality')) {
-          city = component.long_name;
-        }
-        if (types.includes('postal_code')) {
-          zip = component.long_name;
-        }
-        if (types.includes('administrative_area_level_2')) {
-          county = component.long_name;
-        }
-      }
-
-      const fullAddress = `${streetNumber} ${route}`.trim() || place.formatted_address || '';
-      
-      setResidenceForm(prev => ({
-        ...prev,
-        address: fullAddress,
-        city: city,
-        zip_code: zip,
-        county: county,
-      }));
-    });
-  }, [googleMapsLoaded, isEditingResidence]);
 
   // Fetch client details
   const fetchClientDetails = useCallback(async () => {
