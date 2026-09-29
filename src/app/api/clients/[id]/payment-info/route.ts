@@ -91,8 +91,13 @@ export async function GET(
           ? JSON.parse(paymentInfo.routing_number_encrypted)
           : paymentInfo.routing_number_encrypted;
         routing_number = decryptPaymentField(parsed.ciphertext, parsed.iv, parsed.authTag, clientId, 'routing_number');
-      } catch (err) {
-        console.error('Failed to decrypt routing_number server-side:', err);
+        console.log('[PaymentInfo GET] Routing decryption SUCCESS', {
+          clientId,
+          length: routing_number.length,
+          digitsOnly: /^\d+$/.test(routing_number),
+        });
+      } catch (err: any) {
+        console.error('[PaymentInfo GET] Routing decryption FAILED:', err?.message);
       }
     }
 
@@ -102,8 +107,13 @@ export async function GET(
           ? JSON.parse(paymentInfo.account_number_encrypted)
           : paymentInfo.account_number_encrypted;
         account_number = decryptPaymentField(parsed.ciphertext, parsed.iv, parsed.authTag, clientId, 'account_number');
-      } catch (err) {
-        console.error('Failed to decrypt account_number server-side:', err);
+        console.log('[PaymentInfo GET] Account decryption SUCCESS', {
+          clientId,
+          length: account_number.length,
+          digitsOnly: /^\d+$/.test(account_number),
+        });
+      } catch (err: any) {
+        console.error('[PaymentInfo GET] Account decryption FAILED:', err?.message);
       }
     }
 
@@ -113,8 +123,14 @@ export async function GET(
           ? JSON.parse(paymentInfo.card_number_encrypted)
           : paymentInfo.card_number_encrypted;
         card_number = decryptPaymentField(parsed.ciphertext, parsed.iv, parsed.authTag, clientId, 'card_number');
-      } catch (err) {
-        console.error('Failed to decrypt card_number server-side:', err);
+        console.log('[PaymentInfo GET] Card decryption SUCCESS', {
+          clientId,
+          length: card_number.length,
+          digitsOnly: /^\d+$/.test(card_number),
+          last4Matches: card_number.slice(-4) === paymentInfo.card_last4,
+        });
+      } catch (err: any) {
+        console.error('[PaymentInfo GET] Card decryption FAILED:', err?.message);
       }
     }
 
