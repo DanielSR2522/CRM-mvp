@@ -483,7 +483,7 @@ export async function extractCommissionDocument(
 
   const visionProvider: IVisionExtractionProvider = new GeminiVisionProvider();
 
-  if (visionProvider.isAvailable()) {
+  if (isImage && visionProvider.isAvailable()) {
     try {
       console.log(`[Extraction Pipeline] Executing Primary Provider: ${visionProvider.name}`);
       const visionResult = await visionProvider.extract(fileBuffer, mimeType, filename);
@@ -496,7 +496,7 @@ export async function extractCommissionDocument(
       console.warn(`[Extraction Pipeline] Vision AI notice: ${msg}`);
       document_warnings.push('Processed locally.');
     }
-  } else {
+  } else if (isImage) {
     console.log('[Extraction Pipeline] Vision AI unavailable or unconfigured. Using local processing.');
     document_warnings.push('Processed locally.');
   }

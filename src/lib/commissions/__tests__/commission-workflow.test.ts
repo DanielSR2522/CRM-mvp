@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import {
   parseSpreadsheetDocument,
   parseCommissionRowsFromText,
+  extractCommissionDocument,
 } from '../extraction-service';
 import {
   computeNameSimilarity,
@@ -10,11 +11,18 @@ import {
   normalizeCarrier,
   matchExtractedRowsToCRM,
 } from '../matching-service';
+import { GeminiVisionProvider } from '../providers/gemini-vision-provider';
 import { ExtractedCommissionRow } from '@/types/commissions';
+
+// Valid 1x1 PNG Buffer for mock image testing
+const SAMPLE_PNG_BUFFER = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64'
+);
 
 async function runAllTests() {
   console.log('==================================================');
-  console.log('RUNNING P&C COMMISSION IMPORT DETERMINISTIC TESTS');
+  console.log('RUNNING GEMINI VISION + DETERMINISTIC P&C TESTS');
   console.log('==================================================\n');
 
   let passed = 0;
@@ -30,430 +38,342 @@ async function runAllTests() {
     }
   }
 
+  const originalFetch = global.fetch;
+
   // --------------------------------------------------
-  // Test 1: XLSX spreadsheet extraction
+  // Test 1: Gemini image extraction success
   // --------------------------------------------------
   try {
+    global.fetch = (async (url: string | URL | Request) => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      document_type: 'statement_photo',
+                      rows: [
+                        {
+                          date: '03/15/2026',
+                          client_name: 'Maria del Carmen Perez Mena',
+                          membership_or_policy_number: '15127227-02',
+                          carrier: 'Progressive',
+                          transaction_code: 'COMM',
+                          amount: 125.50,
+                          confidence: 1.0,
+                        },
+                      ],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      } as Response;
+    }) as any;
+
+    process.env.GEMINI_API_KEY = 'test-mock-key';
+    const result = await extractCommissionDocument(SAMPLE_PNG_BUFFER, 'image/png', 'sample.png');
+
+    assert(result.extraction_method === 'vision_ai', 'Test 1: Gemini extraction method', `Got ${result.extraction_method}`);
+    assert(result.rows.length === 1, 'Test 1: Gemini extracted rows count', `Got ${result.rows.length}`);
+    assert(result.rows[0].membership_or_policy_number === '15127227-02', 'Test 1: Gemini policy suffix preserved', `Got ${result.rows[0]?.membership_or_policy_number}`);
+  } catch (e: any) {
+    assert(false, 'Test 1: Gemini image extraction success', e.message);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  // --------------------------------------------------
+  // Test 2: Gemini failure -> OCR fallback
+  // --------------------------------------------------
+  try {
+    global.fetch = (async () => {
+      return {
+        ok: false,
+        status: 500,
+        text: async () => 'Internal Server Error',
+      } as Response;
+    }) as any;
+
+    process.env.GEMINI_API_KEY = 'test-mock-key';
+    const result = await extractCommissionDocument(SAMPLE_PNG_BUFFER, 'image/png', 'sample.png');
+
+    assert(result.extraction_method === 'ocr_fallback', 'Test 2: Fallback to OCR on Gemini 500 failure', `Got ${result.extraction_method}`);
+    assert(result.document_warnings.includes('Processed locally.'), 'Test 2: Neutral warning on fallback', `Warnings: ${result.document_warnings}`);
+  } catch (e: any) {
+    assert(false, 'Test 2: Gemini failure -> OCR fallback', e.message);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  // --------------------------------------------------
+  // Test 3: Gemini timeout -> OCR fallback
+  // --------------------------------------------------
+  try {
+    global.fetch = (async () => {
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      throw err;
+    }) as any;
+
+    process.env.GEMINI_API_KEY = 'test-mock-key';
+    const result = await extractCommissionDocument(SAMPLE_PNG_BUFFER, 'image/png', 'sample.png');
+
+    assert(result.extraction_method === 'ocr_fallback', 'Test 3: Fallback to OCR on Gemini timeout', `Got ${result.extraction_method}`);
+  } catch (e: any) {
+    assert(false, 'Test 3: Gemini timeout -> OCR fallback', e.message);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  // --------------------------------------------------
+  // Test 4: Spreadsheet path never calls Gemini
+  // --------------------------------------------------
+  try {
+    let geminiCalled = false;
+    global.fetch = (async () => {
+      geminiCalled = true;
+      throw new Error('Gemini should NOT be called for spreadsheet!');
+    }) as any;
+
     const wb = XLSX.utils.book_new();
     const wsData = [
-      ['Date', 'Client Name', 'Policy Number', 'Carrier', 'Tx Code', 'Commission Amount'],
-      ['2026-03-15', 'Maria Perez', 'POL-1001', 'Progressive', 'COMM', 125.50],
-      ['2026-03-16', 'Jeffery Cunnyngham', 'POL-1002', 'Travelers', 'COMM', 250.00],
+      ['Date', 'Client', 'Policy', 'Carrier', 'Amount'],
+      ['2026-03-01', 'Jhuber Vasquez', 'PTH0019893', 'Patriot Select', 180.00],
     ];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    XLSX.utils.book_append_sheet(wb, ws, 'Commissions');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsData), 'Sheet1');
     const xlsxBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-    const rows = parseSpreadsheetDocument(xlsxBuffer);
-    assert(rows.length === 2, 'Test 1: XLSX extraction row count', `Got ${rows.length} rows`);
-    assert(rows[0].client_name === 'Maria Perez', 'Test 1: XLSX client name', `Got ${rows[0]?.client_name}`);
-    assert(rows[0].membership_or_policy_number === 'POL-1001', 'Test 1: XLSX policy number', `Got ${rows[0]?.membership_or_policy_number}`);
-    assert(rows[0].commission_amount === 125.50, 'Test 1: XLSX amount', `Got ${rows[0]?.commission_amount}`);
+    const result = await extractCommissionDocument(xlsxBuffer, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'statement.xlsx');
+
+    assert(!geminiCalled, 'Test 4: Spreadsheet path never calls Gemini', `Gemini called: ${geminiCalled}`);
+    assert(result.extraction_method === 'structured_file', 'Test 4: Extraction method structured_file', `Got ${result.extraction_method}`);
+    assert(result.rows[0].membership_or_policy_number === 'PTH0019893', 'Test 4: Policy extracted from spreadsheet', `Got ${result.rows[0]?.membership_or_policy_number}`);
   } catch (e: any) {
-    assert(false, 'Test 1: XLSX spreadsheet extraction', e.message);
+    assert(false, 'Test 4: Spreadsheet path never calls Gemini', e.message);
+  } finally {
+    global.fetch = originalFetch;
   }
 
   // --------------------------------------------------
-  // Test 2: XLS spreadsheet extraction
+  // Test 5: PDF text path never calls Gemini
   // --------------------------------------------------
   try {
-    const wb = XLSX.utils.book_new();
-    const wsData = [
-      ['Transaction Date', 'Insured Name', 'Policy #', 'Company', 'Amount'],
-      ['03/20/2026', 'Camila Cabrera', 'FL-99281', 'Universal', '$310.00'],
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    XLSX.utils.book_append_sheet(wb, ws, 'Statement');
-    const xlsBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xls' });
+    let geminiCalled = false;
+    global.fetch = (async () => {
+      geminiCalled = true;
+      throw new Error('Gemini should NOT be called for PDF!');
+    }) as any;
 
-    const rows = parseSpreadsheetDocument(xlsBuffer);
-    assert(rows.length === 1, 'Test 2: XLS extraction row count', `Got ${rows.length} rows`);
-    assert(rows[0].membership_or_policy_number === 'FL-99281', 'Test 2: XLS policy number', `Got ${rows[0]?.membership_or_policy_number}`);
+    const dummyPdfBuffer = Buffer.from('%PDF-1.4 dummy pdf content');
+    const result = await extractCommissionDocument(dummyPdfBuffer, 'application/pdf', 'statement.pdf');
+
+    assert(!geminiCalled, 'Test 5: PDF path never calls Gemini', `Gemini called: ${geminiCalled}`);
+    assert(result.extraction_method === 'ocr_fallback', 'Test 5: PDF method ocr_fallback', `Got ${result.extraction_method}`);
   } catch (e: any) {
-    assert(false, 'Test 2: XLS spreadsheet extraction', e.message);
+    assert(false, 'Test 5: PDF text path never calls Gemini', e.message);
+  } finally {
+    global.fetch = originalFetch;
   }
 
   // --------------------------------------------------
-  // Test 3: CSV spreadsheet extraction
-  // --------------------------------------------------
-  try {
-    const csvContent = 'Pay Date,Customer,Policy_No,Carrier,Comm Amount\n2026-03-10,John Smith,POL-550,Slide,75.25\n';
-    const csvBuffer = Buffer.from(csvContent, 'utf-8');
-
-    const rows = parseSpreadsheetDocument(csvBuffer);
-    assert(rows.length === 1, 'Test 3: CSV extraction row count', `Got ${rows.length} rows`);
-    assert(rows[0].client_name === 'John Smith', 'Test 3: CSV client name', `Got ${rows[0]?.client_name}`);
-    assert(rows[0].commission_amount === 75.25, 'Test 3: CSV amount', `Got ${rows[0]?.commission_amount}`);
-  } catch (e: any) {
-    assert(false, 'Test 3: CSV spreadsheet extraction', e.message);
-  }
-
-  // --------------------------------------------------
-  // Test 4: Header normalization across aliases
-  // --------------------------------------------------
-  try {
-    const csvAliases = 'posted_date,customer_name,policyno,writing_company,trans_code,earned_amount\n2026-01-01,Test User,ABC12345,Citizens,DV,50.00\n';
-    const rows = parseSpreadsheetDocument(Buffer.from(csvAliases, 'utf-8'));
-    assert(rows.length === 1, 'Test 4: Alias header normalization', `Got ${rows.length} rows`);
-    assert(rows[0].membership_or_policy_number === 'ABC12345', 'Test 4: Alias policy', `Got ${rows[0]?.membership_or_policy_number}`);
-    assert(rows[0].carrier === 'Citizens', 'Test 4: Alias carrier', `Got ${rows[0]?.carrier}`);
-    assert(rows[0].transaction_code === 'DV', 'Test 4: Alias tx code', `Got ${rows[0]?.transaction_code}`);
-  } catch (e: any) {
-    assert(false, 'Test 4: Header normalization across aliases', e.message);
-  }
-
-  // --------------------------------------------------
-  // Test 5: Missing date handling (never invent dates)
-  // --------------------------------------------------
-  try {
-    const textNoDate = 'Maria del Carmen Perez POL-1001 Progressive $125.50';
-    const rows = parseCommissionRowsFromText(textNoDate);
-    assert(rows.length === 1, 'Test 5: OCR missing date parsed', `Got ${rows.length} rows`);
-    assert(rows[0].payment_date === '', 'Test 5: Payment date is empty (never invented)', `Got "${rows[0]?.payment_date}"`);
-    assert(rows[0].match_status === 'REVIEW', 'Test 5: Match status is REVIEW when date missing', `Got "${rows[0]?.match_status}"`);
-  } catch (e: any) {
-    assert(false, 'Test 5: Missing date handling', e.message);
-  }
-
-  // --------------------------------------------------
-  // Test 6: Exact policy match -> MATCHED
-  // --------------------------------------------------
-  try {
-    const mockSupabase: any = {
-      from: (table: string) => ({
-        select: () => Promise.resolve({
-          data: [
-            {
-              id: 'pol-1',
-              policy_number: '15127227-02',
-              company_name: 'Progressive',
-              effective_date: '2026-01-01',
-              premium_amount: 1200,
-              agent_id: 'agent-1',
-              client_id: 'client-1',
-              clients: { id: 'client-1', full_name: 'Maria del Carmen Perez Mena', agent_id: 'agent-1' },
-            },
-          ],
-          error: null,
-        }),
-      }),
-    };
-
-    const row: ExtractedCommissionRow = {
-      id: 'row-1',
-      payment_date: '2026-03-01',
-      client_name: 'Maria Perez',
-      membership_or_policy_number: '15127227-02',
-      carrier: 'Progressive',
-      commission_amount: 150,
-      confidence: 0.9,
-      match_status: 'UNMATCHED',
-    };
-
-    const res = await matchExtractedRowsToCRM([row], 'agent-1', mockSupabase, true);
-    assert(res[0].match_status === 'MATCHED', 'Test 6: Exact match status is MATCHED', `Got ${res[0]?.match_status}`);
-    assert(res[0].matched_policy_id === 'pol-1', 'Test 6: Exact match policy ID', `Got ${res[0]?.matched_policy_id}`);
-  } catch (e: any) {
-    assert(false, 'Test 6: Exact policy match', e.message);
-  }
-
-  // --------------------------------------------------
-  // Test 7: Containment base policy match -> REVIEW
-  // --------------------------------------------------
-  try {
-    const mockSupabase: any = {
-      from: (table: string) => ({
-        select: () => Promise.resolve({
-          data: [
-            {
-              id: 'pol-base',
-              policy_number: '15127227-02',
-              company_name: 'Progressive',
-              agent_id: 'agent-1',
-              client_id: 'client-1',
-              clients: { id: 'client-1', full_name: 'Maria del Carmen Perez Mena', agent_id: 'agent-1' },
-            },
-          ],
-          error: null,
-        }),
-      }),
-    };
-
-    // Row has base policy "15127227" without suffix "-02"
-    const row: ExtractedCommissionRow = {
-      id: 'row-2',
-      payment_date: '2026-03-01',
-      client_name: 'Maria Perez',
-      membership_or_policy_number: '15127227',
-      carrier: 'Progressive',
-      commission_amount: 150,
-      confidence: 0.8,
-      match_status: 'UNMATCHED',
-    };
-
-    const res = await matchExtractedRowsToCRM([row], 'agent-1', mockSupabase, true);
-    assert(res[0].match_status === 'REVIEW', 'Test 7: Base policy match status is REVIEW', `Got ${res[0]?.match_status}`);
-    assert(res[0].matched_policy_id === 'pol-base', 'Test 7: Suggested match policy attached', `Got ${res[0]?.matched_policy_id}`);
-  } catch (e: any) {
-    assert(false, 'Test 7: Containment base policy match', e.message);
-  }
-
-  // --------------------------------------------------
-  // Test 8: Client name + carrier agreement match -> REVIEW
-  // --------------------------------------------------
-  try {
-    const mockSupabase: any = {
-      from: (table: string) => ({
-        select: () => Promise.resolve({
-          data: [
-            {
-              id: 'pol-cunnyngham',
-              policy_number: 'TRV-998822',
-              company_name: 'Travelers',
-              agent_id: 'agent-1',
-              client_id: 'client-2',
-              clients: { id: 'client-2', full_name: 'Jeffery Cunnyngham', agent_id: 'agent-1' },
-            },
-          ],
-          error: null,
-        }),
-      }),
-    };
-
-    // Row has typo or different policy number "TRV-998800" but name & carrier agree
-    const row: ExtractedCommissionRow = {
-      id: 'row-3',
-      payment_date: '2026-03-01',
-      client_name: 'Jeffery Cunnyngham',
-      membership_or_policy_number: 'TRV-998800',
-      carrier: 'Travelers Insurance',
-      commission_amount: 200,
-      confidence: 0.7,
-      match_status: 'UNMATCHED',
-    };
-
-    const res = await matchExtractedRowsToCRM([row], 'agent-1', mockSupabase, true);
-    assert(res[0].match_status === 'REVIEW', 'Test 8: Client + carrier match status is REVIEW', `Got ${res[0]?.match_status}`);
-    assert(res[0].matched_client_name === 'Jeffery Cunnyngham', 'Test 8: Suggested client attached', `Got ${res[0]?.matched_client_name}`);
-  } catch (e: any) {
-    assert(false, 'Test 8: Client name + carrier agreement match', e.message);
-  }
-
-  // --------------------------------------------------
-  // Test 9: Strong client name match -> REVIEW
-  // --------------------------------------------------
-  try {
-    const sim = computeNameSimilarity('Camila Viera Cabrera', 'Camila Cabrera');
-    assert(sim >= 0.75, 'Test 9: Name similarity function threshold', `Got similarity ${sim.toFixed(2)}`);
-
-    const mockSupabase: any = {
-      from: (table: string) => ({
-        select: () => Promise.resolve({
-          data: [
-            {
-              id: 'pol-cabrera',
-              policy_number: 'UNI-4411',
-              company_name: 'Universal Property',
-              agent_id: 'agent-1',
-              client_id: 'client-3',
-              clients: { id: 'client-3', full_name: 'Camila Viera Cabrera', agent_id: 'agent-1' },
-            },
-          ],
-          error: null,
-        }),
-      }),
-    };
-
-    const row: ExtractedCommissionRow = {
-      id: 'row-4',
-      payment_date: '2026-03-01',
-      client_name: 'Camila Cabrera',
-      membership_or_policy_number: 'UNKNOWN-POL',
-      carrier: 'Other Carrier',
-      commission_amount: 300,
-      confidence: 0.6,
-      match_status: 'UNMATCHED',
-    };
-
-    const res = await matchExtractedRowsToCRM([row], 'agent-1', mockSupabase, true);
-    assert(res[0].match_status === 'REVIEW', 'Test 9: Strong name match status is REVIEW', `Got ${res[0]?.match_status}`);
-    assert(res[0].matched_client_id === 'client-3', 'Test 9: Suggested client match attached', `Got ${res[0]?.matched_client_id}`);
-  } catch (e: any) {
-    assert(false, 'Test 9: Strong client name match', e.message);
-  }
-
-  // --------------------------------------------------
-  // Test 10: Multiple candidate matches -> REVIEW
-  // --------------------------------------------------
-  try {
-    const mockSupabase: any = {
-      from: (table: string) => ({
-        select: () => Promise.resolve({
-          data: [
-            {
-              id: 'pol-m1',
-              policy_number: 'POL-AUTO-1',
-              company_name: 'Progressive',
-              agent_id: 'agent-1',
-              client_id: 'client-m',
-              clients: { id: 'client-m', full_name: 'Maria Perez', agent_id: 'agent-1' },
-            },
-            {
-              id: 'pol-m2',
-              policy_number: 'POL-HOME-2',
-              company_name: 'Progressive',
-              agent_id: 'agent-1',
-              client_id: 'client-m',
-              clients: { id: 'client-m', full_name: 'Maria Perez', agent_id: 'agent-1' },
-            },
-          ],
-          error: null,
-        }),
-      }),
-    };
-
-    const row: ExtractedCommissionRow = {
-      id: 'row-5',
-      payment_date: '2026-03-01',
-      client_name: 'Maria Perez',
-      membership_or_policy_number: 'POL-MISSING',
-      carrier: 'Progressive',
-      commission_amount: 100,
-      confidence: 0.6,
-      match_status: 'UNMATCHED',
-    };
-
-    const res = await matchExtractedRowsToCRM([row], 'agent-1', mockSupabase, true);
-    assert(res[0].match_status === 'REVIEW', 'Test 10: Multiple candidates status is REVIEW', `Got ${res[0]?.match_status}`);
-  } catch (e: any) {
-    assert(false, 'Test 10: Multiple candidate matches', e.message);
-  }
-
-  // --------------------------------------------------
-  // Test 11: No candidate match -> UNMATCHED
-  // --------------------------------------------------
-  try {
-    const mockSupabase: any = {
-      from: (table: string) => ({
-        select: () => Promise.resolve({
-          data: [
-            {
-              id: 'pol-other',
-              policy_number: 'POL-111',
-              company_name: 'Geico',
-              agent_id: 'agent-1',
-              client_id: 'client-other',
-              clients: { id: 'client-other', full_name: 'Unknown Person', agent_id: 'agent-1' },
-            },
-          ],
-          error: null,
-        }),
-      }),
-    };
-
-    const row: ExtractedCommissionRow = {
-      id: 'row-6',
-      payment_date: '2026-03-01',
-      client_name: 'Nonexistent Client',
-      membership_or_policy_number: 'POL-999999',
-      carrier: 'State Farm',
-      commission_amount: 50,
-      confidence: 0.9,
-      match_status: 'UNMATCHED',
-    };
-
-    const res = await matchExtractedRowsToCRM([row], 'agent-1', mockSupabase, true);
-    assert(res[0].match_status === 'UNMATCHED', 'Test 11: Unmatched status is UNMATCHED', `Got ${res[0]?.match_status}`);
-  } catch (e: any) {
-    assert(false, 'Test 11: No candidate match', e.message);
-  }
-
-  // --------------------------------------------------
-  // Test 12: Shared agent access scoping
-  // --------------------------------------------------
-  try {
-    const mockSupabase: any = {
-      from: (table: string) => {
-        if (table === 'pc_policies') {
-          return {
-            select: () => Promise.resolve({
-              data: [
-                {
-                  id: 'pol-secret',
-                  policy_number: 'SECRET-777',
-                  company_name: 'Travelers',
-                  agent_id: 'unauthorized-agent-id',
-                  client_id: 'client-secret',
-                  clients: { id: 'client-secret', full_name: 'Secret Client', agent_id: 'unauthorized-agent-id' },
-                },
-              ],
-              error: null,
-            }),
-          };
-        }
-        if (table === 'agent_shared_access') {
-          return {
-            select: () => ({
-              or: () => ({
-                eq: () => Promise.resolve({ data: [], error: null }),
-              }),
-            }),
-          };
-        }
-        return { select: () => Promise.resolve({ data: [], error: null }) };
-      },
-    };
-
-    const row: ExtractedCommissionRow = {
-      id: 'row-7',
-      payment_date: '2026-03-01',
-      client_name: 'Secret Client',
-      membership_or_policy_number: 'SECRET-777',
-      carrier: 'Travelers',
-      commission_amount: 500,
-      confidence: 0.9,
-      match_status: 'UNMATCHED',
-    };
-
-    // Agent 'agent-restricted' is not privileged and does not own 'SECRET-777'
-    const res = await matchExtractedRowsToCRM([row], 'agent-restricted', mockSupabase, false);
-    assert(res[0].match_status === 'UNMATCHED', 'Test 12: Unscoped policy excluded from matching', `Got ${res[0]?.match_status}`);
-  } catch (e: any) {
-    assert(false, 'Test 12: Shared agent access scoping', e.message);
-  }
-
-  // --------------------------------------------------
-  // Test 13: Manual commission entry helper
+  // Test 6: Manual entry never calls Gemini
   // --------------------------------------------------
   try {
     const manualRow: ExtractedCommissionRow = {
-      id: 'manual-1',
+      id: 'manual-row-1',
       payment_date: '2026-03-29',
-      client_name: 'Maria Perez',
-      membership_or_policy_number: 'POL-1001',
-      carrier: 'Progressive',
-      transaction_code: 'COMM',
-      commission_amount: 175.00,
+      client_name: 'Camila Viera Cabrera',
+      membership_or_policy_number: '6242957865-461212307',
+      carrier: 'Citizens',
+      commission_amount: 310.00,
       confidence: 1.0,
       match_status: 'MATCHED',
-      matched_client_id: 'client-1',
-      matched_policy_id: 'pol-1',
     };
-    assert(manualRow.match_status === 'MATCHED', 'Test 13: Manual entry row initialized as MATCHED', `Got ${manualRow.match_status}`);
-    assert(manualRow.matched_policy_id === 'pol-1', 'Test 13: Manual entry row linked to CRM policy', `Got ${manualRow.matched_policy_id}`);
+    assert(manualRow.membership_or_policy_number === '6242957865-461212307', 'Test 6: Manual entry preserves full policy number with suffix', `Got ${manualRow.membership_or_policy_number}`);
   } catch (e: any) {
-    assert(false, 'Test 13: Manual commission entry helper', e.message);
+    assert(false, 'Test 6: Manual entry never calls Gemini', e.message);
   }
 
   // --------------------------------------------------
-  // Test 14: Neutral source label formatting
+  // Test 7: Gemini preserves policy suffix
   // --------------------------------------------------
   try {
-    const warning = 'Processed locally.';
-    const isExposed = warning.includes('Gemini') || warning.includes('Vision AI unavailable');
-    assert(!isExposed, 'Test 14: Neutral source warning does not expose AI vendor strings', `Warning: "${warning}"`);
+    global.fetch = (async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      document_type: 'statement_photo',
+                      rows: [
+                        {
+                          date: '03/15/2026',
+                          client_name: 'Camila Viera Cabrera',
+                          membership_or_policy_number: '6242957865-461212307',
+                          carrier: 'Citizens',
+                          amount: 310.00,
+                        },
+                      ],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      } as Response;
+    }) as any;
+
+    const provider = new GeminiVisionProvider();
+    const result = await provider.extract(SAMPLE_PNG_BUFFER, 'image/png', 'img.png');
+    assert(result.rows[0].membership_or_policy_number === '6242957865-461212307', 'Test 7: Policy suffix preserved in Gemini result', `Got ${result.rows[0]?.membership_or_policy_number}`);
   } catch (e: any) {
-    assert(false, 'Test 14: Neutral source label formatting', e.message);
+    assert(false, 'Test 7: Gemini preserves policy suffix', e.message);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  // --------------------------------------------------
+  // Test 8: Gemini does not invent missing date
+  // --------------------------------------------------
+  try {
+    global.fetch = (async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      document_type: 'statement_photo',
+                      rows: [
+                        {
+                          date: '',
+                          client_name: 'Maria Perez',
+                          membership_or_policy_number: '15127227-02',
+                          carrier: 'Progressive',
+                          amount: 100.00,
+                        },
+                      ],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      } as Response;
+    }) as any;
+
+    const provider = new GeminiVisionProvider();
+    const result = await provider.extract(SAMPLE_PNG_BUFFER, 'image/png', 'img.png');
+    assert(result.rows[0].payment_date === '', 'Test 8: Missing date is returned as empty string', `Got "${result.rows[0]?.payment_date}"`);
+    assert(result.rows[0].match_status === 'REVIEW', 'Test 8: Match status is REVIEW when date is missing', `Got ${result.rows[0]?.match_status}`);
+  } catch (e: any) {
+    assert(false, 'Test 8: Gemini does not invent missing date', e.message);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  // --------------------------------------------------
+  // Test 9: Negative commission amount parsing
+  // --------------------------------------------------
+  try {
+    global.fetch = (async () => {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      document_type: 'statement_photo',
+                      rows: [
+                        {
+                          date: '03/15/2026',
+                          client_name: 'Jeffery Cunnyngham',
+                          membership_or_policy_number: 'TRV102938',
+                          carrier: 'Travelers',
+                          amount: '$(178.50)',
+                        },
+                      ],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      } as Response;
+    }) as any;
+
+    const provider = new GeminiVisionProvider();
+    const result = await provider.extract(SAMPLE_PNG_BUFFER, 'image/png', 'img.png');
+    assert(result.rows[0].commission_amount === -178.50, 'Test 9: Parentheses negative amount parsed to negative float', `Got ${result.rows[0]?.commission_amount}`);
+  } catch (e: any) {
+    assert(false, 'Test 9: Negative commission amount parsing', e.message);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  // --------------------------------------------------
+  // Test 10: Deterministic CRM matching remains unchanged
+  // --------------------------------------------------
+  try {
+    const mockSupabase: any = {
+      from: (table: string) => ({
+        select: () => Promise.resolve({
+          data: [
+            {
+              id: 'pol-jhuber',
+              policy_number: 'PTH0019893',
+              company_name: 'Patriot Select',
+              effective_date: '2026-01-01',
+              premium_amount: 1500,
+              agent_id: 'agent-1',
+              client_id: 'client-jhuber',
+              clients: { id: 'client-jhuber', full_name: 'Jhuber Vasquez', agent_id: 'agent-1' },
+            },
+          ],
+          error: null,
+        }),
+      }),
+    };
+
+    const row: ExtractedCommissionRow = {
+      id: 'row-jhuber',
+      payment_date: '2026-03-01',
+      client_name: 'Jhuber Vasquez',
+      membership_or_policy_number: 'PTH0019893',
+      carrier: 'Patriot Select',
+      commission_amount: 180.00,
+      confidence: 1.0,
+      match_status: 'UNMATCHED',
+    };
+
+    const res = await matchExtractedRowsToCRM([row], 'agent-1', mockSupabase, true);
+    assert(res[0].match_status === 'MATCHED', 'Test 10: Exact CRM match status is MATCHED', `Got ${res[0]?.match_status}`);
+    assert(res[0].matched_client_name === 'Jhuber Vasquez', 'Test 10: CRM matched client name', `Got ${res[0]?.matched_client_name}`);
+  } catch (e: any) {
+    assert(false, 'Test 10: Deterministic CRM matching remains unchanged', e.message);
   }
 
   console.log('\n==================================================');

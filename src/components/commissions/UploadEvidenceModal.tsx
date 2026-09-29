@@ -530,7 +530,7 @@ export default function UploadEvidenceModal({ isOpen, onClose, onSuccess }: Uplo
 
                     {extractionMethod === 'vision_ai' && (
                       <span className="text-[11px] bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-md font-bold flex items-center gap-1">
-                        ✨ Multimodal Vision AI
+                        ✨ Vision Extraction
                       </span>
                     )}
 

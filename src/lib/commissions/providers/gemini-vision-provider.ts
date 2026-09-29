@@ -1,5 +1,5 @@
 import { IVisionExtractionProvider } from './vision-provider-interface';
-import { StructuredExtractionResult, ExtractedCommissionRow } from '@/types/commissions';
+import { StructuredExtractionResult, ExtractedCommissionRow, MatchStatus } from '@/types/commissions';
 
 type DocumentType = 'structured_table' | 'whatsapp_chat' | 'statement_photo' | 'pdf_document' | 'unknown';
 
@@ -22,7 +22,7 @@ interface GeminiParsedResponse {
 }
 
 export class GeminiVisionProvider implements IVisionExtractionProvider {
-  name = 'Gemini Flash Vision';
+  name = 'Gemini 2.5 Flash-Lite';
 
   isAvailable(): boolean {
     return Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 0);
@@ -35,43 +35,39 @@ export class GeminiVisionProvider implements IVisionExtractionProvider {
     }
 
     const base64Data = fileBuffer.toString('base64');
-    const effectiveMimeType = mimeType.includes('pdf')
-      ? 'application/pdf'
-      : mimeType.startsWith('image/')
+    const effectiveMimeType = mimeType.startsWith('image/')
       ? mimeType
-      : filename.endsWith('.pdf')
-      ? 'application/pdf'
       : 'image/png';
 
     const promptText = `
 You are an expert P&C Insurance Commission Document AI extractor.
-Analyze the attached document/image (which could be a structured statement table, WhatsApp chat screenshot, scan, photo, or PDF) and extract ALL commission rows.
+Analyze the attached commission screenshot/image and extract ALL visible commission rows.
 
-CRITICAL INSTRUCTIONS:
-1. Extract ALL commission rows present in the document.
-2. For each row extract:
-   - date: payment/statement date in MM/DD/YYYY or YYYY-MM-DD format.
-   - client_name: full name of the client/insured.
-   - membership_or_policy_number: policy ID or membership number as written (e.g., "SIC3415864", "NXTYQR3KTH-00-PL", "864824912", "SIF0021341"). If missing/truncated, set to empty string "". NEVER invent or guess a policy number.
-   - carrier: exact insurance carrier name as shown (e.g., "Slide", "Progressive", "Next", "US Assure", "Travelers", "United Auto", etc.). Extract whatever carrier is clearly shown.
-   - transaction_code: transaction or product code if present (e.g., "DV", "LA", "BOP", "COMM"). If none, use empty string "".
-   - amount: numeric commission dollar amount as a float (e.g., 230.76).
-   - confidence: float between 0.0 and 1.0 reflecting extraction certainty. Use 1.0 for clearly readable complete rows. Use 0.4 - 0.6 if policy number or client name is missing/truncated/blurry.
-   - confidence_reason: string explaining reason if confidence < 0.8 (e.g. "Missing policy number in line").
-3. Determine document_type: one of "structured_table", "whatsapp_chat", "statement_photo", "pdf_document", "unknown".
-4. NEVER invent fictitious client names or policy numbers.
+CRITICAL EXTRACTION RULES:
+1. Extract ONLY fields that are visibly present in the image.
+2. For each visible row extract:
+   - date: payment or statement date in MM/DD/YYYY or YYYY-MM-DD format as written. If date cannot be read, set to empty string "". DO NOT invent or guess dates.
+   - client_name: full client/insured name as visibly written.
+   - membership_or_policy_number: policy or member ID exactly as written, preserving all suffixes such as "-02" (e.g. "15127227-02", "6242957865-461212307", "PTH0019893"). If missing/unreadable, set to empty string "". NEVER invent policy numbers.
+   - carrier: exact insurance company/carrier name as visibly shown (e.g. "Slide", "Progressive", "Travelers", "Citizens", "Geico", "Patriot Select", etc.).
+   - transaction_code: transaction code if visibly shown (e.g. "COMM", "DV", "LA", "BOP"). If none, set to "".
+   - amount: commission dollar amount. Preserve negative amounts shown with parentheses or minus signs (e.g. "$45.55" -> 45.55, "$(178.50)" or "($178.50)" -> -178.50, "-50.00" -> -50.00).
+   - confidence: float between 0.0 and 1.0 reflecting extraction certainty. Use 1.0 for clearly readable complete rows. Use 0.4 - 0.6 if policy number or date is missing/unreadable.
+   - confidence_reason: string explanation if confidence < 0.8.
+3. Determine document_type: one of "structured_table", "whatsapp_chat", "statement_photo", "unknown".
+4. NEVER invent fictitious client names, policy numbers, or dates.
 5. Return ONLY a valid JSON object matching this exact schema:
 
 {
-  "document_type": "structured_table",
+  "document_type": "statement_photo",
   "rows": [
     {
       "date": "07/30/2026",
-      "client_name": "Denise Reinoso Chao",
-      "membership_or_policy_number": "SIC3415864",
-      "carrier": "Slide",
-      "transaction_code": "DV",
-      "amount": 230.76,
+      "client_name": "Maria del Carmen Perez Mena",
+      "membership_or_policy_number": "15127227-02",
+      "carrier": "Progressive",
+      "transaction_code": "COMM",
+      "amount": 125.50,
       "confidence": 1.0,
       "confidence_reason": "",
       "warnings": []
@@ -81,8 +77,8 @@ CRITICAL INSTRUCTIONS:
 }
 `;
 
-    // Active Flash multimodal models appropriate for document/image extraction
-    const modelsToTry = ['gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.5-flash'];
+    // Model configured specifically with gemini-2.5-flash-lite primary and active flash fallbacks
+    const modelsToTry = ['gemini-2.5-flash-lite', 'gemini-1.5-flash-002', 'gemini-1.5-flash-001', 'gemini-2.0-flash'];
 
     let lastErrorText = '';
     let lastStatus = 500;
@@ -94,7 +90,7 @@ CRITICAL INSTRUCTIONS:
       console.log(`[Gemini Vision] Endpoint: ${endpoint}`);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       try {
         const response = await fetch(`${endpoint}?key=${apiKey}`, {
@@ -117,7 +113,7 @@ CRITICAL INSTRUCTIONS:
             ],
             generationConfig: {
               response_mime_type: 'application/json',
-              temperature: 0.1,
+              temperature: 0.0,
             },
           }),
         });
@@ -147,22 +143,48 @@ CRITICAL INSTRUCTIONS:
 
           const rows: ExtractedCommissionRow[] = parsedRows.map((r, idx: number) => {
             const polNum = (r.membership_or_policy_number || '').trim();
-            const conf = typeof r.confidence === 'number' ? r.confidence : polNum ? 0.95 : 0.4;
-            const amt = typeof r.amount === 'number' ? r.amount : parseFloat(String(r.amount)) || 0;
+            const rawDate = (r.date || '').trim();
+            const dateMatch = rawDate.match(/\b(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\b/);
+            const payment_date = dateMatch ? dateMatch[1] : '';
+
+            let amt = 0;
+            if (typeof r.amount === 'number') {
+              amt = r.amount;
+            } else if (typeof r.amount === 'string') {
+              const rawAmt = r.amount.trim();
+              const isNegative = rawAmt.includes('(') || rawAmt.startsWith('-');
+              const cleanAmt = parseFloat(rawAmt.replace(/[^0-9.]/g, ''));
+              if (!isNaN(cleanAmt)) {
+                amt = isNegative ? -cleanAmt : cleanAmt;
+              }
+            }
+
+            let match_status: MatchStatus = 'UNMATCHED';
+            let conf = typeof r.confidence === 'number' ? r.confidence : polNum ? 0.95 : 0.4;
+            let confidence_reason = r.confidence_reason;
+
+            if (!payment_date) {
+              match_status = 'REVIEW';
+              conf = Math.min(conf, 0.5);
+              confidence_reason = confidence_reason || 'Payment date missing — verify before confirming';
+            } else if (!polNum) {
+              conf = Math.min(conf, 0.4);
+              confidence_reason = confidence_reason || 'Missing policy number in line';
+            }
 
             return {
               id: `vision-row-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`,
-              payment_date: r.date || new Date().toISOString().split('T')[0],
+              payment_date,
               client_name: r.client_name || 'Extracted Client',
               membership_or_policy_number: polNum,
               carrier: r.carrier || 'P&C Carrier',
               transaction_code: r.transaction_code || '',
               commission_amount: amt,
               confidence: Math.max(0.0, Math.min(1.0, conf)),
-              confidence_reason: r.confidence_reason || (polNum ? undefined : 'Missing policy number in extraction'),
+              confidence_reason,
               warnings: r.warnings || [],
-              raw_text: `${r.date || ''} ${r.client_name || ''} ${polNum} ${r.carrier || ''} ${amt}`,
-              match_status: 'UNMATCHED',
+              raw_text: `${payment_date} ${r.client_name || ''} ${polNum} ${r.carrier || ''} ${amt}`,
+              match_status,
             };
           });
 
@@ -186,3 +208,4 @@ CRITICAL INSTRUCTIONS:
     throw new Error(`Gemini Vision API error (${lastStatus}): ${lastErrorText}`);
   }
 }
+
