@@ -197,26 +197,52 @@ export default function DashboardPage() {
         email: session.user.email || 'Agent',
       });
 
-      // 2. Fetch Accessible Clients (Direct ownership + shared access)
-      const [{ data: ownedClientsData }, { data: sharedAccessData }] = await Promise.all([
+      // 2. Fetch Accessible Clients (Direct ownership + bidirectional scoped P&C shared access)
+      const [{ data: ownedClientsData }, { data: sharedAccessData, error: sharedAccessError }] = await Promise.all([
         supabase.from('clients').select('id, full_name, agent_id').eq('agent_id', userId),
-        supabase.from('agent_shared_access').select('owner_agent_id').eq('grantee_agent_id', userId)
+        supabase
+          .from('agent_shared_access')
+          .select('agent_id, shared_agent_id, scope')
+          .or(`agent_id.eq.${userId},shared_agent_id.eq.${userId}`)
+          .in('scope', ['property_casualty', 'all'])
       ]);
 
+      if (sharedAccessError) {
+        console.error('Dashboard shared P&C access query failed:', sharedAccessError);
+      }
+
       let allAccessibleClients: ClientRow[] = ownedClientsData || [];
-      let queryClientIds = allAccessibleClients.map((c) => c.id);
 
       if (sharedAccessData && sharedAccessData.length > 0) {
-        const sharedOwnerIds = sharedAccessData.map((s) => s.owner_agent_id);
-        const { data: sharedClients } = await supabase
-          .from('clients')
-          .select('id, full_name, agent_id')
-          .in('agent_id', sharedOwnerIds);
-        if (sharedClients && sharedClients.length > 0) {
-          allAccessibleClients = [...allAccessibleClients, ...sharedClients];
-          queryClientIds = Array.from(new Set(allAccessibleClients.map((c) => c.id)));
+        const sharedAgentIds = Array.from(
+          new Set(
+            sharedAccessData
+              .map((row) => row.agent_id === userId ? row.shared_agent_id : row.agent_id)
+              .filter((id): id is string => Boolean(id && id !== userId))
+          )
+        );
+
+        if (sharedAgentIds.length > 0) {
+          const { data: sharedClients, error: sharedClientsError } = await supabase
+            .from('clients')
+            .select('id, full_name, agent_id')
+            .in('agent_id', sharedAgentIds);
+
+          if (sharedClientsError) {
+            console.error('Dashboard shared P&C clients query failed:', sharedClientsError);
+          }
+
+          if (sharedClients && sharedClients.length > 0) {
+            const dedupedClients = new Map<string, ClientRow>();
+            [...allAccessibleClients, ...sharedClients].forEach((client) => {
+              dedupedClients.set(client.id, client);
+            });
+            allAccessibleClients = Array.from(dedupedClients.values());
+          }
         }
       }
+
+      const queryClientIds = Array.from(new Set(allAccessibleClients.map((c) => c.id)));
 
       setClients(allAccessibleClients);
 
