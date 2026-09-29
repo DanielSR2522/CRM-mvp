@@ -1,7 +1,32 @@
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
-import DOMPurify from 'isomorphic-dompurify';
+
+/**
+ * Server-safe HTML sanitizer that strips executable script tags, iframe, object, embed,
+ * inline event handlers (onerror, onload, onclick, etc.), and javascript: URIs
+ * without loading DOM/jsdom dependencies into Node serverless runtime.
+ */
+export function sanitizeServerHtml(rawHtml: string): string {
+  if (!rawHtml) return '';
+
+  let sanitized = rawHtml;
+
+  // 1. Strip dangerous tags
+  sanitized = sanitized.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  sanitized = sanitized.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
+  sanitized = sanitized.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
+  sanitized = sanitized.replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '');
+  sanitized = sanitized.replace(/<applet\b[^<]*(?:(?!<\/applet>)<[^<]*)*<\/applet>/gi, '');
+
+  // 2. Strip event handlers (on*="...")
+  sanitized = sanitized.replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+
+  // 3. Neutralize javascript: or vbscript: or data:text/html URIs
+  sanitized = sanitized.replace(/(href|src|action)\s*=\s*["']?\s*(?:javascript|vbscript|data:text\/html):[^"'\s>]+/gi, '$1="#"');
+
+  return sanitized;
+}
 
 export interface OfficeSlide {
   slideNumber: number;
@@ -29,7 +54,7 @@ export async function renderOfficeDocument(
   if (ext === 'docx' || mime.includes('wordprocessingml')) {
     try {
       const result = await mammoth.convertToHtml({ buffer });
-      const cleanHtml = DOMPurify.sanitize(result.value || '<p>Empty document</p>');
+      const cleanHtml = sanitizeServerHtml(result.value || '<p>Empty document</p>');
       return {
         type: 'html',
         html: `<div class="prose max-w-none p-6 font-sans text-slate-800 leading-relaxed bg-white rounded-xl shadow-xs border border-slate-100">${cleanHtml}</div>`,
@@ -60,7 +85,7 @@ export async function renderOfficeDocument(
       const sheet = workbook.Sheets[sheetName];
       if (sheet) {
         const tableHtml = XLSX.utils.sheet_to_html(sheet, { header: '', footer: '' });
-        const sanitizedTable = DOMPurify.sanitize(tableHtml);
+        const sanitizedTable = sanitizeServerHtml(tableHtml);
         combinedHtml += `
           <div style="margin-bottom: 2rem;">
             <div style="font-weight: 800; font-size: 0.875rem; color: #1e293b; margin-bottom: 0.75rem; padding-bottom: 0.35rem; border-bottom: 2px solid #e2e8f0; font-family: sans-serif;">
@@ -166,7 +191,7 @@ export async function extractDocxTextFallback(buffer: Buffer): Promise<string> {
       .trim();
 
     if (pText.length > 0) {
-      paragraphs.push(`<p>${DOMPurify.sanitize(pText)}</p>`);
+      paragraphs.push(`<p>${sanitizeServerHtml(pText)}</p>`);
     }
   }
 

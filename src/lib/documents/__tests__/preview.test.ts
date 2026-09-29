@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { fetchOfficeDocumentPreview } from '../fetch-preview.js';
-import { renderOfficeDocument } from '../office-preview.js';
+import { renderOfficeDocument, sanitizeServerHtml } from '../office-preview.js';
 
 describe('Office Document Preview Fetcher (fetchOfficeDocumentPreview)', () => {
   it('successfully fetches and returns JSON preview payload', async () => {
@@ -152,3 +152,29 @@ describe('Office Document Rendering Engine (renderOfficeDocument)', () => {
     );
   });
 });
+
+describe('Server-Safe HTML Sanitizer (sanitizeServerHtml)', () => {
+  it('strips script tags and inline event handlers while preserving safe HTML markup', () => {
+    const maliciousHtml = `
+      <div>
+        <h1>Document Title</h1>
+        <p style="color: blue;">Valid paragraph</p>
+        <script>alert('xss')</script>
+        <img src="x" onerror="alert('onerror xss')" />
+        <a href="javascript:alert('href xss')">Click here</a>
+        <iframe src="http://evilsite.com"></iframe>
+      </div>
+    `;
+
+    const cleaned = sanitizeServerHtml(maliciousHtml);
+
+    assert.match(cleaned, /<h1>Document Title<\/h1>/);
+    assert.match(cleaned, /<p style="color: blue;">Valid paragraph<\/p>/);
+    assert.doesNotMatch(cleaned, /<script>/);
+    assert.doesNotMatch(cleaned, /alert\('xss'\)/);
+    assert.doesNotMatch(cleaned, /onerror=/);
+    assert.doesNotMatch(cleaned, /javascript:/);
+    assert.doesNotMatch(cleaned, /<iframe/);
+  });
+});
+
