@@ -66,16 +66,59 @@ export async function GET(
         account_holder_name: '',
         has_bank_account: false,
         bank_name: '',
+        routing_number: '',
+        account_number: '',
         bank_last4: '',
         has_card: false,
         card_type: null,
+        card_number: '',
         card_last4: '',
         expiration_month: '',
         expiration_year: '',
       });
     }
 
-    // Return strictly non-secret masked payload to client browser
+    // Decrypt sensitive payment fields server-side for authorized owner
+    const { decryptPaymentField } = await import('@/lib/payments/encryption');
+
+    let routing_number = '';
+    let account_number = '';
+    let card_number = '';
+
+    if (paymentInfo.routing_number_encrypted) {
+      try {
+        const parsed = typeof paymentInfo.routing_number_encrypted === 'string'
+          ? JSON.parse(paymentInfo.routing_number_encrypted)
+          : paymentInfo.routing_number_encrypted;
+        routing_number = decryptPaymentField(parsed.ciphertext, parsed.iv, parsed.authTag, clientId, 'routing_number');
+      } catch (err) {
+        console.error('Failed to decrypt routing_number server-side:', err);
+      }
+    }
+
+    if (paymentInfo.account_number_encrypted) {
+      try {
+        const parsed = typeof paymentInfo.account_number_encrypted === 'string'
+          ? JSON.parse(paymentInfo.account_number_encrypted)
+          : paymentInfo.account_number_encrypted;
+        account_number = decryptPaymentField(parsed.ciphertext, parsed.iv, parsed.authTag, clientId, 'account_number');
+      } catch (err) {
+        console.error('Failed to decrypt account_number server-side:', err);
+      }
+    }
+
+    if (paymentInfo.card_number_encrypted) {
+      try {
+        const parsed = typeof paymentInfo.card_number_encrypted === 'string'
+          ? JSON.parse(paymentInfo.card_number_encrypted)
+          : paymentInfo.card_number_encrypted;
+        card_number = decryptPaymentField(parsed.ciphertext, parsed.iv, parsed.authTag, clientId, 'card_number');
+      } catch (err) {
+        console.error('Failed to decrypt card_number server-side:', err);
+      }
+    }
+
+    // Return payload with decrypted fields to authorized owner
     return NextResponse.json({
       id: paymentInfo.id,
       client_id: paymentInfo.client_id,
@@ -85,9 +128,12 @@ export async function GET(
       account_holder_name: paymentInfo.account_holder_name || '',
       has_bank_account: paymentInfo.has_bank_account,
       bank_name: paymentInfo.bank_name || '',
+      routing_number,
+      account_number,
       bank_last4: paymentInfo.bank_last4 || '',
       has_card: paymentInfo.has_card,
       card_type: paymentInfo.card_type || null,
+      card_number,
       card_last4: paymentInfo.card_last4 || '',
       expiration_month: paymentInfo.expiration_month || '',
       expiration_year: paymentInfo.expiration_year || '',
@@ -269,6 +315,39 @@ export async function POST(
       return NextResponse.json({ error: saveErr.message }, { status: 500 });
     }
 
+    const { decryptPaymentField } = await import('@/lib/payments/encryption');
+
+    let routing_number_out = '';
+    let account_number_out = '';
+    let card_number_out = '';
+
+    if (saved.routing_number_encrypted) {
+      try {
+        const parsed = typeof saved.routing_number_encrypted === 'string'
+          ? JSON.parse(saved.routing_number_encrypted)
+          : saved.routing_number_encrypted;
+        routing_number_out = decryptPaymentField(parsed.ciphertext, parsed.iv, parsed.authTag, clientId, 'routing_number');
+      } catch {}
+    }
+
+    if (saved.account_number_encrypted) {
+      try {
+        const parsed = typeof saved.account_number_encrypted === 'string'
+          ? JSON.parse(saved.account_number_encrypted)
+          : saved.account_number_encrypted;
+        account_number_out = decryptPaymentField(parsed.ciphertext, parsed.iv, parsed.authTag, clientId, 'account_number');
+      } catch {}
+    }
+
+    if (saved.card_number_encrypted) {
+      try {
+        const parsed = typeof saved.card_number_encrypted === 'string'
+          ? JSON.parse(saved.card_number_encrypted)
+          : saved.card_number_encrypted;
+        card_number_out = decryptPaymentField(parsed.ciphertext, parsed.iv, parsed.authTag, clientId, 'card_number');
+      } catch {}
+    }
+
     return NextResponse.json({
       id: saved.id,
       client_id: saved.client_id,
@@ -278,9 +357,12 @@ export async function POST(
       account_holder_name: saved.account_holder_name || '',
       has_bank_account: saved.has_bank_account,
       bank_name: saved.bank_name || '',
+      routing_number: routing_number_out,
+      account_number: account_number_out,
       bank_last4: saved.bank_last4 || '',
       has_card: saved.has_card,
       card_type: saved.card_type || null,
+      card_number: card_number_out,
       card_last4: saved.card_last4 || '',
       expiration_month: saved.expiration_month || '',
       expiration_year: saved.expiration_year || '',

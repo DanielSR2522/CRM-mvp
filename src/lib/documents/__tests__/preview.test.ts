@@ -125,6 +125,20 @@ describe('Office Document Rendering Engine (renderOfficeDocument)', () => {
     assert.match(result.html || '', /Jane Doe/);
   });
 
+  it('extracts text via XML fallback if primary renderer encounters incompatible structure', async () => {
+    const zip = new JSZip();
+    zip.file(
+      'word/document.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:t>Fallback Extracted Paragraph Text</w:t></w:p></w:body></w:document>'
+    );
+    const docxBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+    const { extractDocxTextFallback } = await import('../office-preview.js');
+    const fallbackHtml = await extractDocxTextFallback(docxBuffer);
+    assert.match(fallbackHtml, /Fallback Extracted Paragraph Text/);
+    assert.match(fallbackHtml, /<p>/);
+  });
+
   it('handles unsupported extension gracefully', async () => {
     const dummyBuffer = Buffer.from('PDF file content');
     await assert.rejects(

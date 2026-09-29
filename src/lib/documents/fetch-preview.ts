@@ -21,7 +21,11 @@ export async function fetchOfficeDocumentPreview(
     if (contentType.includes('application/json')) {
       try {
         const errData = await res.json();
-        errorMessage = errData.error || errorMessage;
+        if (errData.error && errData.code) {
+          errorMessage = `${errData.error} Code: ${errData.code}`;
+        } else if (errData.error) {
+          errorMessage = errData.error;
+        }
       } catch {}
     }
     throw new Error(errorMessage);

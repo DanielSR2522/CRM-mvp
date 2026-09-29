@@ -879,16 +879,17 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
       setHasBankAccount(Boolean(data.has_bank_account));
       setBankName(data.bank_name || '');
+      setBankRoutingNumber(data.routing_number || '');
+      setBankAccountNumber(data.account_number || '');
       setBankLast4(data.bank_last4 || '');
-      setIsReplacingBank(false);
 
       setHasCardMethod(Boolean(data.has_card));
       setCardTypeVal(data.card_type === 'Credit' ? 'Credit' : 'Debit');
+      setCardNumberVal(data.card_number || '');
       setCardLast4Val(data.card_last4 || '');
       setCardExpMonth(data.expiration_month || '');
       setCardExpYear(data.expiration_year || '');
       setCardCvvVal(''); // Ensure CVV is cleared
-      setIsReplacingCard(false);
     } catch (err: any) {
       console.error('loadPaymentInfo error:', err);
     } finally {
@@ -903,12 +904,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       setPaymentInfoError(null);
       setPaymentInfoSuccess(null);
 
-      if (hasBankAccount && !bankLast4 && (!bankName || !bankRoutingNumber || !bankAccountNumber)) {
-        throw new Error('Bank Name, Routing Number, and Account Number are required when enabling a new Bank Account');
+      if (hasBankAccount && (!bankName || !bankRoutingNumber || !bankAccountNumber)) {
+        throw new Error('Bank Name, Routing Number, and Account Number are required when enabling Bank Account');
       }
 
-      if (hasCardMethod && !cardLast4Val && (!cardNumberVal || !cardExpMonth || !cardExpYear)) {
-        throw new Error('Card Type, Card Number, Expiration Month, and Expiration Year are required when enabling a new Card');
+      if (hasCardMethod && (!cardNumberVal || !cardExpMonth || !cardExpYear)) {
+        throw new Error('Card Type, Card Number, Expiration Month, and Expiration Year are required when enabling Card');
       }
 
       const payload: any = {
@@ -918,20 +919,14 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
         account_holder_name: paymentHolderName,
         has_bank_account: hasBankAccount,
         bank_name: bankName,
+        routing_number: bankRoutingNumber,
+        account_number: bankAccountNumber,
         has_card: hasCardMethod,
         card_type: cardTypeVal,
+        card_number: cardNumberVal,
         expiration_month: cardExpMonth,
         expiration_year: cardExpYear,
       };
-
-      if (hasBankAccount && (isReplacingBank || !bankLast4)) {
-        payload.routing_number = bankRoutingNumber;
-        payload.account_number = bankAccountNumber;
-      }
-
-      if (hasCardMethod && (isReplacingCard || !cardLast4Val)) {
-        payload.card_number = cardNumberVal;
-      }
 
       const res = await fetch(`/api/clients/${clientId}/payment-info`, {
         method: 'POST',
@@ -952,19 +947,17 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
       setHasBankAccount(Boolean(saved.has_bank_account));
       setBankName(saved.bank_name || '');
+      setBankRoutingNumber(saved.routing_number || '');
+      setBankAccountNumber(saved.account_number || '');
       setBankLast4(saved.bank_last4 || '');
-      setBankRoutingNumber('');
-      setBankAccountNumber('');
-      setIsReplacingBank(false);
 
       setHasCardMethod(Boolean(saved.has_card));
       setCardTypeVal(saved.card_type === 'Credit' ? 'Credit' : 'Debit');
+      setCardNumberVal(saved.card_number || '');
       setCardLast4Val(saved.card_last4 || '');
       setCardExpMonth(saved.expiration_month || '');
       setCardExpYear(saved.expiration_year || '');
-      setCardNumberVal('');
       setCardCvvVal(''); // STRICT CVV RULE: Immediately discard transient CVV
-      setIsReplacingCard(false);
 
       setPaymentInfoSuccess('Payment information saved successfully');
     } catch (err: any) {
@@ -4556,23 +4549,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                           setBankRoutingNumber('');
                                           setBankAccountNumber('');
                                           setBankLast4('');
-                                          setIsReplacingBank(false);
                                         }
                                       }}
                                       className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
                                     />
                                     <span className="text-sm font-bold text-slate-800 font-sans">Bank Account</span>
                                   </label>
-
-                                  {hasBankAccount && bankLast4 && !isReplacingBank && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setIsReplacingBank(true)}
-                                      className="text-xs font-bold text-blue-600 hover:text-blue-800 font-sans"
-                                    >
-                                      Replace Bank Details
-                                    </button>
-                                  )}
                                 </div>
 
                                 {hasBankAccount && (
@@ -4585,57 +4567,31 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                         onChange={(e) => setBankName(e.target.value)}
                                         placeholder="e.g. Chase Bank"
                                         className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-sans"
-                                        required={hasBankAccount && !bankLast4}
+                                        required={hasBankAccount}
                                       />
                                     </div>
-
-                                    {bankLast4 && !isReplacingBank ? (
-                                      <>
-                                        <div>
-                                          <label className="block text-xs font-bold text-slate-500 mb-1">Routing Number</label>
-                                          <input
-                                            type="text"
-                                            value={formatMaskedRoutingNumber()}
-                                            disabled
-                                            className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-500 font-mono"
-                                          />
-                                        </div>
-                                        <div>
-                                          <label className="block text-xs font-bold text-slate-500 mb-1">Account Number</label>
-                                          <input
-                                            type="text"
-                                            value={formatMaskedAccountNumber(bankLast4)}
-                                            disabled
-                                            className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold"
-                                          />
-                                        </div>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <div>
-                                          <label className="block text-xs font-bold text-slate-500 mb-1">Routing Number</label>
-                                          <input
-                                            type="text"
-                                            value={bankRoutingNumber}
-                                            onChange={(e) => setBankRoutingNumber(e.target.value)}
-                                            placeholder="9-digit Routing Number"
-                                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono"
-                                            required={hasBankAccount && (isReplacingBank || !bankLast4)}
-                                          />
-                                        </div>
-                                        <div>
-                                          <label className="block text-xs font-bold text-slate-500 mb-1">Account Number</label>
-                                          <input
-                                            type="text"
-                                            value={bankAccountNumber}
-                                            onChange={(e) => setBankAccountNumber(e.target.value)}
-                                            placeholder="Account Number"
-                                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono"
-                                            required={hasBankAccount && (isReplacingBank || !bankLast4)}
-                                          />
-                                        </div>
-                                      </>
-                                    )}
+                                    <div>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">Routing Number</label>
+                                      <input
+                                        type="text"
+                                        value={bankRoutingNumber}
+                                        onChange={(e) => setBankRoutingNumber(e.target.value)}
+                                        placeholder="9-digit Routing Number"
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono"
+                                        required={hasBankAccount}
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">Account Number</label>
+                                      <input
+                                        type="text"
+                                        value={bankAccountNumber}
+                                        onChange={(e) => setBankAccountNumber(e.target.value)}
+                                        placeholder="Account Number"
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono font-bold"
+                                        required={hasBankAccount}
+                                      />
+                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -4657,23 +4613,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                           setCardExpMonth('');
                                           setCardExpYear('');
                                           setCardCvvVal('');
-                                          setIsReplacingCard(false);
                                         }
                                       }}
                                       className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
                                     />
                                     <span className="text-sm font-bold text-slate-800 font-sans">Card</span>
                                   </label>
-
-                                  {hasCardMethod && cardLast4Val && !isReplacingCard && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setIsReplacingCard(true)}
-                                      className="text-xs font-bold text-blue-600 hover:text-blue-800 font-sans"
-                                    >
-                                      Replace Card
-                                    </button>
-                                  )}
                                 </div>
 
                                 {hasCardMethod && (
@@ -4690,29 +4635,17 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                       </select>
                                     </div>
 
-                                    {cardLast4Val && !isReplacingCard ? (
-                                      <div>
-                                        <label className="block text-xs font-bold text-slate-500 mb-1">Card Number</label>
-                                        <input
-                                          type="text"
-                                          value={formatMaskedCardNumber(cardLast4Val)}
-                                          disabled
-                                          className="w-full bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono font-bold"
-                                        />
-                                      </div>
-                                    ) : (
-                                      <div>
-                                        <label className="block text-xs font-bold text-slate-500 mb-1">Card Number</label>
-                                        <input
-                                          type="text"
-                                          value={cardNumberVal}
-                                          onChange={(e) => setCardNumberVal(e.target.value)}
-                                          placeholder="16-digit Card Number"
-                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono"
-                                          required={hasCardMethod && (isReplacingCard || !cardLast4Val)}
-                                        />
-                                      </div>
-                                    )}
+                                    <div>
+                                      <label className="block text-xs font-bold text-slate-500 mb-1">Card Number</label>
+                                      <input
+                                        type="text"
+                                        value={cardNumberVal}
+                                        onChange={(e) => setCardNumberVal(e.target.value)}
+                                        placeholder="16-digit Card Number"
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono font-bold"
+                                        required={hasCardMethod}
+                                      />
+                                    </div>
 
                                     <div>
                                       <label className="block text-xs font-bold text-slate-500 mb-1">Expiration Date (MM/YYYY)</label>

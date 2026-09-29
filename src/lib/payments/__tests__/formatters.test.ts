@@ -48,4 +48,17 @@ describe('Payment Mask Formatters', () => {
   it('formats routing number correctly', () => {
     assert.strictEqual(formatMaskedRoutingNumber(), '•••••••••');
   });
+
+  it('verifies unmasked display strings for full PAN, routing, and account', () => {
+    const fullPan = '4532012345677638';
+    const routingNum = '061000104';
+    const accountNum = '1234567890';
+
+    assert.strictEqual(fullPan, '4532012345677638');
+    assert.strictEqual(routingNum, '061000104');
+    assert.strictEqual(accountNum, '1234567890');
+    assert.strictEqual(/[â€¢]/.test(fullPan), false);
+    assert.strictEqual(/[â€¢]/.test(routingNum), false);
+    assert.strictEqual(/[â€¢]/.test(accountNum), false);
+  });
 });

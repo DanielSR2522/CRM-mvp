@@ -27,13 +27,27 @@ export async function renderOfficeDocument(
 
   // 1. DOCX Handling
   if (ext === 'docx' || mime.includes('wordprocessingml')) {
-    const result = await mammoth.convertToHtml({ buffer });
-    const cleanHtml = DOMPurify.sanitize(result.value || '<p>Empty document</p>');
-    return {
-      type: 'html',
-      html: `<div class="prose max-w-none p-6 font-sans text-slate-800 leading-relaxed bg-white rounded-xl shadow-xs border border-slate-100">${cleanHtml}</div>`,
-      warning: result.messages.map((m) => m.message).join('; '),
-    };
+    try {
+      const result = await mammoth.convertToHtml({ buffer });
+      const cleanHtml = DOMPurify.sanitize(result.value || '<p>Empty document</p>');
+      return {
+        type: 'html',
+        html: `<div class="prose max-w-none p-6 font-sans text-slate-800 leading-relaxed bg-white rounded-xl shadow-xs border border-slate-100">${cleanHtml}</div>`,
+        warning: result.messages.map((m) => m.message).join('; '),
+      };
+    } catch (mammothErr: any) {
+      console.warn('Mammoth DOCX render failed, attempting XML fallback extractor:', mammothErr?.message);
+      try {
+        const fallbackHtml = await extractDocxTextFallback(buffer);
+        return {
+          type: 'html',
+          html: `<div class="prose max-w-none p-6 font-sans text-slate-800 leading-relaxed bg-white rounded-xl shadow-xs border border-slate-100">${fallbackHtml}</div>`,
+          warning: 'Rendered using fallback XML extractor',
+        };
+      } catch (fallbackErr: any) {
+        throw new Error(`DOCX_RENDER_FAILED: ${mammothErr?.message || 'Mammoth rendering failed'}`);
+      }
+    }
   }
 
   // 2. XLSX / XLS Handling
@@ -121,4 +135,44 @@ export async function renderOfficeDocument(
   }
 
   throw new Error('Unsupported Office document format for preview rendering.');
+}
+
+/**
+ * Fallback DOCX text extractor using JSZip to parse word/document.xml
+ * used when Mammoth rendering encounters incompatible structures.
+ */
+export async function extractDocxTextFallback(buffer: Buffer): Promise<string> {
+  const zip = await JSZip.loadAsync(buffer);
+  const documentXml = zip.files['word/document.xml'];
+  if (!documentXml) {
+    throw new Error('Invalid DOCX: missing word/document.xml');
+  }
+
+  const xmlText = await documentXml.async('string');
+  const paragraphMatches = Array.from(xmlText.matchAll(/<w:p(?:\s|>)([\s\S]*?)<\/w:p>/gi));
+  
+  const paragraphs: string[] = [];
+
+  for (const pMatch of paragraphMatches) {
+    const pContent = pMatch[1];
+    const textMatches = Array.from(pContent.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/gi)).map((m) => m[1]);
+    const pText = textMatches
+      .join('')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .trim();
+
+    if (pText.length > 0) {
+      paragraphs.push(`<p>${DOMPurify.sanitize(pText)}</p>`);
+    }
+  }
+
+  if (paragraphs.length === 0) {
+    return '<p>Empty document</p>';
+  }
+
+  return paragraphs.join('\n');
 }

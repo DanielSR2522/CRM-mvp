@@ -173,24 +173,86 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid document source.' }, { status: 400 });
     }
 
-    // Download document buffer directly from storage
-    const { data: fileData, error: downloadErr } = await supabase.storage.from(bucket).download(storagePath);
-    if (downloadErr || !fileData) {
-      return NextResponse.json({ error: 'Failed to retrieve document file.' }, { status: 404 });
+    const ext = (fileName.split('.').pop() || '').toLowerCase();
+    console.log('[DocumentPreview] Starting preview request:', {
+      docId,
+      source,
+      bucket,
+      storagePath,
+      fileName,
+      extension: ext,
+      mimeType,
+    });
+
+    // Try primary bucket first, then fallback candidates if 404 object not found
+    const candidateBuckets = Array.from(new Set([bucket, 'health-policy-documents', 'policy-documents', 'client-documents', 'life-documents', 'lead-files']));
+    let fileData: Blob | null = null;
+    let successfulBucket = bucket;
+
+    for (const b of candidateBuckets) {
+      const { data, error } = await supabase.storage.from(b).download(storagePath);
+      if (!error && data) {
+        fileData = data;
+        successfulBucket = b;
+        break;
+      }
+    }
+
+    if (!fileData) {
+      console.error('[DocumentPreview] Storage download failed across candidate buckets:', {
+        docId,
+        source,
+        attemptedBuckets: candidateBuckets,
+        storagePath,
+      });
+      return NextResponse.json({
+        error: 'Failed to retrieve document file from storage.',
+        code: 'DOC_DOWNLOAD_FAILED',
+      }, { status: 404 });
     }
 
     const arrayBuffer = await fileData.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
+    console.log('[DocumentPreview] Storage download successful:', {
+      docId,
+      successfulBucket,
+      sizeBytes: buffer.length,
+    });
+
     // Limit preview size to 15 MB for safe serverless execution
     if (buffer.length > 15 * 1024 * 1024) {
-      return NextResponse.json({ error: 'This document is too large to preview online.' }, { status: 413 });
+      console.warn('[DocumentPreview] Document exceeds 15 MB limit:', {
+        docId,
+        sizeBytes: buffer.length,
+      });
+      return NextResponse.json({
+        error: 'This document is too large to preview online.',
+        code: 'DOCUMENT_TOO_LARGE',
+      }, { status: 413 });
     }
 
-    const previewResult = await renderOfficeDocument(buffer, fileName, mimeType);
-    return NextResponse.json(previewResult);
+    try {
+      const previewResult = await renderOfficeDocument(buffer, fileName, mimeType);
+      return NextResponse.json(previewResult);
+    } catch (renderErr: any) {
+      console.error('[DocumentPreview] Office render error:', {
+        docId,
+        fileName,
+        extension: ext,
+        errorMessage: renderErr?.message,
+        stack: renderErr?.stack,
+      });
+      return NextResponse.json({
+        error: 'Unable to preview this Word document.',
+        code: 'DOCX_RENDER_FAILED',
+      }, { status: 500 });
+    }
   } catch (err: any) {
-    console.error('Office document preview error:', err);
-    return NextResponse.json({ error: 'Unable to generate a preview for this document.' }, { status: 500 });
+    console.error('[DocumentPreview] General preview route error:', err);
+    return NextResponse.json({
+      error: 'Unable to generate a preview for this document.',
+      code: 'DOCX_RENDER_FAILED',
+    }, { status: 500 });
   }
 }
