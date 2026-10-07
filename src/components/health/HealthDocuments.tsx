@@ -184,6 +184,10 @@ export default function HealthDocuments({
         type: 'success'
       });
 
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('client-documents-updated', { detail: { clientId } }));
+      }
+
       await loadDocsData();
     } catch (err) {
       console.error(err);
@@ -340,6 +344,10 @@ export default function HealthDocuments({
         description: `"${doc.display_name}" has been removed.`,
         type: 'success'
       });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('client-documents-updated', { detail: { clientId } }));
+      }
 
       await loadDocsData();
     } catch (err) {

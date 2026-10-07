@@ -86,7 +86,7 @@ export default function InlineEditableSSN({
 
       {isEditing ? (
         <div className="flex items-center gap-2" onKeyDown={handleKeyDown}>
-          <div className="w-full max-w-[260px]">
+          <div className="w-full flex-1 min-w-0">
             <SSNInput
               value={draftValue}
               onChange={(val) => {

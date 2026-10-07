@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { HealthPolicy, HealthTaxHouseholdMember, HealthPrimaryApplicant } from '@/lib/health/types';
+import { HealthPolicy, HealthPolicyStatus, HealthActionPending, HealthTaxHouseholdMember, HealthPrimaryApplicant } from '@/lib/health/types';
 import HealthSensitiveField from './HealthSensitiveField';
 import TaxMemberSensitiveField from './TaxMemberSensitiveField';
 import ClientIncomeInformationSection from '@/components/clients/ClientIncomeInformationSection';
@@ -19,8 +19,10 @@ import {
   updateAppliedMarketplacePlan,
   saveTaxMemberSecret,
   fetchHealthNotes,
-  fetchHealthDocuments
+  fetchHealthDocuments,
+  fetchClientDocumentsCount
 } from '@/lib/health/health-service';
+import { fetchClientNotesCount } from '@/lib/notes/notes-service';
 import { supabase } from '@/lib/supabaseClient';
 import {
   formatIsoToUsDate,
@@ -43,6 +45,57 @@ const calculateAgeFromDob = (dobStr: string | null | undefined): string => {
   const age = calculateAgeFromDateOnly(dobStr);
   return age !== null ? `${age} yrs` : '—';
 };
+
+function HorizontalFieldRow({
+  label,
+  value,
+  isEditing,
+  onStartEdit,
+  readOnly = false,
+  renderEditor,
+  valueClassName = '',
+}: {
+  label: string;
+  value: React.ReactNode;
+  isEditing?: boolean;
+  onStartEdit?: () => void;
+  readOnly?: boolean;
+  renderEditor?: () => React.ReactNode;
+  valueClassName?: string;
+}) {
+  const displayValue = value !== undefined && value !== null && value !== '' ? value : '—';
+
+  return (
+    <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+      <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">
+        {label}
+      </span>
+      {isEditing && renderEditor ? (
+        renderEditor()
+      ) : readOnly ? (
+        <span className={`text-[15px] font-normal text-[#253247] leading-snug select-none ${valueClassName}`}>
+          {displayValue}
+        </span>
+      ) : (
+        <div
+          onClick={onStartEdit}
+          className={`group inline-flex items-center gap-1.5 cursor-pointer text-[15px] font-normal text-[#253247] leading-snug transition-colors ${valueClassName}`}
+          title={`Click to edit ${label}`}
+        >
+          <span>{displayValue}</span>
+          <svg
+            className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface HealthPolicyFormProps {
   clientId: string;
@@ -70,8 +123,8 @@ export default function HealthPolicyForm({
   // Form State
   const [isActive, setIsActive] = useState(false);
   const [yearRenovation, setYearRenovation] = useState('');
-  const [policyStatus, setPolicyStatus] = useState<'Active' | 'Pending' | 'Cancelled'>('Pending');
-  const [actionPending, setActionPending] = useState<'Documents' | 'Verification' | 'Call To Marketplace' | 'Completed'>('Documents');
+  const [policyStatus, setPolicyStatus] = useState<HealthPolicyStatus | string>('Pending');
+  const [actionPending, setActionPending] = useState<HealthActionPending | string>('Documents');
   const [renovationStatus, setRenovationStatus] = useState<'New Policy 2026' | 'Renewal 2026' | 'Only Service' | null>('New Policy 2026');
   const [npn, setNpn] = useState('');
   const [authorizedNpns, setAuthorizedNpns] = useState<AgentNpn[]>([]);
@@ -134,9 +187,14 @@ export default function HealthPolicyForm({
   const [medicines, setMedicines] = useState('');
   const [specialist, setSpecialist] = useState('');
 
-  // Agency Info Summary Meta States
-  const [notesCount, setNotesCount] = useState<number>(0);
-  const [documentsCount, setDocumentsCount] = useState<number>(0);
+  // Agency Info Summary Meta States (Client-wide Notes & Documents Counters)
+  const [notesCount, setNotesCount] = useState<number | null>(null);
+  const [notesLoading, setNotesLoading] = useState<boolean>(true);
+  const [notesError, setNotesError] = useState<boolean>(false);
+
+  const [documentsCount, setDocumentsCount] = useState<number | null>(null);
+  const [documentsLoading, setDocumentsLoading] = useState<boolean>(true);
+  const [documentsError, setDocumentsError] = useState<boolean>(false);
   const [isConsentReady, setIsConsentReady] = useState<boolean>(false);
 
   // Agency Info Field-level Inline Edit State
@@ -172,6 +230,75 @@ export default function HealthPolicyForm({
   const [appliedMarketplacePlan, setAppliedMarketplacePlan] = useState<MarketplacePlanPreview | null>(null);
 
   const [saving, setSaving] = useState(false);
+
+  // Load Client-wide Notes Count
+  const loadClientNotesCount = React.useCallback(async () => {
+    if (!clientId) return;
+    setNotesLoading(true);
+    setNotesError(false);
+    try {
+      const count = await fetchClientNotesCount(clientId);
+      setNotesCount(count);
+    } catch (err) {
+      console.error('Failed to load client notes count:', err);
+      setNotesError(true);
+    } finally {
+      setNotesLoading(false);
+    }
+  }, [clientId]);
+
+  // Load Client-wide Documents Count
+  const loadClientDocumentsCount = React.useCallback(async () => {
+    if (!clientId) return;
+    setDocumentsLoading(true);
+    setDocumentsError(false);
+    try {
+      const count = await fetchClientDocumentsCount(clientId);
+      setDocumentsCount(count);
+    } catch (err) {
+      console.error('Failed to load client documents count:', err);
+      setDocumentsError(true);
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }, [clientId]);
+
+  // Initial & Client-switch trigger for notes and documents counts
+  useEffect(() => {
+    loadClientNotesCount();
+    loadClientDocumentsCount();
+  }, [clientId, loadClientNotesCount, loadClientDocumentsCount]);
+
+  // Real-time refresh listeners for creation/deletion/upload events across modules
+  useEffect(() => {
+    const handleNotesRefresh = () => {
+      loadClientNotesCount();
+    };
+
+    const handleDocsRefresh = () => {
+      loadClientDocumentsCount();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('client-notes-updated', handleNotesRefresh);
+      window.addEventListener('notes-updated', handleNotesRefresh);
+      window.addEventListener('crm:notes-refresh', handleNotesRefresh);
+      window.addEventListener('client-documents-updated', handleDocsRefresh);
+      window.addEventListener('documents-updated', handleDocsRefresh);
+      window.addEventListener('crm:documents-refresh', handleDocsRefresh);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('client-notes-updated', handleNotesRefresh);
+        window.removeEventListener('notes-updated', handleNotesRefresh);
+        window.removeEventListener('crm:notes-refresh', handleNotesRefresh);
+        window.removeEventListener('client-documents-updated', handleDocsRefresh);
+        window.removeEventListener('documents-updated', handleDocsRefresh);
+        window.removeEventListener('crm:documents-refresh', handleDocsRefresh);
+      }
+    };
+  }, [loadClientNotesCount, loadClientDocumentsCount]);
 
   // Sync Form values with initialPolicy (scheduled asynchronously to satisfy eslint rules)
   useEffect(() => {
@@ -257,16 +384,6 @@ export default function HealthPolicyForm({
         setConditions(initialPolicy.conditions || '');
         setMedicines(initialPolicy.medicines || '');
         setSpecialist(initialPolicy.specialist || '');
-
-        // Fetch Notes Count
-        fetchHealthNotes(initialPolicy.id)
-          .then(notes => setNotesCount(notes.length))
-          .catch(() => setNotesCount(0));
-
-        // Fetch Documents Count
-        fetchHealthDocuments(initialPolicy.id)
-          .then(docs => setDocumentsCount(docs.length))
-          .catch(() => setDocumentsCount(0));
 
         // Check Consent Ready status from signature_requests
         supabase
@@ -377,7 +494,42 @@ export default function HealthPolicyForm({
             console.error('Failed to load marketplace snapshot:', err);
           });
       } else {
-        // Default reset
+        // Default reset or restore transferred household draft from Personal Info
+        let initialDraftCount = 1;
+        const initialDraftMembers: { [key: number]: HealthTaxHouseholdMember } = {};
+        if (typeof window !== 'undefined' && clientId) {
+          try {
+            const rawDraft = sessionStorage.getItem(`health_household_draft_${clientId}`);
+            if (rawDraft) {
+              const parsedDraft = JSON.parse(rawDraft);
+              if (parsedDraft && typeof parsedDraft.taxMemberCount === 'number') {
+                initialDraftCount = Math.max(1, parsedDraft.taxMemberCount);
+                if (Array.isArray(parsedDraft.members)) {
+                  parsedDraft.members.forEach((m: any) => {
+                    if (m && m.member_number) {
+                      initialDraftMembers[m.member_number] = {
+                        health_policy_id: '',
+                        member_number: m.member_number,
+                        coverage: m.coverage !== false,
+                        full_name: m.full_name || '',
+                        date_of_birth: m.date_of_birth || null,
+                        relationship_to_applicant: m.relationship_to_applicant || 'Son',
+                        gender: m.gender || '',
+                        us_citizen: m.us_citizen !== false,
+                        uses_tobacco: !!m.uses_tobacco,
+                        annual_income: m.annual_income || 0,
+                        immigration_status: m.immigration_status || ''
+                      };
+                    }
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            console.error('Error loading household draft from sessionStorage:', e);
+          }
+        }
+
         setIsActive(false);
         setYearRenovation('2026');
         setPolicyStatus('Pending');
@@ -394,9 +546,9 @@ export default function HealthPolicyForm({
         setPlanCost(0);
         setTaxCredit(0);
         setEffectiveDate('');
-        setCoverageMembersCount(1);
-        setTaxMemberCount(1);
-        setTaxMembers({});
+        setCoverageMembersCount(initialDraftCount);
+        setTaxMemberCount(initialDraftCount);
+        setTaxMembers(initialDraftMembers);
         setPrimaryDoctor('');
         setPrimaryDoctorAddress('');
         setPrimaryDoctorPhone('');
@@ -920,6 +1072,11 @@ export default function HealthPolicyForm({
       });
 
       onSaved(savedPolicy);
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem(`health_household_draft_${clientId}`);
+        } catch {}
+      }
       hasLocalTaxChangesRef.current = false;
       setIsEditing(false);
     } catch (err) {
@@ -1047,363 +1204,399 @@ export default function HealthPolicyForm({
             </span>
           </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
-          {/* LEFT COLUMN */}
-          <div className="space-y-0">
-            {/* 1. Enrolled */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Enrolled</span>
-              {editingAgencyField === 'active' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
-                  <select
-                    value={agencyDraftValue ? 'Yes' : 'No'}
-                    onChange={e => setAgencyDraftValue(e.target.value === 'Yes')}
-                    className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-medium outline-none"
-                    autoFocus
-                    onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingAgencyField(null);
-                      if (e.key === 'Enter') handleInlineSaveAgencyField('active', agencyDraftValue);
-                    }}
-                  >
-                    <option value="Yes">Yes</option>
-                    <option value="No">No</option>
-                  </select>
-                  <button
-                    type="button"
-                    disabled={agencyFieldSaving}
-                    onClick={() => handleInlineSaveAgencyField('active', agencyDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
-                    title="Save"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingAgencyField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
-                    title="Cancel"
-                  >
-                    ✕
-                  </button>
-                  {agencyFieldError && <span className="text-rose-500 text-[10px] pl-1">{agencyFieldError}</span>}
-                </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingAgencyField('active');
-                    setAgencyDraftValue(isActive);
-                    setAgencyFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Enrolled"
-                >
-                  {isActive ? 'Yes' : 'No'}
-                </span>
-              )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
+            {/* LEFT COLUMN */}
+            <div className="space-y-0">
+              {/* 1. Active (formerly Enrolled) */}
+              <HorizontalFieldRow
+                label="Active"
+                value={isActive ? 'Yes' : 'No'}
+                isEditing={editingAgencyField === 'active'}
+                onStartEdit={() => {
+                  setEditingAgencyField('active');
+                  setAgencyDraftValue(isActive);
+                  setAgencyFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                    <select
+                      value={agencyDraftValue ? 'Yes' : 'No'}
+                      onChange={e => setAgencyDraftValue(e.target.value === 'Yes')}
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingAgencyField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveAgencyField('active', agencyDraftValue);
+                        }
+                      }}
+                    >
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                    <button
+                      type="button"
+                      disabled={agencyFieldSaving}
+                      onClick={() => handleInlineSaveAgencyField('active', agencyDraftValue)}
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
+                      title="Save"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingAgencyField(null)}
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                      title="Cancel"
+                    >
+                      ✕
+                    </button>
+                    {agencyFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{agencyFieldError}</span>}
+                  </div>
+                )}
+              />
+
+              {/* 2. Renovation Year 2026 */}
+              <HorizontalFieldRow
+                label="Renovation Year 2026"
+                value={yearRenovation || '2026'}
+                isEditing={editingAgencyField === 'yearRenovation'}
+                onStartEdit={() => {
+                  setEditingAgencyField('yearRenovation');
+                  setAgencyDraftValue(yearRenovation || '2026');
+                  setAgencyFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                    <input
+                      type="text"
+                      value={agencyDraftValue}
+                      onChange={e => setAgencyDraftValue(e.target.value)}
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingAgencyField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveAgencyField('yearRenovation', agencyDraftValue);
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={agencyFieldSaving}
+                      onClick={() => handleInlineSaveAgencyField('yearRenovation', agencyDraftValue)}
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
+                      title="Save"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingAgencyField(null)}
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                      title="Cancel"
+                    >
+                      ✕
+                    </button>
+                    {agencyFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{agencyFieldError}</span>}
+                  </div>
+                )}
+              />
+
+              {/* 3. Notes */}
+              <HorizontalFieldRow
+                label="Notes"
+                value={
+                  notesLoading ? (
+                    <span className="inline-flex items-center text-slate-400 text-sm">
+                      <svg className="animate-spin h-3.5 w-3.5 text-slate-400 mr-1.5 shrink-0" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Loading...
+                    </span>
+                  ) : notesError ? (
+                    <span className="text-rose-500 font-medium text-xs">Error</span>
+                  ) : (
+                    notesCount ?? 0
+                  )
+                }
+                readOnly={true}
+              />
+
+              {/* 4. Documents */}
+              <HorizontalFieldRow
+                label="Documents"
+                value={
+                  documentsLoading ? (
+                    <span className="inline-flex items-center text-slate-400 text-sm">
+                      <svg className="animate-spin h-3.5 w-3.5 text-slate-400 mr-1.5 shrink-0" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Loading...
+                    </span>
+                  ) : documentsError ? (
+                    <span className="text-rose-500 font-medium text-xs">Error</span>
+                  ) : (
+                    documentsCount ?? 0
+                  )
+                }
+                readOnly={true}
+              />
             </div>
 
-            {/* 2. Renovation Year 2026 */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Renovation Year 2026</span>
-              {editingAgencyField === 'yearRenovation' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
-                  <input
-                    type="text"
-                    value={agencyDraftValue}
-                    onChange={e => setAgencyDraftValue(e.target.value)}
-                    className="w-20 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
-                    autoFocus
-                    onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingAgencyField(null);
-                      if (e.key === 'Enter') handleInlineSaveAgencyField('yearRenovation', agencyDraftValue);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    disabled={agencyFieldSaving}
-                    onClick={() => handleInlineSaveAgencyField('yearRenovation', agencyDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
-                    title="Save"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingAgencyField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
-                    title="Cancel"
-                  >
-                    ✕
-                  </button>
-                  {agencyFieldError && <span className="text-rose-500 text-[10px] pl-1">{agencyFieldError}</span>}
-                </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingAgencyField('yearRenovation');
-                    setAgencyDraftValue(yearRenovation || '2026');
-                    setAgencyFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Renovation Year"
-                >
-                  {yearRenovation || '2026'}
-                </span>
-              )}
-            </div>
+            {/* RIGHT COLUMN */}
+            <div className="space-y-0">
+              {/* 1. Policy Status */}
+              <HorizontalFieldRow
+                label="Policy Status"
+                value={policyStatus || '—'}
+                isEditing={editingAgencyField === 'policyStatus'}
+                onStartEdit={() => {
+                  setEditingAgencyField('policyStatus');
+                  setAgencyDraftValue(policyStatus || 'Pending');
+                  setAgencyFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                    <select
+                      value={agencyDraftValue || 'Pending'}
+                      onChange={e => setAgencyDraftValue(e.target.value)}
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingAgencyField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveAgencyField('policyStatus', agencyDraftValue);
+                        }
+                      }}
+                    >
+                      {agencyDraftValue && !['Sold', 'Enrolled', 'Pending', 'Cancelled'].includes(agencyDraftValue) && (
+                        <option value={agencyDraftValue} disabled>{agencyDraftValue} (Legacy)</option>
+                      )}
+                      <option value="Sold">Sold</option>
+                      <option value="Enrolled">Enrolled</option>
+                      <option value="Pending">Pending</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
+                    <button
+                      type="button"
+                      disabled={agencyFieldSaving}
+                      onClick={() => handleInlineSaveAgencyField('policyStatus', agencyDraftValue)}
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
+                      title="Save"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingAgencyField(null)}
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                      title="Cancel"
+                    >
+                      ✕
+                    </button>
+                    {agencyFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{agencyFieldError}</span>}
+                  </div>
+                )}
+              />
 
-            {/* 3. Notes */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Notes</span>
-              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
-                {notesCount}
-              </span>
-            </div>
+              {/* 2. Action Pending */}
+              <HorizontalFieldRow
+                label="Action Pending"
+                value={actionPending || '—'}
+                isEditing={editingAgencyField === 'actionPending'}
+                onStartEdit={() => {
+                  setEditingAgencyField('actionPending');
+                  setAgencyDraftValue(actionPending || 'Documents');
+                  setAgencyFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                    <select
+                      value={agencyDraftValue || 'Documents'}
+                      onChange={e => setAgencyDraftValue(e.target.value)}
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingAgencyField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveAgencyField('actionPending', agencyDraftValue);
+                        }
+                      }}
+                    >
+                      <option value="Payment">Payment</option>
+                      <option value="Enroll">Enroll</option>
+                      <option value="Documents">Documents</option>
+                      <option value="Verification">Verification</option>
+                      <option value="Call To Marketplace">Call To Marketplace</option>
+                      <option value="Completed">Completed</option>
+                    </select>
+                    <button
+                      type="button"
+                      disabled={agencyFieldSaving}
+                      onClick={() => handleInlineSaveAgencyField('actionPending', agencyDraftValue)}
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
+                      title="Save"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingAgencyField(null)}
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                      title="Cancel"
+                    >
+                      ✕
+                    </button>
+                    {agencyFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{agencyFieldError}</span>}
+                  </div>
+                )}
+              />
 
-            {/* 4. Documents */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Documents</span>
-              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
-                {documentsCount}
-              </span>
-            </div>
-          </div>
+              {/* 3. Renovation Status */}
+              <HorizontalFieldRow
+                label="Renovation Status"
+                value={renovationStatus || '—'}
+                isEditing={editingAgencyField === 'renovationStatus'}
+                onStartEdit={() => {
+                  setEditingAgencyField('renovationStatus');
+                  setAgencyDraftValue(renovationStatus || 'New Policy 2026');
+                  setAgencyFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                    <select
+                      value={agencyDraftValue || 'New Policy 2026'}
+                      onChange={e => setAgencyDraftValue(e.target.value)}
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingAgencyField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveAgencyField('renovationStatus', agencyDraftValue);
+                        }
+                      }}
+                    >
+                      <option value="New Policy 2026">New Policy 2026</option>
+                      <option value="Renewal 2026">Renewal 2026</option>
+                      <option value="Only Service">Only Service</option>
+                    </select>
+                    <button
+                      type="button"
+                      disabled={agencyFieldSaving}
+                      onClick={() => handleInlineSaveAgencyField('renovationStatus', agencyDraftValue)}
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
+                      title="Save"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingAgencyField(null)}
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                      title="Cancel"
+                    >
+                      ✕
+                    </button>
+                    {agencyFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{agencyFieldError}</span>}
+                  </div>
+                )}
+              />
 
-          {/* RIGHT COLUMN */}
-          <div className="space-y-0">
-            {/* 1. Policy Status */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Policy Status</span>
-              {editingAgencyField === 'policyStatus' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
-                  <select
-                    value={agencyDraftValue || 'Pending'}
-                    onChange={e => setAgencyDraftValue(e.target.value)}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
-                    autoFocus
-                    onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingAgencyField(null);
-                      if (e.key === 'Enter') handleInlineSaveAgencyField('policyStatus', agencyDraftValue);
-                    }}
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Cancelled">Cancelled</option>
-                  </select>
-                  <button
-                    type="button"
-                    disabled={agencyFieldSaving}
-                    onClick={() => handleInlineSaveAgencyField('policyStatus', agencyDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
-                    title="Save"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingAgencyField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
-                    title="Cancel"
-                  >
-                    ✕
-                  </button>
-                  {agencyFieldError && <span className="text-rose-500 text-[10px] pl-1">{agencyFieldError}</span>}
-                </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingAgencyField('policyStatus');
-                    setAgencyDraftValue(policyStatus || 'Pending');
-                    setAgencyFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Policy Status"
-                >
-                  {policyStatus || '—'}
-                </span>
-              )}
-            </div>
+              {/* 4. Agent */}
+              <HorizontalFieldRow
+                label="Agent"
+                value={agentName || '—'}
+                readOnly={true}
+              />
 
-            {/* 2. Action Pending */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Action Pending</span>
-              {editingAgencyField === 'actionPending' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
-                  <select
-                    value={agencyDraftValue || 'Documents'}
-                    onChange={e => setAgencyDraftValue(e.target.value)}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
-                    autoFocus
-                    onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingAgencyField(null);
-                      if (e.key === 'Enter') handleInlineSaveAgencyField('actionPending', agencyDraftValue);
-                    }}
-                  >
-                    <option value="Documents">Documents</option>
-                    <option value="Verification">Verification</option>
-                    <option value="Call To Marketplace">Call To Marketplace</option>
-                    <option value="Completed">Completed</option>
-                  </select>
-                  <button
-                    type="button"
-                    disabled={agencyFieldSaving}
-                    onClick={() => handleInlineSaveAgencyField('actionPending', agencyDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
-                    title="Save"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingAgencyField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
-                    title="Cancel"
-                  >
-                    ✕
-                  </button>
-                  {agencyFieldError && <span className="text-rose-500 text-[10px] pl-1">{agencyFieldError}</span>}
-                </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingAgencyField('actionPending');
-                    setAgencyDraftValue(actionPending || 'Documents');
-                    setAgencyFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Action Pending"
-                >
-                  {actionPending || '—'}
-                </span>
-              )}
-            </div>
+              {/* 5. NPN */}
+              <HorizontalFieldRow
+                label="NPN"
+                value={npnSelectOptions.find(o => o.value === npn)?.label || npn || '—'}
+                isEditing={editingAgencyField === 'npn'}
+                onStartEdit={() => {
+                  setEditingAgencyField('npn');
+                  setAgencyDraftValue(npn || (npnSelectOptions[0]?.value ?? ''));
+                  setAgencyFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                    <select
+                      value={agencyDraftValue}
+                      onChange={e => setAgencyDraftValue(e.target.value)}
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingAgencyField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveAgencyField('npn', agencyDraftValue);
+                        }
+                      }}
+                    >
+                      {npnSelectOptions.map(opt => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={agencyFieldSaving}
+                      onClick={() => handleInlineSaveAgencyField('npn', agencyDraftValue)}
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
+                      title="Save"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingAgencyField(null)}
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                      title="Cancel"
+                    >
+                      ✕
+                    </button>
+                    {agencyFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{agencyFieldError}</span>}
+                  </div>
+                )}
+              />
 
-            {/* 3. Renovation Status */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Renovation Status</span>
-              {editingAgencyField === 'renovationStatus' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
-                  <select
-                    value={agencyDraftValue}
-                    onChange={e => setAgencyDraftValue(e.target.value)}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
-                    autoFocus
-                    onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingAgencyField(null);
-                      if (e.key === 'Enter') handleInlineSaveAgencyField('renovationStatus', agencyDraftValue);
-                    }}
-                  >
-                    <option value="New Policy 2026">New Policy 2026</option>
-                    <option value="Renewal 2026">Renewal 2026</option>
-                    <option value="Only Service">Only Service</option>
-                  </select>
-                  <button
-                    type="button"
-                    disabled={agencyFieldSaving}
-                    onClick={() => handleInlineSaveAgencyField('renovationStatus', agencyDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
-                    title="Save"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingAgencyField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
-                    title="Cancel"
-                  >
-                    ✕
-                  </button>
-                  {agencyFieldError && <span className="text-rose-500 text-[10px] pl-1">{agencyFieldError}</span>}
-                </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingAgencyField('renovationStatus');
-                    setAgencyDraftValue(renovationStatus);
-                    setAgencyFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Renovation Status"
-                >
-                  {renovationStatus || '—'}
-                </span>
-              )}
-            </div>
-
-            {/* 4. Agent */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Agent</span>
-              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
-                {agentName || '—'}
-              </span>
-            </div>
-
-            {/* 5. NPN */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">NPN</span>
-              {editingAgencyField === 'npn' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
-                  <select
-                    value={agencyDraftValue}
-                    onChange={e => setAgencyDraftValue(e.target.value)}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] font-normal outline-none cursor-pointer"
-                    autoFocus
-                    onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingAgencyField(null);
-                      if (e.key === 'Enter') handleInlineSaveAgencyField('npn', agencyDraftValue);
-                    }}
-                  >
-                    {npnSelectOptions.map(opt => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    disabled={agencyFieldSaving}
-                    onClick={() => handleInlineSaveAgencyField('npn', agencyDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
-                    title="Save"
-                  >
-                    ✓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingAgencyField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
-                    title="Cancel"
-                  >
-                    ✕
-                  </button>
-                  {agencyFieldError && <span className="text-rose-500 text-[10px] pl-1">{agencyFieldError}</span>}
-                </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingAgencyField('npn');
-                    setAgencyDraftValue(npn || (npnSelectOptions[0]?.value ?? ''));
-                    setAgencyFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit NPN"
-                >
-                  {npnSelectOptions.find(o => o.value === npn)?.label || npn || '—'}
-                </span>
-              )}
-            </div>
-
-            {/* 6. Consent Ready */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Consent Ready</span>
-              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
-                {isConsentReady ? 'Yes' : 'No'}
-              </span>
+              {/* 6. Consent Ready */}
+              <HorizontalFieldRow
+                label="Consent Ready"
+                value={isConsentReady ? 'Yes' : 'No'}
+                readOnly={true}
+              />
             </div>
           </div>
         </div>
-      </div>
 
         {/* SECTION 2 — Health Information 2026 */}
         <div>
@@ -1420,27 +1613,40 @@ export default function HealthPolicyForm({
             {/* LEFT COLUMN */}
             <div className="space-y-0">
               {/* 1. Company 2026 */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Company 2026</span>
-                {editingHealthField === 'company2026' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="Company 2026"
+                value={company2026}
+                isEditing={editingHealthField === 'company2026'}
+                onStartEdit={() => {
+                  setEditingHealthField('company2026');
+                  setHealthDraftValue(company2026);
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <input
                       type="text"
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
                       placeholder="Company..."
-                      className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('company2026', healthDraftValue);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveHealthField('company2026', healthDraftValue);
+                        }
                       }}
                     />
                     <button
                       type="button"
                       disabled={healthFieldSaving}
                       onClick={() => handleInlineSaveHealthField('company2026', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                       title="Save"
                     >
                       ✓
@@ -1448,41 +1654,42 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
+                    {healthFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{healthFieldError}</span>}
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('company2026');
-                      setHealthDraftValue(company2026);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Company 2026"
-                  >
-                    {company2026 || '—'}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 2. Type Plan */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Type Plan</span>
-                {editingHealthField === 'typePlan' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="Type Plan"
+                value={typePlan}
+                isEditing={editingHealthField === 'typePlan'}
+                onStartEdit={() => {
+                  setEditingHealthField('typePlan');
+                  setHealthDraftValue(typePlan);
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <select
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
-                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('typePlan', healthDraftValue);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveHealthField('typePlan', healthDraftValue);
+                        }
                       }}
                     >
                       <option value="">Select Plan Type...</option>
@@ -1496,7 +1703,7 @@ export default function HealthPolicyForm({
                       type="button"
                       disabled={healthFieldSaving}
                       onClick={() => handleInlineSaveHealthField('typePlan', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                       title="Save"
                     >
                       ✓
@@ -1504,50 +1711,51 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
+                    {healthFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{healthFieldError}</span>}
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('typePlan');
-                      setHealthDraftValue(typePlan);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Type Plan"
-                  >
-                    {typePlan || '—'}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 3. Plan ID */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Plan ID</span>
-                {editingHealthField === 'planId' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="Plan ID"
+                value={planId}
+                isEditing={editingHealthField === 'planId'}
+                onStartEdit={() => {
+                  setEditingHealthField('planId');
+                  setHealthDraftValue(planId);
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <input
                       type="text"
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
                       placeholder="Plan ID..."
-                      className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('planId', healthDraftValue);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveHealthField('planId', healthDraftValue);
+                        }
                       }}
                     />
                     <button
                       type="button"
                       disabled={healthFieldSaving}
                       onClick={() => handleInlineSaveHealthField('planId', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                       title="Save"
                     >
                       ✓
@@ -1555,50 +1763,51 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
+                    {healthFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{healthFieldError}</span>}
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('planId');
-                      setHealthDraftValue(planId);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Plan ID"
-                  >
-                    {planId || '—'}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 4. Plan Name */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Plan Name</span>
-                {editingHealthField === 'planName' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="Plan Name"
+                value={planName}
+                isEditing={editingHealthField === 'planName'}
+                onStartEdit={() => {
+                  setEditingHealthField('planName');
+                  setHealthDraftValue(planName);
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <input
                       type="text"
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
                       placeholder="Plan Name..."
-                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[260px]"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('planName', healthDraftValue);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveHealthField('planName', healthDraftValue);
+                        }
                       }}
                     />
                     <button
                       type="button"
                       disabled={healthFieldSaving}
                       onClick={() => handleInlineSaveHealthField('planName', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                       title="Save"
                     >
                       ✓
@@ -1606,50 +1815,51 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
+                    {healthFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{healthFieldError}</span>}
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('planName');
-                      setHealthDraftValue(planName);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors break-words max-w-[260px]"
-                    title={planName || 'Click to edit Plan Name'}
-                  >
-                    {planName || '—'}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 5. No. Membership */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">No. Membership</span>
-                {editingHealthField === 'noMembership' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="No. Membership"
+                value={noMembership}
+                isEditing={editingHealthField === 'noMembership'}
+                onStartEdit={() => {
+                  setEditingHealthField('noMembership');
+                  setHealthDraftValue(noMembership);
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <input
                       type="text"
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
                       placeholder="Membership No..."
-                      className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('noMembership', healthDraftValue);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveHealthField('noMembership', healthDraftValue);
+                        }
                       }}
                     />
                     <button
                       type="button"
                       disabled={healthFieldSaving}
                       onClick={() => handleInlineSaveHealthField('noMembership', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                       title="Save"
                     >
                       ✓
@@ -1657,51 +1867,52 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
+                    {healthFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{healthFieldError}</span>}
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('noMembership');
-                      setHealthDraftValue(noMembership);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Membership Number"
-                  >
-                    {noMembership || '—'}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 6. Plan Cost */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Plan Cost</span>
-                {editingHealthField === 'planCost' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="Plan Cost"
+                value={`$${Number(planCost || 0).toFixed(2)}`}
+                isEditing={editingHealthField === 'planCost'}
+                onStartEdit={() => {
+                  setEditingHealthField('planCost');
+                  setHealthDraftValue(planCost);
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <input
                       type="number"
                       step="0.01"
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
                       placeholder="0.00"
-                      className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('planCost', healthDraftValue);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveHealthField('planCost', healthDraftValue);
+                        }
                       }}
                     />
                     <button
                       type="button"
                       disabled={healthFieldSaving}
                       onClick={() => handleInlineSaveHealthField('planCost', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                       title="Save"
                     >
                       ✓
@@ -1709,51 +1920,52 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
+                    {healthFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{healthFieldError}</span>}
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('planCost');
-                      setHealthDraftValue(planCost);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Plan Cost"
-                  >
-                    ${Number(planCost || 0).toFixed(2)}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 7. Tax Credit */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Tax Credit</span>
-                {editingHealthField === 'taxCredit' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="Tax Credit"
+                value={`$${Number(taxCredit || 0).toFixed(2)}`}
+                isEditing={editingHealthField === 'taxCredit'}
+                onStartEdit={() => {
+                  setEditingHealthField('taxCredit');
+                  setHealthDraftValue(taxCredit);
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <input
                       type="number"
                       step="0.01"
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
                       placeholder="0.00"
-                      className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('taxCredit', healthDraftValue);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveHealthField('taxCredit', healthDraftValue);
+                        }
                       }}
                     />
                     <button
                       type="button"
                       disabled={healthFieldSaving}
                       onClick={() => handleInlineSaveHealthField('taxCredit', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                       title="Save"
                     >
                       ✓
@@ -1761,58 +1973,58 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
+                    {healthFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{healthFieldError}</span>}
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('taxCredit');
-                      setHealthDraftValue(taxCredit);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Tax Credit"
-                  >
-                    ${Number(taxCredit || 0).toFixed(2)}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 8. Monthly Premium */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Monthly Premium</span>
-                <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
-                  ${monthlyPremium}
-                </span>
-              </div>
+              <HorizontalFieldRow
+                label="Monthly Premium"
+                value={`$${monthlyPremium}`}
+                readOnly={true}
+              />
 
               {/* 9. Effective Date */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Effective Date</span>
-                {editingHealthField === 'effectiveDate' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="Effective Date"
+                value={effectiveDate ? formatDateForDisplay(effectiveDate) : ''}
+                isEditing={editingHealthField === 'effectiveDate'}
+                onStartEdit={() => {
+                  setEditingHealthField('effectiveDate');
+                  setHealthDraftValue(effectiveDate ? formatDateForDisplay(effectiveDate) : '');
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <input
                       type="text"
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(formatAsDateInput(e.target.value))}
                       placeholder="MM/DD/YYYY"
-                      className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
+                      className="h-[34px] w-full flex-1 min-w-0 bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('effectiveDate', healthDraftValue);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveHealthField('effectiveDate', healthDraftValue);
+                        }
                       }}
                     />
                     <button
                       type="button"
                       disabled={healthFieldSaving}
                       onClick={() => handleInlineSaveHealthField('effectiveDate', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                       title="Save"
                     >
                       ✓
@@ -1820,61 +2032,61 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
+                    {healthFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{healthFieldError}</span>}
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('effectiveDate');
-                      setHealthDraftValue(effectiveDate ? formatDateForDisplay(effectiveDate) : '');
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Effective Date"
-                  >
-                    {effectiveDate ? formatDateForDisplay(effectiveDate) : '—'}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 10. Coverage Members Count */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Coverage Members Count</span>
-                <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
-                  {calculatedCoverageMembersCount}
-                </span>
-              </div>
+              <HorizontalFieldRow
+                label="Coverage Members Count"
+                value={calculatedCoverageMembersCount}
+                readOnly={true}
+              />
             </div>
 
             {/* RIGHT COLUMN */}
             <div className="space-y-0">
               {/* 1. Application Number 2026 */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Application Number 2026</span>
-                {editingHealthField === 'applicationNumber' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="Application Number 2026"
+                value={applicationNumber}
+                isEditing={editingHealthField === 'applicationNumber'}
+                onStartEdit={() => {
+                  setEditingHealthField('applicationNumber');
+                  setHealthDraftValue(applicationNumber);
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <input
                       type="text"
                       value={healthDraftValue}
                       onChange={e => setHealthDraftValue(e.target.value)}
                       placeholder="Application No..."
-                      className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('applicationNumber', healthDraftValue);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveHealthField('applicationNumber', healthDraftValue);
+                        }
                       }}
                     />
                     <button
                       type="button"
                       disabled={healthFieldSaving}
                       onClick={() => handleInlineSaveHealthField('applicationNumber', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                       title="Save"
                     >
                       ✓
@@ -1882,41 +2094,42 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
+                    {healthFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{healthFieldError}</span>}
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('applicationNumber');
-                      setHealthDraftValue(applicationNumber);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Application Number"
-                  >
-                    {applicationNumber || '—'}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 2. Marketplace Account */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Marketplace Account</span>
-                {editingHealthField === 'marketplaceAccount' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="Marketplace Account"
+                value={marketplaceAccount ? 'Yes' : 'No'}
+                isEditing={editingHealthField === 'marketplaceAccount'}
+                onStartEdit={() => {
+                  setEditingHealthField('marketplaceAccount');
+                  setHealthDraftValue(marketplaceAccount);
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <select
                       value={healthDraftValue ? 'Yes' : 'No'}
                       onChange={e => setHealthDraftValue(e.target.value === 'Yes')}
-                      className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-medium outline-none"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') handleInlineSaveHealthField('marketplaceAccount', healthDraftValue);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          handleInlineSaveHealthField('marketplaceAccount', healthDraftValue);
+                        }
                       }}
                     >
                       <option value="Yes">Yes</option>
@@ -1926,7 +2139,7 @@ export default function HealthPolicyForm({
                       type="button"
                       disabled={healthFieldSaving}
                       onClick={() => handleInlineSaveHealthField('marketplaceAccount', healthDraftValue)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                       title="Save"
                     >
                       ✓
@@ -1934,27 +2147,15 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
-                    {healthFieldError && <span className="text-rose-500 text-[10px] pl-1">{healthFieldError}</span>}
+                    {healthFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{healthFieldError}</span>}
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('marketplaceAccount');
-                      setHealthDraftValue(marketplaceAccount);
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Marketplace Account"
-                  >
-                    {marketplaceAccount ? 'Yes' : 'No'}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 3. Conditional Marketplace Credentials */}
               {marketplaceAccount && (
@@ -1988,18 +2189,30 @@ export default function HealthPolicyForm({
               )}
 
               {/* 4. Company Account Toggle */}
-              <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Company Account</span>
-                {editingHealthField === 'companyAccount' ? (
-                  <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <HorizontalFieldRow
+                label="Company Account"
+                value={companyAccount ? 'Yes' : 'No'}
+                isEditing={editingHealthField === 'companyAccount'}
+                onStartEdit={() => {
+                  setEditingHealthField('companyAccount');
+                  setHealthFieldError(null);
+                }}
+                renderEditor={() => (
+                  <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                     <select
                       value={companyAccount ? 'Yes' : 'No'}
                       onChange={e => setCompanyAccount(e.target.value === 'Yes')}
-                      className="bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-medium outline-none"
+                      className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === 'Escape') setEditingHealthField(null);
-                        if (e.key === 'Enter') setEditingHealthField(null);
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          setEditingHealthField(null);
+                        }
                       }}
                     >
                       <option value="Yes">Yes</option>
@@ -2008,7 +2221,7 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                      className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                       title="Save"
                     >
                       ✓
@@ -2016,25 +2229,14 @@ export default function HealthPolicyForm({
                     <button
                       type="button"
                       onClick={() => setEditingHealthField(null)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                      className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                       title="Cancel"
                     >
                       ✕
                     </button>
                   </div>
-                ) : (
-                  <span
-                    onClick={() => {
-                      setEditingHealthField('companyAccount');
-                      setHealthFieldError(null);
-                    }}
-                    className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                    title="Click to edit Company Account"
-                  >
-                    {companyAccount ? 'Yes' : 'No'}
-                  </span>
                 )}
-              </div>
+              />
 
               {/* 5. Conditional Company Credentials */}
               {companyAccount && (
@@ -2082,18 +2284,27 @@ export default function HealthPolicyForm({
           {/* LEFT COLUMN */}
           <div className="space-y-0">
             {/* 1. Coverage */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Coverage</span>
-              {editingHealthField === 'applicantCoverage' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="Coverage"
+              value={applicantCoverage ? 'Yes' : 'No'}
+              isEditing={editingHealthField === 'applicantCoverage'}
+              onStartEdit={() => setEditingHealthField('applicantCoverage')}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <select
                     value={applicantCoverage ? 'Yes' : 'No'}
                     onChange={e => setApplicantCoverage(e.target.value === 'Yes')}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingHealthField(null);
-                      if (e.key === 'Enter') setEditingHealthField(null);
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingHealthField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        setEditingHealthField(null);
+                      }
                     }}
                   >
                     <option value="Yes">Yes</option>
@@ -2102,7 +2313,7 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingHealthField(null)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                     title="Save"
                   >
                     ✓
@@ -2110,44 +2321,49 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingHealthField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
                 </div>
-              ) : (
-                <span
-                  onClick={() => setEditingHealthField('applicantCoverage')}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Coverage status"
-                >
-                  {applicantCoverage ? 'Yes' : 'No'}
-                </span>
               )}
-            </div>
+            />
 
             {/* 2. Applicant Name */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Applicant Name</span>
-              {editingApplicantField === 'full_name' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="Applicant Name"
+              value={primaryApplicant?.fullName}
+              isEditing={editingApplicantField === 'full_name'}
+              onStartEdit={() => {
+                setEditingApplicantField('full_name');
+                setApplicantDraftValue(primaryApplicant?.fullName || '');
+                setApplicantFieldError(null);
+              }}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <input
                     type="text"
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[260px]"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingApplicantField(null);
-                      if (e.key === 'Enter') handleInlineSaveApplicantField('full_name', applicantDraftValue);
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingApplicantField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleInlineSaveApplicantField('full_name', applicantDraftValue);
+                      }
                     }}
                   />
                   <button
                     type="button"
                     disabled={applicantFieldSaving}
                     onClick={() => handleInlineSaveApplicantField('full_name', applicantDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                     title="Save"
                   >
                     ✓
@@ -2155,43 +2371,42 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingApplicantField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
-                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                  {applicantFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{applicantFieldError}</span>}
                 </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingApplicantField('full_name');
-                    setApplicantDraftValue(primaryApplicant?.fullName || '');
-                    setApplicantFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Applicant Name"
-                >
-                  {primaryApplicant?.fullName || '—'}
-                </span>
               )}
-            </div>
+            />
 
             {/* 3. DOB */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">DOB</span>
-              {editingApplicantField === 'date_of_birth' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="DOB"
+              value={formatDateForDisplay(primaryApplicant?.dateOfBirth)}
+              isEditing={editingApplicantField === 'date_of_birth'}
+              onStartEdit={() => {
+                setEditingApplicantField('date_of_birth');
+                setApplicantDraftValue(primaryApplicant?.dateOfBirth ? formatDateForDisplay(primaryApplicant.dateOfBirth) : '');
+                setApplicantFieldError(null);
+              }}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <input
                     type="text"
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(formatAsDateInput(e.target.value))}
                     placeholder="MM/DD/YYYY"
-                    className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
+                    className="h-[34px] w-full flex-1 min-w-0 bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingApplicantField(null);
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingApplicantField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
                         const parsedIso = parseDisplayDate(applicantDraftValue);
                         if (applicantDraftValue && !parsedIso) {
                           setApplicantFieldError('Invalid date (MM/DD/YYYY)');
@@ -2212,7 +2427,7 @@ export default function HealthPolicyForm({
                       }
                       handleInlineSaveApplicantField('date_of_birth', parsedIso);
                     }}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                     title="Save"
                   >
                     ✓
@@ -2220,58 +2435,59 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingApplicantField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
-                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                  {applicantFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{applicantFieldError}</span>}
                 </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingApplicantField('date_of_birth');
-                    setApplicantDraftValue(primaryApplicant?.dateOfBirth ? formatDateForDisplay(primaryApplicant.dateOfBirth) : '');
-                    setApplicantFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Date of Birth"
-                >
-                  {formatDateForDisplay(primaryApplicant?.dateOfBirth)}
-                </span>
               )}
-            </div>
+            />
 
             {/* 4. Age */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Age</span>
-              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
-                {primaryApplicant?.dateOfBirth ? calculateAgeFromDob(primaryApplicant.dateOfBirth) : '—'}
-              </span>
-            </div>
+            <HorizontalFieldRow
+              label="Age"
+              value={primaryApplicant?.dateOfBirth ? calculateAgeFromDob(primaryApplicant.dateOfBirth) : '—'}
+              readOnly={true}
+            />
 
             {/* 5. SSN (Visible unmasked) */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">SSN</span>
-              {editingApplicantField === 'ssn' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="SSN"
+              value={primaryApplicant?.ssn ? formatSsnInput(primaryApplicant.ssn) : '—'}
+              valueClassName="font-mono"
+              isEditing={editingApplicantField === 'ssn'}
+              onStartEdit={() => {
+                setEditingApplicantField('ssn');
+                setApplicantDraftValue(primaryApplicant?.ssn ? formatSsnInput(primaryApplicant.ssn) : '');
+                setApplicantFieldError(null);
+              }}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <input
                     type="text"
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(formatSsnInput(e.target.value))}
                     placeholder="XXX-XX-XXXX"
-                    className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold font-mono outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-mono w-full flex-1 min-w-0"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingApplicantField(null);
-                      if (e.key === 'Enter') handleInlineSaveApplicantField('ssn', applicantDraftValue.replace(/\D/g, ''));
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingApplicantField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleInlineSaveApplicantField('ssn', applicantDraftValue.replace(/\D/g, ''));
+                      }
                     }}
                   />
                   <button
                     type="button"
                     disabled={applicantFieldSaving}
                     onClick={() => handleInlineSaveApplicantField('ssn', applicantDraftValue.replace(/\D/g, ''))}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                     title="Save"
                   >
                     ✓
@@ -2279,50 +2495,51 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingApplicantField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
-                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                  {applicantFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{applicantFieldError}</span>}
                 </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingApplicantField('ssn');
-                    setApplicantDraftValue(primaryApplicant?.ssn ? formatSsnInput(primaryApplicant.ssn) : '');
-                    setApplicantFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit SSN"
-                >
-                  {primaryApplicant?.ssn ? formatSsnInput(primaryApplicant.ssn) : '—'}
-                </span>
               )}
-            </div>
+            />
 
             {/* 6. Email */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Email</span>
-              {editingApplicantField === 'email' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="Email"
+              value={primaryApplicant?.email}
+              isEditing={editingApplicantField === 'email'}
+              onStartEdit={() => {
+                setEditingApplicantField('email');
+                setApplicantDraftValue(primaryApplicant?.email || '');
+                setApplicantFieldError(null);
+              }}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <input
                     type="email"
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
                     placeholder="email@domain.com"
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[260px]"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingApplicantField(null);
-                      if (e.key === 'Enter') handleInlineSaveApplicantField('email', applicantDraftValue);
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingApplicantField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleInlineSaveApplicantField('email', applicantDraftValue);
+                      }
                     }}
                   />
                   <button
                     type="button"
                     disabled={applicantFieldSaving}
                     onClick={() => handleInlineSaveApplicantField('email', applicantDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                     title="Save"
                   >
                     ✓
@@ -2330,50 +2547,51 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingApplicantField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
-                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                  {applicantFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{applicantFieldError}</span>}
                 </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingApplicantField('email');
-                    setApplicantDraftValue(primaryApplicant?.email || '');
-                    setApplicantFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug truncate cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Email"
-                >
-                  {primaryApplicant?.email || '—'}
-                </span>
               )}
-            </div>
+            />
 
             {/* 7. Phone */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Phone</span>
-              {editingApplicantField === 'phone' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="Phone"
+              value={primaryApplicant?.phone}
+              isEditing={editingApplicantField === 'phone'}
+              onStartEdit={() => {
+                setEditingApplicantField('phone');
+                setApplicantDraftValue(primaryApplicant?.phone || '');
+                setApplicantFieldError(null);
+              }}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <input
                     type="text"
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
                     placeholder="Phone number"
-                    className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingApplicantField(null);
-                      if (e.key === 'Enter') handleInlineSaveApplicantField('phone', applicantDraftValue);
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingApplicantField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleInlineSaveApplicantField('phone', applicantDraftValue);
+                      }
                     }}
                   />
                   <button
                     type="button"
                     disabled={applicantFieldSaving}
                     onClick={() => handleInlineSaveApplicantField('phone', applicantDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                     title="Save"
                   >
                     ✓
@@ -2381,41 +2599,39 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingApplicantField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
-                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                  {applicantFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{applicantFieldError}</span>}
                 </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingApplicantField('phone');
-                    setApplicantDraftValue(primaryApplicant?.phone || '');
-                    setApplicantFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Phone"
-                >
-                  {primaryApplicant?.phone || '—'}
-                </span>
               )}
-            </div>
+            />
 
             {/* 8. Number of People on Tax Return */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Number of People on Tax Return</span>
-              {editingApplicantField === 'tax_household_count' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="Number of People on Tax Return"
+              value={taxMemberCount}
+              isEditing={editingApplicantField === 'tax_household_count'}
+              onStartEdit={() => {
+                setEditingApplicantField('tax_household_count');
+                setApplicantDraftValue(taxMemberCount);
+              }}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <select
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(Number(e.target.value))}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingApplicantField(null);
-                      if (e.key === 'Enter') {
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingApplicantField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
                         const count = Number(applicantDraftValue);
                         setTaxMemberCount(count);
                         if (initialPolicy?.id) {
@@ -2439,7 +2655,7 @@ export default function HealthPolicyForm({
                       }
                       setEditingApplicantField(null);
                     }}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                     title="Save"
                   >
                     ✓
@@ -2447,50 +2663,51 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingApplicantField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
                 </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingApplicantField('tax_household_count');
-                    setApplicantDraftValue(taxMemberCount);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Number of People on Tax Return"
-                >
-                  {taxMemberCount}
-                </span>
               )}
-            </div>
+            />
           </div>
 
           {/* RIGHT COLUMN */}
           <div className="space-y-0">
             {/* 1. Relationship */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Relationship</span>
-              <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
-                Self
-              </span>
-            </div>
+            <HorizontalFieldRow
+              label="Relationship"
+              value="Self"
+              readOnly={true}
+            />
 
             {/* 2. Gender */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Gender</span>
-              {editingApplicantField === 'gender' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="Gender"
+              value={primaryApplicant?.gender}
+              isEditing={editingApplicantField === 'gender'}
+              onStartEdit={() => {
+                setEditingApplicantField('gender');
+                setApplicantDraftValue(primaryApplicant?.gender || '');
+                setApplicantFieldError(null);
+              }}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <select
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingApplicantField(null);
-                      if (e.key === 'Enter') handleInlineSaveApplicantField('gender', applicantDraftValue);
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingApplicantField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleInlineSaveApplicantField('gender', applicantDraftValue);
+                      }
                     }}
                   >
                     <option value="">Select Gender...</option>
@@ -2501,7 +2718,7 @@ export default function HealthPolicyForm({
                     type="button"
                     disabled={applicantFieldSaving}
                     onClick={() => handleInlineSaveApplicantField('gender', applicantDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                     title="Save"
                   >
                     ✓
@@ -2509,41 +2726,42 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingApplicantField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
-                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                  {applicantFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{applicantFieldError}</span>}
                 </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingApplicantField('gender');
-                    setApplicantDraftValue(primaryApplicant?.gender || '');
-                    setApplicantFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Gender"
-                >
-                  {primaryApplicant?.gender || '—'}
-                </span>
               )}
-            </div>
+            />
 
             {/* 3. Marital Status */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Marital Status</span>
-              {editingApplicantField === 'marital_status' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="Marital Status"
+              value={primaryApplicant?.maritalStatus}
+              isEditing={editingApplicantField === 'marital_status'}
+              onStartEdit={() => {
+                setEditingApplicantField('marital_status');
+                setApplicantDraftValue(primaryApplicant?.maritalStatus || '');
+                setApplicantFieldError(null);
+              }}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <select
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingApplicantField(null);
-                      if (e.key === 'Enter') handleInlineSaveApplicantField('marital_status', applicantDraftValue);
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingApplicantField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleInlineSaveApplicantField('marital_status', applicantDraftValue);
+                      }
                     }}
                   >
                     <option value="">Select Marital Status...</option>
@@ -2557,7 +2775,7 @@ export default function HealthPolicyForm({
                     type="button"
                     disabled={applicantFieldSaving}
                     onClick={() => handleInlineSaveApplicantField('marital_status', applicantDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                     title="Save"
                   >
                     ✓
@@ -2565,41 +2783,42 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingApplicantField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
-                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                  {applicantFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{applicantFieldError}</span>}
                 </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingApplicantField('marital_status');
-                    setApplicantDraftValue(primaryApplicant?.maritalStatus || '');
-                    setApplicantFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Marital Status"
-                >
-                  {primaryApplicant?.maritalStatus || '—'}
-                </span>
               )}
-            </div>
+            />
 
             {/* 4. U.S. Citizen */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">U.S. Citizen</span>
-              {editingApplicantField === 'us_citizen' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="U.S. Citizen"
+              value={primaryApplicant?.usCitizen !== null && primaryApplicant?.usCitizen !== undefined ? (primaryApplicant.usCitizen ? 'Yes' : 'No') : ''}
+              isEditing={editingApplicantField === 'us_citizen'}
+              onStartEdit={() => {
+                setEditingApplicantField('us_citizen');
+                setApplicantDraftValue(primaryApplicant?.usCitizen !== false);
+                setApplicantFieldError(null);
+              }}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <select
                     value={applicantDraftValue ? 'Yes' : 'No'}
                     onChange={e => setApplicantDraftValue(e.target.value === 'Yes')}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingApplicantField(null);
-                      if (e.key === 'Enter') handleInlineSaveApplicantField('born_in_usa', applicantDraftValue);
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingApplicantField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleInlineSaveApplicantField('born_in_usa', applicantDraftValue);
+                      }
                     }}
                   >
                     <option value="Yes">Yes</option>
@@ -2609,7 +2828,7 @@ export default function HealthPolicyForm({
                     type="button"
                     disabled={applicantFieldSaving}
                     onClick={() => handleInlineSaveApplicantField('born_in_usa', applicantDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                     title="Save"
                   >
                     ✓
@@ -2617,43 +2836,42 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingApplicantField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
-                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                  {applicantFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{applicantFieldError}</span>}
                 </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingApplicantField('us_citizen');
-                    setApplicantDraftValue(primaryApplicant?.usCitizen !== false);
-                    setApplicantFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit U.S. Citizen"
-                >
-                  {primaryApplicant?.usCitizen !== null && primaryApplicant?.usCitizen !== undefined
-                    ? (primaryApplicant.usCitizen ? 'Yes' : 'No')
-                    : '—'}
-                </span>
               )}
-            </div>
+            />
 
             {/* 5. Immigration Status */}
-            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Immigration Status</span>
-              {editingApplicantField === 'immigration_status' ? (
-                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+            <HorizontalFieldRow
+              label="Immigration Status"
+              value={primaryApplicant?.immigrationStatus}
+              isEditing={editingApplicantField === 'immigration_status'}
+              onStartEdit={() => {
+                setEditingApplicantField('immigration_status');
+                setApplicantDraftValue(primaryApplicant?.immigrationStatus || '');
+                setApplicantFieldError(null);
+              }}
+              renderEditor={() => (
+                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                   <select
                     value={applicantDraftValue}
                     onChange={e => setApplicantDraftValue(e.target.value)}
-                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                     autoFocus
                     onKeyDown={e => {
-                      if (e.key === 'Escape') setEditingApplicantField(null);
-                      if (e.key === 'Enter') handleInlineSaveApplicantField('immigration_status', applicantDraftValue);
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingApplicantField(null);
+                      }
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleInlineSaveApplicantField('immigration_status', applicantDraftValue);
+                      }
                     }}
                   >
                     <option value="">Select Immigration Status...</option>
@@ -2666,7 +2884,7 @@ export default function HealthPolicyForm({
                     type="button"
                     disabled={applicantFieldSaving}
                     onClick={() => handleInlineSaveApplicantField('immigration_status', applicantDraftValue)}
-                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                     title="Save"
                   >
                     ✓
@@ -2674,52 +2892,53 @@ export default function HealthPolicyForm({
                   <button
                     type="button"
                     onClick={() => setEditingApplicantField(null)}
-                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                     title="Cancel"
                   >
                     ✕
                   </button>
-                  {applicantFieldError && <span className="text-rose-500 text-[10px] pl-1">{applicantFieldError}</span>}
+                  {applicantFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{applicantFieldError}</span>}
                 </div>
-              ) : (
-                <span
-                  onClick={() => {
-                    setEditingApplicantField('immigration_status');
-                    setApplicantDraftValue(primaryApplicant?.immigrationStatus || '');
-                    setApplicantFieldError(null);
-                  }}
-                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                  title="Click to edit Immigration Status"
-                >
-                  {primaryApplicant?.immigrationStatus || '—'}
-                </span>
               )}
-            </div>
+            />
 
             {/* CONDITIONAL IMMIGRATION FIELDS: Work Permit */}
             {primaryApplicant?.immigrationStatus === 'Work Permit' && (
               <>
-                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Card Number</span>
-                  {editingApplicantField === 'card_number' ? (
-                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                <HorizontalFieldRow
+                  label="Card Number"
+                  value={primaryApplicant?.cardNumber}
+                  valueClassName="font-mono"
+                  isEditing={editingApplicantField === 'card_number'}
+                  onStartEdit={() => {
+                    setEditingApplicantField('card_number');
+                    setApplicantDraftValue(primaryApplicant?.cardNumber || '');
+                  }}
+                  renderEditor={() => (
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                       <input
                         type="text"
                         value={applicantDraftValue}
                         onChange={e => setApplicantDraftValue(e.target.value)}
                         placeholder="Card Number..."
-                        className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold font-mono outline-none"
+                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-mono w-full flex-1 min-w-0"
                         autoFocus
                         onKeyDown={e => {
-                          if (e.key === 'Escape') setEditingApplicantField(null);
-                          if (e.key === 'Enter') handleInlineSaveApplicantField('card_number', applicantDraftValue);
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingApplicantField(null);
+                          }
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
+                            handleInlineSaveApplicantField('card_number', applicantDraftValue);
+                          }
                         }}
                       />
                       <button
                         type="button"
                         disabled={applicantFieldSaving}
                         onClick={() => handleInlineSaveApplicantField('card_number', applicantDraftValue)}
-                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                         title="Save"
                       >
                         ✓
@@ -2727,47 +2946,49 @@ export default function HealthPolicyForm({
                       <button
                         type="button"
                         onClick={() => setEditingApplicantField(null)}
-                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                         title="Cancel"
                       >
                         ✕
                       </button>
                     </div>
-                  ) : (
-                    <span
-                      onClick={() => {
-                        setEditingApplicantField('card_number');
-                        setApplicantDraftValue(primaryApplicant?.cardNumber || '');
-                      }}
-                      className="text-[15px] font-normal text-[#253247] leading-snug font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                      title="Click to edit Card Number"
-                    >
-                      {primaryApplicant?.cardNumber || '—'}
-                    </span>
                   )}
-                </div>
+                />
 
-                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">USCIS Number</span>
-                  {editingApplicantField === 'uscis_number' ? (
-                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                <HorizontalFieldRow
+                  label="USCIS Number"
+                  value={primaryApplicant?.uscisNumber}
+                  valueClassName="font-mono"
+                  isEditing={editingApplicantField === 'uscis_number'}
+                  onStartEdit={() => {
+                    setEditingApplicantField('uscis_number');
+                    setApplicantDraftValue(primaryApplicant?.uscisNumber || '');
+                  }}
+                  renderEditor={() => (
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                       <input
                         type="text"
                         value={applicantDraftValue}
                         onChange={e => setApplicantDraftValue(e.target.value)}
                         placeholder="USCIS Number..."
-                        className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold font-mono outline-none"
+                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-mono w-full flex-1 min-w-0"
                         autoFocus
                         onKeyDown={e => {
-                          if (e.key === 'Escape') setEditingApplicantField(null);
-                          if (e.key === 'Enter') handleInlineSaveApplicantField('uscis_number', applicantDraftValue);
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingApplicantField(null);
+                          }
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
+                            handleInlineSaveApplicantField('uscis_number', applicantDraftValue);
+                          }
                         }}
                       />
                       <button
                         type="button"
                         disabled={applicantFieldSaving}
                         onClick={() => handleInlineSaveApplicantField('uscis_number', applicantDraftValue)}
-                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                         title="Save"
                       >
                         ✓
@@ -2775,47 +2996,48 @@ export default function HealthPolicyForm({
                       <button
                         type="button"
                         onClick={() => setEditingApplicantField(null)}
-                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                         title="Cancel"
                       >
                         ✕
                       </button>
                     </div>
-                  ) : (
-                    <span
-                      onClick={() => {
-                        setEditingApplicantField('uscis_number');
-                        setApplicantDraftValue(primaryApplicant?.uscisNumber || '');
-                      }}
-                      className="text-[15px] font-normal text-[#253247] leading-snug font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                      title="Click to edit USCIS Number"
-                    >
-                      {primaryApplicant?.uscisNumber || '—'}
-                    </span>
                   )}
-                </div>
+                />
 
-                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Category</span>
-                  {editingApplicantField === 'immigration_category' ? (
-                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                <HorizontalFieldRow
+                  label="Category"
+                  value={primaryApplicant?.immigrationCategory}
+                  isEditing={editingApplicantField === 'immigration_category'}
+                  onStartEdit={() => {
+                    setEditingApplicantField('immigration_category');
+                    setApplicantDraftValue(primaryApplicant?.immigrationCategory || '');
+                  }}
+                  renderEditor={() => (
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                       <input
                         type="text"
                         value={applicantDraftValue}
                         onChange={e => setApplicantDraftValue(e.target.value)}
                         placeholder="Category..."
-                        className="w-28 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                         autoFocus
                         onKeyDown={e => {
-                          if (e.key === 'Escape') setEditingApplicantField(null);
-                          if (e.key === 'Enter') handleInlineSaveApplicantField('immigration_category', applicantDraftValue);
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingApplicantField(null);
+                          }
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
+                            handleInlineSaveApplicantField('immigration_category', applicantDraftValue);
+                          }
                         }}
                       />
                       <button
                         type="button"
                         disabled={applicantFieldSaving}
                         onClick={() => handleInlineSaveApplicantField('immigration_category', applicantDraftValue)}
-                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                         title="Save"
                       >
                         ✓
@@ -2823,40 +3045,39 @@ export default function HealthPolicyForm({
                       <button
                         type="button"
                         onClick={() => setEditingApplicantField(null)}
-                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                         title="Cancel"
                       >
                         ✕
                       </button>
                     </div>
-                  ) : (
-                    <span
-                      onClick={() => {
-                        setEditingApplicantField('immigration_category');
-                        setApplicantDraftValue(primaryApplicant?.immigrationCategory || '');
-                      }}
-                      className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                      title="Click to edit Category"
-                    >
-                      {primaryApplicant?.immigrationCategory || '—'}
-                    </span>
                   )}
-                </div>
+                />
 
-                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Expiration Date</span>
-                  {editingApplicantField === 'immigration_expiration_date' ? (
-                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                <HorizontalFieldRow
+                  label="Expiration Date"
+                  value={primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : ''}
+                  isEditing={editingApplicantField === 'immigration_expiration_date'}
+                  onStartEdit={() => {
+                    setEditingApplicantField('immigration_expiration_date');
+                    setApplicantDraftValue(primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '');
+                  }}
+                  renderEditor={() => (
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                       <input
                         type="text"
                         value={applicantDraftValue}
                         onChange={e => setApplicantDraftValue(formatAsDateInput(e.target.value))}
                         placeholder="MM/DD/YYYY"
-                        className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
+                        className="h-[34px] w-full flex-1 min-w-0 bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                         autoFocus
                         onKeyDown={e => {
-                          if (e.key === 'Escape') setEditingApplicantField(null);
-                          if (e.key === 'Enter') {
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingApplicantField(null);
+                          }
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
                             const parsedIso = parseDisplayDate(applicantDraftValue);
                             handleInlineSaveApplicantField('immigration_expiration_date', parsedIso);
                           }
@@ -2869,7 +3090,7 @@ export default function HealthPolicyForm({
                           const parsedIso = parseDisplayDate(applicantDraftValue);
                           handleInlineSaveApplicantField('immigration_expiration_date', parsedIso);
                         }}
-                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                         title="Save"
                       >
                         ✓
@@ -2877,52 +3098,54 @@ export default function HealthPolicyForm({
                       <button
                         type="button"
                         onClick={() => setEditingApplicantField(null)}
-                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                         title="Cancel"
                       >
                         ✕
                       </button>
                     </div>
-                  ) : (
-                    <span
-                      onClick={() => {
-                        setEditingApplicantField('immigration_expiration_date');
-                        setApplicantDraftValue(primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '');
-                      }}
-                      className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                      title="Click to edit Expiration Date"
-                    >
-                      {primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '—'}
-                    </span>
                   )}
-                </div>
+                />
               </>
             )}
 
             {/* CONDITIONAL IMMIGRATION FIELDS: Resident */}
             {(primaryApplicant?.immigrationStatus === 'Resident' || primaryApplicant?.immigrationStatus === 'Permanent Resident') && (
               <>
-                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Alien Number</span>
-                  {editingApplicantField === 'alien_number' ? (
-                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                <HorizontalFieldRow
+                  label="Alien Number"
+                  value={primaryApplicant?.alienNumber}
+                  valueClassName="font-mono"
+                  isEditing={editingApplicantField === 'alien_number'}
+                  onStartEdit={() => {
+                    setEditingApplicantField('alien_number');
+                    setApplicantDraftValue(primaryApplicant?.alienNumber || '');
+                  }}
+                  renderEditor={() => (
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                       <input
                         type="text"
                         value={applicantDraftValue}
                         onChange={e => setApplicantDraftValue(e.target.value)}
                         placeholder="Alien Number..."
-                        className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold font-mono outline-none"
+                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-mono w-full flex-1 min-w-0"
                         autoFocus
                         onKeyDown={e => {
-                          if (e.key === 'Escape') setEditingApplicantField(null);
-                          if (e.key === 'Enter') handleInlineSaveApplicantField('alien_number', applicantDraftValue);
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingApplicantField(null);
+                          }
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
+                            handleInlineSaveApplicantField('alien_number', applicantDraftValue);
+                          }
                         }}
                       />
                       <button
                         type="button"
                         disabled={applicantFieldSaving}
                         onClick={() => handleInlineSaveApplicantField('alien_number', applicantDraftValue)}
-                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                         title="Save"
                       >
                         ✓
@@ -2930,47 +3153,49 @@ export default function HealthPolicyForm({
                       <button
                         type="button"
                         onClick={() => setEditingApplicantField(null)}
-                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                         title="Cancel"
                       >
                         ✕
                       </button>
                     </div>
-                  ) : (
-                    <span
-                      onClick={() => {
-                        setEditingApplicantField('alien_number');
-                        setApplicantDraftValue(primaryApplicant?.alienNumber || '');
-                      }}
-                      className="text-[15px] font-normal text-[#253247] leading-snug font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                      title="Click to edit Alien Number"
-                    >
-                      {primaryApplicant?.alienNumber || '—'}
-                    </span>
                   )}
-                </div>
+                />
 
-                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Card Number</span>
-                  {editingApplicantField === 'card_number' ? (
-                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                <HorizontalFieldRow
+                  label="Card Number"
+                  value={primaryApplicant?.cardNumber}
+                  valueClassName="font-mono"
+                  isEditing={editingApplicantField === 'card_number'}
+                  onStartEdit={() => {
+                    setEditingApplicantField('card_number');
+                    setApplicantDraftValue(primaryApplicant?.cardNumber || '');
+                  }}
+                  renderEditor={() => (
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                       <input
                         type="text"
                         value={applicantDraftValue}
                         onChange={e => setApplicantDraftValue(e.target.value)}
                         placeholder="Card Number..."
-                        className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold font-mono outline-none"
+                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-mono w-full flex-1 min-w-0"
                         autoFocus
                         onKeyDown={e => {
-                          if (e.key === 'Escape') setEditingApplicantField(null);
-                          if (e.key === 'Enter') handleInlineSaveApplicantField('card_number', applicantDraftValue);
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingApplicantField(null);
+                          }
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
+                            handleInlineSaveApplicantField('card_number', applicantDraftValue);
+                          }
                         }}
                       />
                       <button
                         type="button"
                         disabled={applicantFieldSaving}
                         onClick={() => handleInlineSaveApplicantField('card_number', applicantDraftValue)}
-                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                         title="Save"
                       >
                         ✓
@@ -2978,40 +3203,39 @@ export default function HealthPolicyForm({
                       <button
                         type="button"
                         onClick={() => setEditingApplicantField(null)}
-                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                         title="Cancel"
                       >
                         ✕
                       </button>
                     </div>
-                  ) : (
-                    <span
-                      onClick={() => {
-                        setEditingApplicantField('card_number');
-                        setApplicantDraftValue(primaryApplicant?.cardNumber || '');
-                      }}
-                      className="text-[15px] font-normal text-[#253247] leading-snug font-mono cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                      title="Click to edit Card Number"
-                    >
-                      {primaryApplicant?.cardNumber || '—'}
-                    </span>
                   )}
-                </div>
+                />
 
-                <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                  <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Expiration Date</span>
-                  {editingApplicantField === 'immigration_expiration_date' ? (
-                    <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                <HorizontalFieldRow
+                  label="Expiration Date"
+                  value={primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : ''}
+                  isEditing={editingApplicantField === 'immigration_expiration_date'}
+                  onStartEdit={() => {
+                    setEditingApplicantField('immigration_expiration_date');
+                    setApplicantDraftValue(primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '');
+                  }}
+                  renderEditor={() => (
+                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                       <input
                         type="text"
                         value={applicantDraftValue}
                         onChange={e => setApplicantDraftValue(formatAsDateInput(e.target.value))}
                         placeholder="MM/DD/YYYY"
-                        className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
+                        className="h-[34px] w-full flex-1 min-w-0 bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                         autoFocus
                         onKeyDown={e => {
-                          if (e.key === 'Escape') setEditingApplicantField(null);
-                          if (e.key === 'Enter') {
+                          if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingApplicantField(null);
+                          }
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
                             const parsedIso = parseDisplayDate(applicantDraftValue);
                             handleInlineSaveApplicantField('immigration_expiration_date', parsedIso);
                           }
@@ -3024,7 +3248,7 @@ export default function HealthPolicyForm({
                           const parsedIso = parseDisplayDate(applicantDraftValue);
                           handleInlineSaveApplicantField('immigration_expiration_date', parsedIso);
                         }}
-                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                         title="Save"
                       >
                         ✓
@@ -3032,25 +3256,14 @@ export default function HealthPolicyForm({
                       <button
                         type="button"
                         onClick={() => setEditingApplicantField(null)}
-                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                         title="Cancel"
                       >
                         ✕
                       </button>
                     </div>
-                  ) : (
-                    <span
-                      onClick={() => {
-                        setEditingApplicantField('immigration_expiration_date');
-                        setApplicantDraftValue(primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '');
-                      }}
-                      className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                      title="Click to edit Expiration Date"
-                    >
-                      {primaryApplicant?.immigrationExpirationDate ? formatDateForDisplay(primaryApplicant.immigrationExpirationDate) : '—'}
-                    </span>
                   )}
-                </div>
+                />
               </>
             )}
           </div>
@@ -3135,18 +3348,29 @@ export default function HealthPolicyForm({
                       {/* LEFT COLUMN */}
                       <div className="space-y-0">
                         {/* 1. Coverage */}
-                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Coverage</span>
-                          {editingTaxMemberField === `m_${memberNumber}_coverage` ? (
-                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                        <HorizontalFieldRow
+                          label="Coverage"
+                          value={member.coverage !== false ? 'Yes' : 'No'}
+                          isEditing={editingTaxMemberField === `m_${memberNumber}_coverage`}
+                          onStartEdit={() => {
+                            setEditingTaxMemberField(`m_${memberNumber}_coverage`);
+                            setTaxMemberDraftValue(member.coverage !== false);
+                            setTaxMemberFieldError(null);
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                               <select
                                 value={taxMemberDraftValue ? 'Yes' : 'No'}
                                 onChange={e => setTaxMemberDraftValue(e.target.value === 'Yes')}
-                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                                 autoFocus
                                 onKeyDown={e => {
-                                  if (e.key === 'Escape') setEditingTaxMemberField(null);
-                                  if (e.key === 'Enter') {
+                                  if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setEditingTaxMemberField(null);
+                                  }
+                                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                    e.preventDefault();
                                     updateMember({ coverage: taxMemberDraftValue });
                                     setEditingTaxMemberField(null);
                                   }
@@ -3161,7 +3385,7 @@ export default function HealthPolicyForm({
                                   updateMember({ coverage: taxMemberDraftValue });
                                   setEditingTaxMemberField(null);
                                 }}
-                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                                 title="Save"
                               >
                                 ✓
@@ -3169,42 +3393,41 @@ export default function HealthPolicyForm({
                               <button
                                 type="button"
                                 onClick={() => setEditingTaxMemberField(null)}
-                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                                 title="Cancel"
                               >
                                 ✕
                               </button>
                             </div>
-                          ) : (
-                            <span
-                              onClick={() => {
-                                setEditingTaxMemberField(`m_${memberNumber}_coverage`);
-                                setTaxMemberDraftValue(member.coverage !== false);
-                                setTaxMemberFieldError(null);
-                              }}
-                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                              title="Click to edit Coverage"
-                            >
-                              {member.coverage !== false ? 'Yes' : 'No'}
-                            </span>
                           )}
-                        </div>
+                        />
 
                         {/* 2. Full Name */}
-                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Full Name</span>
-                          {editingTaxMemberField === `m_${memberNumber}_fullName` ? (
-                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                        <HorizontalFieldRow
+                          label="Full Name"
+                          value={member.full_name}
+                          isEditing={editingTaxMemberField === `m_${memberNumber}_fullName`}
+                          onStartEdit={() => {
+                            setEditingTaxMemberField(`m_${memberNumber}_fullName`);
+                            setTaxMemberDraftValue(member.full_name || '');
+                            setTaxMemberFieldError(null);
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                               <input
                                 type="text"
                                 value={taxMemberDraftValue}
                                 onChange={e => setTaxMemberDraftValue(e.target.value)}
                                 placeholder="Full name..."
-                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[260px]"
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                                 autoFocus
                                 onKeyDown={e => {
-                                  if (e.key === 'Escape') setEditingTaxMemberField(null);
-                                  if (e.key === 'Enter') {
+                                  if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setEditingTaxMemberField(null);
+                                  }
+                                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                    e.preventDefault();
                                     updateMember({ full_name: taxMemberDraftValue });
                                     setEditingTaxMemberField(null);
                                   }
@@ -3216,7 +3439,7 @@ export default function HealthPolicyForm({
                                   updateMember({ full_name: taxMemberDraftValue });
                                   setEditingTaxMemberField(null);
                                 }}
-                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                                 title="Save"
                               >
                                 ✓
@@ -3224,42 +3447,41 @@ export default function HealthPolicyForm({
                               <button
                                 type="button"
                                 onClick={() => setEditingTaxMemberField(null)}
-                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                                 title="Cancel"
                               >
                                 ✕
                               </button>
                             </div>
-                          ) : (
-                            <span
-                              onClick={() => {
-                                setEditingTaxMemberField(`m_${memberNumber}_fullName`);
-                                setTaxMemberDraftValue(member.full_name || '');
-                                setTaxMemberFieldError(null);
-                              }}
-                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                              title="Click to edit Full Name"
-                            >
-                              {member.full_name || '—'}
-                            </span>
                           )}
-                        </div>
+                        />
 
                         {/* 3. DOB */}
-                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">DOB</span>
-                          {editingTaxMemberField === `m_${memberNumber}_dob` ? (
-                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                        <HorizontalFieldRow
+                          label="DOB"
+                          value={formatDateForDisplay(member.date_of_birth)}
+                          isEditing={editingTaxMemberField === `m_${memberNumber}_dob`}
+                          onStartEdit={() => {
+                            setEditingTaxMemberField(`m_${memberNumber}_dob`);
+                            setTaxMemberDraftValue(member.date_of_birth ? formatDateForDisplay(member.date_of_birth) : '');
+                            setTaxMemberFieldError(null);
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                               <input
                                 type="text"
                                 value={taxMemberDraftValue}
                                 onChange={e => setTaxMemberDraftValue(formatAsDateInput(e.target.value))}
                                 placeholder="MM/DD/YYYY"
-                                className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
+                                className="h-[34px] w-full flex-1 min-w-0 bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                                 autoFocus
                                 onKeyDown={e => {
-                                  if (e.key === 'Escape') setEditingTaxMemberField(null);
-                                  if (e.key === 'Enter') {
+                                  if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setEditingTaxMemberField(null);
+                                  }
+                                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                    e.preventDefault();
                                     const parsedIso = parseDisplayDate(taxMemberDraftValue);
                                     if (taxMemberDraftValue && !parsedIso) {
                                       setTaxMemberFieldError('Invalid date (MM/DD/YYYY)');
@@ -3281,7 +3503,7 @@ export default function HealthPolicyForm({
                                   updateMember({ date_of_birth: parsedIso });
                                   setEditingTaxMemberField(null);
                                 }}
-                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                                 title="Save"
                               >
                                 ✓
@@ -3289,67 +3511,63 @@ export default function HealthPolicyForm({
                               <button
                                 type="button"
                                 onClick={() => setEditingTaxMemberField(null)}
-                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                                 title="Cancel"
                               >
                                 ✕
                               </button>
-                              {taxMemberFieldError && <span className="text-rose-500 text-[10px] pl-1">{taxMemberFieldError}</span>}
+                              {taxMemberFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{taxMemberFieldError}</span>}
                             </div>
-                          ) : (
-                            <span
-                              onClick={() => {
-                                setEditingTaxMemberField(`m_${memberNumber}_dob`);
-                                setTaxMemberDraftValue(member.date_of_birth ? formatDateForDisplay(member.date_of_birth) : '');
-                                setTaxMemberFieldError(null);
-                              }}
-                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                              title="Click to edit Date of Birth"
-                            >
-                              {formatDateForDisplay(member.date_of_birth)}
-                            </span>
                           )}
-                        </div>
+                        />
 
                         {/* 4. Age (Calculated read-only) */}
-                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Age</span>
-                          <span className="text-[15px] font-normal text-[#253247] leading-snug select-none">
-                            {calculateAgeFromDob(member.date_of_birth) !== null ? calculateAgeFromDob(member.date_of_birth) : '—'}
-                          </span>
-                        </div>
+                        <HorizontalFieldRow
+                          label="Age"
+                          value={calculateAgeFromDob(member.date_of_birth) !== null ? calculateAgeFromDob(member.date_of_birth) : '—'}
+                          readOnly={true}
+                        />
 
                         {/* 5. SSN (Sensitive Field) */}
-                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                          <TaxMemberSensitiveField
-                            label="SSN"
-                            healthPolicyId={initialPolicy?.id}
-                            memberNumber={memberNumber}
-                            fieldName="ssn"
-                            hasValue={!!member.has_ssn}
-                            disabled={!isEditing}
-                            value={taxMemberSecrets[`member_${memberNumber}_ssn`] || ''}
-                            onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_ssn`]: val }))}
-                            placeholder="SSN (e.g. XXX-XX-XXXX)"
-                          />
-                        </div>
+                        <TaxMemberSensitiveField
+                          label="SSN"
+                          healthPolicyId={initialPolicy?.id}
+                          memberNumber={memberNumber}
+                          fieldName="ssn"
+                          hasValue={!!member.has_ssn}
+                          disabled={!isEditing}
+                          value={taxMemberSecrets[`member_${memberNumber}_ssn`] || ''}
+                          onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_ssn`]: val }))}
+                          placeholder="SSN (e.g. XXX-XX-XXXX)"
+                        />
                       </div>
 
                       {/* RIGHT COLUMN */}
                       <div className="space-y-0">
                         {/* 1. Relationship to Applicant */}
-                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Relationship to Applicant</span>
-                          {editingTaxMemberField === `m_${memberNumber}_relationship` ? (
-                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                        <HorizontalFieldRow
+                          label="Relationship to Applicant"
+                          value={member.relationship_to_applicant || 'Spouse'}
+                          isEditing={editingTaxMemberField === `m_${memberNumber}_relationship`}
+                          onStartEdit={() => {
+                            setEditingTaxMemberField(`m_${memberNumber}_relationship`);
+                            setTaxMemberDraftValue(member.relationship_to_applicant || 'Spouse');
+                            setTaxMemberFieldError(null);
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                               <select
                                 value={taxMemberDraftValue}
                                 onChange={e => setTaxMemberDraftValue(e.target.value)}
-                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                                 autoFocus
                                 onKeyDown={e => {
-                                  if (e.key === 'Escape') setEditingTaxMemberField(null);
-                                  if (e.key === 'Enter') {
+                                  if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setEditingTaxMemberField(null);
+                                  }
+                                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                    e.preventDefault();
                                     updateMember({ relationship_to_applicant: taxMemberDraftValue });
                                     setEditingTaxMemberField(null);
                                   }
@@ -3365,7 +3583,7 @@ export default function HealthPolicyForm({
                                   updateMember({ relationship_to_applicant: taxMemberDraftValue });
                                   setEditingTaxMemberField(null);
                                 }}
-                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                                 title="Save"
                               >
                                 ✓
@@ -3373,40 +3591,39 @@ export default function HealthPolicyForm({
                               <button
                                 type="button"
                                 onClick={() => setEditingTaxMemberField(null)}
-                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                                 title="Cancel"
                               >
                                 ✕
                               </button>
                             </div>
-                          ) : (
-                            <span
-                              onClick={() => {
-                                setEditingTaxMemberField(`m_${memberNumber}_relationship`);
-                                setTaxMemberDraftValue(member.relationship_to_applicant || 'Spouse');
-                                setTaxMemberFieldError(null);
-                              }}
-                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                              title="Click to edit Relationship"
-                            >
-                              {member.relationship_to_applicant || 'Spouse'}
-                            </span>
                           )}
-                        </div>
+                        />
 
                         {/* 2. U.S. Citizen */}
-                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">U.S. Citizen</span>
-                          {editingTaxMemberField === `m_${memberNumber}_usCitizen` ? (
-                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                        <HorizontalFieldRow
+                          label="U.S. Citizen"
+                          value={member.us_citizen !== false ? 'Yes' : 'No'}
+                          isEditing={editingTaxMemberField === `m_${memberNumber}_usCitizen`}
+                          onStartEdit={() => {
+                            setEditingTaxMemberField(`m_${memberNumber}_usCitizen`);
+                            setTaxMemberDraftValue(member.us_citizen !== false);
+                            setTaxMemberFieldError(null);
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                               <select
                                 value={taxMemberDraftValue ? 'Yes' : 'No'}
                                 onChange={e => setTaxMemberDraftValue(e.target.value === 'Yes')}
-                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                                 autoFocus
                                 onKeyDown={e => {
-                                  if (e.key === 'Escape') setEditingTaxMemberField(null);
-                                  if (e.key === 'Enter') {
+                                  if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setEditingTaxMemberField(null);
+                                  }
+                                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                    e.preventDefault();
                                     updateMember({ us_citizen: taxMemberDraftValue });
                                     setEditingTaxMemberField(null);
                                   }
@@ -3421,7 +3638,7 @@ export default function HealthPolicyForm({
                                   updateMember({ us_citizen: taxMemberDraftValue });
                                   setEditingTaxMemberField(null);
                                 }}
-                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                                 title="Save"
                               >
                                 ✓
@@ -3429,40 +3646,39 @@ export default function HealthPolicyForm({
                               <button
                                 type="button"
                                 onClick={() => setEditingTaxMemberField(null)}
-                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                                 title="Cancel"
                               >
                                 ✕
                               </button>
                             </div>
-                          ) : (
-                            <span
-                              onClick={() => {
-                                setEditingTaxMemberField(`m_${memberNumber}_usCitizen`);
-                                setTaxMemberDraftValue(member.us_citizen !== false);
-                                setTaxMemberFieldError(null);
-                              }}
-                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                              title="Click to edit U.S. Citizen"
-                            >
-                              {member.us_citizen !== false ? 'Yes' : 'No'}
-                            </span>
                           )}
-                        </div>
+                        />
 
                         {/* 3. Immigration Status */}
-                        <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                          <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Immigration Status</span>
-                          {editingTaxMemberField === `m_${memberNumber}_immigrationStatus` ? (
-                            <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                        <HorizontalFieldRow
+                          label="Immigration Status"
+                          value={member.immigration_status}
+                          isEditing={editingTaxMemberField === `m_${memberNumber}_immigrationStatus`}
+                          onStartEdit={() => {
+                            setEditingTaxMemberField(`m_${memberNumber}_immigrationStatus`);
+                            setTaxMemberDraftValue(member.immigration_status || '');
+                            setTaxMemberFieldError(null);
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                               <select
                                 value={taxMemberDraftValue}
                                 onChange={e => setTaxMemberDraftValue(e.target.value)}
-                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[180px] cursor-pointer"
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
                                 autoFocus
                                 onKeyDown={e => {
-                                  if (e.key === 'Escape') setEditingTaxMemberField(null);
-                                  if (e.key === 'Enter') {
+                                  if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setEditingTaxMemberField(null);
+                                  }
+                                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                    e.preventDefault();
                                     updateMember({ immigration_status: taxMemberDraftValue });
                                     setEditingTaxMemberField(null);
                                   }
@@ -3480,7 +3696,7 @@ export default function HealthPolicyForm({
                                   updateMember({ immigration_status: taxMemberDraftValue });
                                   setEditingTaxMemberField(null);
                                 }}
-                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                                 title="Save"
                               >
                                 ✓
@@ -3488,68 +3704,63 @@ export default function HealthPolicyForm({
                               <button
                                 type="button"
                                 onClick={() => setEditingTaxMemberField(null)}
-                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                                 title="Cancel"
                               >
                                 ✕
                               </button>
                             </div>
-                          ) : (
-                            <span
-                              onClick={() => {
-                                setEditingTaxMemberField(`m_${memberNumber}_immigrationStatus`);
-                                setTaxMemberDraftValue(member.immigration_status || '');
-                                setTaxMemberFieldError(null);
-                              }}
-                              className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                              title="Click to edit Immigration Status"
-                            >
-                              {member.immigration_status || '—'}
-                            </span>
                           )}
-                        </div>
+                        />
 
                         {/* CONDITIONAL IMMIGRATION FIELDS: Work Permit */}
                         {member.immigration_status === 'Work Permit' && (
                           <>
-                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
-                              <TaxMemberSensitiveField
-                                label="Card Number"
-                                healthPolicyId={initialPolicy?.id}
-                                memberNumber={memberNumber}
-                                fieldName="immigration_card_number"
-                                hasValue={!!member.has_card_number}
-                                disabled={!isEditing}
-                                value={taxMemberSecrets[`member_${memberNumber}_immigration_card_number`] || ''}
-                                onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_card_number`]: val }))}
-                              />
-                            </div>
-                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
-                              <TaxMemberSensitiveField
-                                label="USCIS Number"
-                                healthPolicyId={initialPolicy?.id}
-                                memberNumber={memberNumber}
-                                fieldName="immigration_uscis_number"
-                                hasValue={!!member.has_uscis_number}
-                                disabled={!isEditing}
-                                value={taxMemberSecrets[`member_${memberNumber}_immigration_uscis_number`] || ''}
-                                onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_uscis_number`]: val }))}
-                              />
-                            </div>
-                            <div className="py-[2px] flex items-center justify-between gap-4 min-h-[36px]">
-                              <span className="text-slate-500 font-medium">Category</span>
-                              {editingTaxMemberField === `m_${memberNumber}_immigrationCategory` ? (
-                                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                            <TaxMemberSensitiveField
+                              label="Card Number"
+                              healthPolicyId={initialPolicy?.id}
+                              memberNumber={memberNumber}
+                              fieldName="immigration_card_number"
+                              hasValue={!!member.has_card_number}
+                              disabled={!isEditing}
+                              value={taxMemberSecrets[`member_${memberNumber}_immigration_card_number`] || ''}
+                              onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_card_number`]: val }))}
+                            />
+                            <TaxMemberSensitiveField
+                              label="USCIS Number"
+                              healthPolicyId={initialPolicy?.id}
+                              memberNumber={memberNumber}
+                              fieldName="immigration_uscis_number"
+                              hasValue={!!member.has_uscis_number}
+                              disabled={!isEditing}
+                              value={taxMemberSecrets[`member_${memberNumber}_immigration_uscis_number`] || ''}
+                              onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_uscis_number`]: val }))}
+                            />
+                            <HorizontalFieldRow
+                              label="Category"
+                              value={member.immigration_category}
+                              isEditing={editingTaxMemberField === `m_${memberNumber}_immigrationCategory`}
+                              onStartEdit={() => {
+                                setEditingTaxMemberField(`m_${memberNumber}_immigrationCategory`);
+                                setTaxMemberDraftValue(member.immigration_category || '');
+                                setTaxMemberFieldError(null);
+                              }}
+                              renderEditor={() => (
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                                   <input
                                     type="text"
                                     value={taxMemberDraftValue}
                                     onChange={e => setTaxMemberDraftValue(e.target.value)}
                                     placeholder="e.g. C09"
-                                    className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                                     autoFocus
                                     onKeyDown={e => {
-                                      if (e.key === 'Escape') setEditingTaxMemberField(null);
-                                      if (e.key === 'Enter') {
+                                      if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        setEditingTaxMemberField(null);
+                                      }
+                                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                        e.preventDefault();
                                         updateMember({ immigration_category: taxMemberDraftValue });
                                         setEditingTaxMemberField(null);
                                       }
@@ -3561,7 +3772,7 @@ export default function HealthPolicyForm({
                                       updateMember({ immigration_category: taxMemberDraftValue });
                                       setEditingTaxMemberField(null);
                                     }}
-                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                                     title="Save"
                                   >
                                     ✓
@@ -3569,40 +3780,39 @@ export default function HealthPolicyForm({
                                   <button
                                     type="button"
                                     onClick={() => setEditingTaxMemberField(null)}
-                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                                     title="Cancel"
                                   >
                                     ✕
                                   </button>
                                 </div>
-                              ) : (
-                                <span
-                                  onClick={() => {
-                                    setEditingTaxMemberField(`m_${memberNumber}_immigrationCategory`);
-                                    setTaxMemberDraftValue(member.immigration_category || '');
-                                    setTaxMemberFieldError(null);
-                                  }}
-                                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                                  title="Click to edit Category"
-                                >
-                                  {member.immigration_category || '—'}
-                                </span>
                               )}
-                            </div>
-                            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Expiration Date</span>
-                              {editingTaxMemberField === `m_${memberNumber}_immigrationExpDate` ? (
-                                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                            />
+                            <HorizontalFieldRow
+                              label="Expiration Date"
+                              value={member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : ''}
+                              isEditing={editingTaxMemberField === `m_${memberNumber}_immigrationExpDate`}
+                              onStartEdit={() => {
+                                setEditingTaxMemberField(`m_${memberNumber}_immigrationExpDate`);
+                                setTaxMemberDraftValue(member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : '');
+                                setTaxMemberFieldError(null);
+                              }}
+                              renderEditor={() => (
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                                   <input
                                     type="text"
                                     value={taxMemberDraftValue}
                                     onChange={e => setTaxMemberDraftValue(formatAsDateInput(e.target.value))}
                                     placeholder="MM/DD/YYYY"
-                                    className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
+                                    className="h-[34px] w-full flex-1 min-w-0 bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                                     autoFocus
                                     onKeyDown={async e => {
-                                      if (e.key === 'Escape') setEditingTaxMemberField(null);
-                                      if (e.key === 'Enter') {
+                                      if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        setEditingTaxMemberField(null);
+                                      }
+                                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                        e.preventDefault();
                                         const parsedIso = parseDisplayDate(taxMemberDraftValue);
                                         if (taxMemberDraftValue && !parsedIso) {
                                           setTaxMemberFieldError('Invalid date (MM/DD/YYYY)');
@@ -3622,7 +3832,7 @@ export default function HealthPolicyForm({
                                       }
                                       await updateMember({ immigration_expiration_date: parsedIso });
                                     }}
-                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                                     title="Save"
                                   >
                                     ✓
@@ -3630,71 +3840,66 @@ export default function HealthPolicyForm({
                                   <button
                                     type="button"
                                     onClick={() => setEditingTaxMemberField(null)}
-                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                                     title="Cancel"
                                   >
                                     ✕
                                   </button>
-                                  {taxMemberFieldError && <span className="text-rose-500 text-[10px] pl-1">{taxMemberFieldError}</span>}
+                                  {taxMemberFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{taxMemberFieldError}</span>}
                                 </div>
-                              ) : (
-                                <span
-                                  onClick={() => {
-                                    setEditingTaxMemberField(`m_${memberNumber}_immigrationExpDate`);
-                                    setTaxMemberDraftValue(member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : '');
-                                    setTaxMemberFieldError(null);
-                                  }}
-                                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                                  title="Click to edit Expiration Date"
-                                >
-                                  {member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : '—'}
-                                </span>
                               )}
-                            </div>
+                            />
                           </>
                         )}
 
                         {/* CONDITIONAL IMMIGRATION FIELDS: Resident & Permanent Resident */}
                         {(member.immigration_status === 'Resident' || member.immigration_status === 'Permanent Resident') && (
                           <>
-                            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                              <TaxMemberSensitiveField
-                                label="Alien Number"
-                                healthPolicyId={initialPolicy?.id}
-                                memberNumber={memberNumber}
-                                fieldName="immigration_alien_number"
-                                hasValue={!!member.has_alien_number}
-                                disabled={!isEditing}
-                                value={taxMemberSecrets[`member_${memberNumber}_immigration_alien_number`] || ''}
-                                onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_alien_number`]: val }))}
-                              />
-                            </div>
-                            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                              <TaxMemberSensitiveField
-                                label="Card Number"
-                                healthPolicyId={initialPolicy?.id}
-                                memberNumber={memberNumber}
-                                fieldName="immigration_card_number"
-                                hasValue={!!member.has_card_number}
-                                disabled={!isEditing}
-                                value={taxMemberSecrets[`member_${memberNumber}_immigration_card_number`] || ''}
-                                onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_card_number`]: val }))}
-                              />
-                            </div>
-                            <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-                              <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Expiration Date</span>
-                              {editingTaxMemberField === `m_${memberNumber}_immigrationExpDate` ? (
-                                <div className="flex items-center gap-2 flex-nowrap min-w-0">
+                            <TaxMemberSensitiveField
+                              label="Alien Number"
+                              healthPolicyId={initialPolicy?.id}
+                              memberNumber={memberNumber}
+                              fieldName="immigration_alien_number"
+                              hasValue={!!member.has_alien_number}
+                              disabled={!isEditing}
+                              value={taxMemberSecrets[`member_${memberNumber}_immigration_alien_number`] || ''}
+                              onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_alien_number`]: val }))}
+                            />
+                            <TaxMemberSensitiveField
+                              label="Card Number"
+                              healthPolicyId={initialPolicy?.id}
+                              memberNumber={memberNumber}
+                              fieldName="immigration_card_number"
+                              hasValue={!!member.has_card_number}
+                              disabled={!isEditing}
+                              value={taxMemberSecrets[`member_${memberNumber}_immigration_card_number`] || ''}
+                              onChange={val => setTaxMemberSecrets(prev => ({ ...prev, [`member_${memberNumber}_immigration_card_number`]: val }))}
+                            />
+                            <HorizontalFieldRow
+                              label="Expiration Date"
+                              value={member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : ''}
+                              isEditing={editingTaxMemberField === `m_${memberNumber}_immigrationExpDate`}
+                              onStartEdit={() => {
+                                setEditingTaxMemberField(`m_${memberNumber}_immigrationExpDate`);
+                                setTaxMemberDraftValue(member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : '');
+                                setTaxMemberFieldError(null);
+                              }}
+                              renderEditor={() => (
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                                   <input
                                     type="text"
                                     value={taxMemberDraftValue}
                                     onChange={e => setTaxMemberDraftValue(formatAsDateInput(e.target.value))}
                                     placeholder="MM/DD/YYYY"
-                                    className="h-[34px] w-[220px] max-w-[220px] min-w-[180px] flex-none bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
+                                    className="h-[34px] w-full flex-1 min-w-0 bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans"
                                     autoFocus
                                     onKeyDown={async e => {
-                                      if (e.key === 'Escape') setEditingTaxMemberField(null);
-                                      if (e.key === 'Enter') {
+                                      if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        setEditingTaxMemberField(null);
+                                      }
+                                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                        e.preventDefault();
                                         const parsedIso = parseDisplayDate(taxMemberDraftValue);
                                         if (taxMemberDraftValue && !parsedIso) {
                                           setTaxMemberFieldError('Invalid date (MM/DD/YYYY)');
@@ -3714,7 +3919,7 @@ export default function HealthPolicyForm({
                                       }
                                       await updateMember({ immigration_expiration_date: parsedIso });
                                     }}
-                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
                                     title="Save"
                                   >
                                     ✓
@@ -3722,27 +3927,15 @@ export default function HealthPolicyForm({
                                   <button
                                     type="button"
                                     onClick={() => setEditingTaxMemberField(null)}
-                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                                     title="Cancel"
                                   >
                                     ✕
                                   </button>
-                                  {taxMemberFieldError && <span className="text-rose-500 text-[10px] pl-1">{taxMemberFieldError}</span>}
+                                  {taxMemberFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{taxMemberFieldError}</span>}
                                 </div>
-                              ) : (
-                                <span
-                                  onClick={() => {
-                                    setEditingTaxMemberField(`m_${memberNumber}_immigrationExpDate`);
-                                    setTaxMemberDraftValue(member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : '');
-                                    setTaxMemberFieldError(null);
-                                  }}
-                                  className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                                  title="Click to edit Expiration Date"
-                                >
-                                  {member.immigration_expiration_date ? formatDateForDisplay(member.immigration_expiration_date) : '—'}
-                                </span>
                               )}
-                            </div>
+                            />
                           </>
                         )}
                       </div>
@@ -3765,27 +3958,40 @@ export default function HealthPolicyForm({
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
           {/* 1. Street Address */}
-          <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-            <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Street Address</span>
-            {editingResidenceField === 'address' ? (
-              <div className="flex items-center gap-2 flex-nowrap min-w-0">
+          <HorizontalFieldRow
+            label="Street Address"
+            value={clientResidence?.address}
+            isEditing={editingResidenceField === 'address'}
+            onStartEdit={() => {
+              setEditingResidenceField('address');
+              setResidenceDraftValue(clientResidence?.address || '');
+              setResidenceFieldError(null);
+            }}
+            renderEditor={() => (
+              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                 <input
                   type="text"
                   value={residenceDraftValue}
                   onChange={e => setResidenceDraftValue(e.target.value)}
                   placeholder="Street address..."
-                  className="w-48 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                   autoFocus
                   onKeyDown={e => {
-                    if (e.key === 'Escape') setEditingResidenceField(null);
-                    if (e.key === 'Enter') handleInlineSaveResidenceField('address', residenceDraftValue);
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setEditingResidenceField(null);
+                    }
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      handleInlineSaveResidenceField('address', residenceDraftValue);
+                    }
                   }}
                 />
                 <button
                   type="button"
                   disabled={residenceFieldSaving}
                   onClick={() => handleInlineSaveResidenceField('address', residenceDraftValue)}
-                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                   title="Save"
                 >
                   ✓
@@ -3793,50 +3999,51 @@ export default function HealthPolicyForm({
                 <button
                   type="button"
                   onClick={() => setEditingResidenceField(null)}
-                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                   title="Cancel"
                 >
                   ✕
                 </button>
-                {residenceFieldError && <span className="text-rose-500 text-[10px] pl-1">{residenceFieldError}</span>}
+                {residenceFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{residenceFieldError}</span>}
               </div>
-            ) : (
-              <span
-                onClick={() => {
-                  setEditingResidenceField('address');
-                  setResidenceDraftValue(clientResidence?.address || '');
-                  setResidenceFieldError(null);
-                }}
-                className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                title="Click to edit Street Address"
-              >
-                {clientResidence?.address || '—'}
-              </span>
             )}
-          </div>
+          />
 
           {/* 2. City */}
-          <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-            <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">City</span>
-            {editingResidenceField === 'city' ? (
-              <div className="flex items-center gap-2 flex-nowrap min-w-0">
+          <HorizontalFieldRow
+            label="City"
+            value={clientResidence?.city}
+            isEditing={editingResidenceField === 'city'}
+            onStartEdit={() => {
+              setEditingResidenceField('city');
+              setResidenceDraftValue(clientResidence?.city || '');
+              setResidenceFieldError(null);
+            }}
+            renderEditor={() => (
+              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                 <input
                   type="text"
                   value={residenceDraftValue}
                   onChange={e => setResidenceDraftValue(e.target.value)}
                   placeholder="City..."
-                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full max-w-[260px]"
+                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                   autoFocus
                   onKeyDown={e => {
-                    if (e.key === 'Escape') setEditingResidenceField(null);
-                    if (e.key === 'Enter') handleInlineSaveResidenceField('city', residenceDraftValue);
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setEditingResidenceField(null);
+                    }
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      handleInlineSaveResidenceField('city', residenceDraftValue);
+                    }
                   }}
                 />
                 <button
                   type="button"
                   disabled={residenceFieldSaving}
                   onClick={() => handleInlineSaveResidenceField('city', residenceDraftValue)}
-                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                   title="Save"
                 >
                   ✓
@@ -3844,50 +4051,51 @@ export default function HealthPolicyForm({
                 <button
                   type="button"
                   onClick={() => setEditingResidenceField(null)}
-                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                   title="Cancel"
                 >
                   ✕
                 </button>
-                {residenceFieldError && <span className="text-rose-500 text-[10px] pl-1">{residenceFieldError}</span>}
+                {residenceFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{residenceFieldError}</span>}
               </div>
-            ) : (
-              <span
-                onClick={() => {
-                  setEditingResidenceField('city');
-                  setResidenceDraftValue(clientResidence?.city || '');
-                  setResidenceFieldError(null);
-                }}
-                className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                title="Click to edit City"
-              >
-                {clientResidence?.city || '—'}
-              </span>
             )}
-          </div>
+          />
 
           {/* 3. State */}
-          <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-            <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">State</span>
-            {editingResidenceField === 'state' ? (
-              <div className="flex items-center gap-2 flex-nowrap min-w-0">
+          <HorizontalFieldRow
+            label="State"
+            value={clientResidence?.state}
+            isEditing={editingResidenceField === 'state'}
+            onStartEdit={() => {
+              setEditingResidenceField('state');
+              setResidenceDraftValue(clientResidence?.state || '');
+              setResidenceFieldError(null);
+            }}
+            renderEditor={() => (
+              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                 <input
                   type="text"
                   value={residenceDraftValue}
                   onChange={e => setResidenceDraftValue(e.target.value)}
                   placeholder="State (e.g. FL)..."
-                  className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                   autoFocus
                   onKeyDown={e => {
-                    if (e.key === 'Escape') setEditingResidenceField(null);
-                    if (e.key === 'Enter') handleInlineSaveResidenceField('state', residenceDraftValue);
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setEditingResidenceField(null);
+                    }
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      handleInlineSaveResidenceField('state', residenceDraftValue);
+                    }
                   }}
                 />
                 <button
                   type="button"
                   disabled={residenceFieldSaving}
                   onClick={() => handleInlineSaveResidenceField('state', residenceDraftValue)}
-                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                   title="Save"
                 >
                   ✓
@@ -3895,50 +4103,51 @@ export default function HealthPolicyForm({
                 <button
                   type="button"
                   onClick={() => setEditingResidenceField(null)}
-                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                   title="Cancel"
                 >
                   ✕
                 </button>
-                {residenceFieldError && <span className="text-rose-500 text-[10px] pl-1">{residenceFieldError}</span>}
+                {residenceFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{residenceFieldError}</span>}
               </div>
-            ) : (
-              <span
-                onClick={() => {
-                  setEditingResidenceField('state');
-                  setResidenceDraftValue(clientResidence?.state || '');
-                  setResidenceFieldError(null);
-                }}
-                className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                title="Click to edit State"
-              >
-                {clientResidence?.state || '—'}
-              </span>
             )}
-          </div>
+          />
 
           {/* 4. Zip Code */}
-          <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-            <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">Zip Code</span>
-            {editingResidenceField === 'zip_code' ? (
-              <div className="h-[34px] w-full max-w-[180px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans">
+          <HorizontalFieldRow
+            label="Zip Code"
+            value={clientResidence?.zipCode}
+            isEditing={editingResidenceField === 'zip_code'}
+            onStartEdit={() => {
+              setEditingResidenceField('zip_code');
+              setResidenceDraftValue(clientResidence?.zipCode || '');
+              setResidenceFieldError(null);
+            }}
+            renderEditor={() => (
+              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                 <input
                   type="text"
                   value={residenceDraftValue}
                   onChange={e => setResidenceDraftValue(e.target.value)}
                   placeholder="Zip code..."
-                  className="w-24 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                   autoFocus
                   onKeyDown={e => {
-                    if (e.key === 'Escape') setEditingResidenceField(null);
-                    if (e.key === 'Enter') handleInlineSaveResidenceField('zip_code', residenceDraftValue);
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setEditingResidenceField(null);
+                    }
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      handleInlineSaveResidenceField('zip_code', residenceDraftValue);
+                    }
                   }}
                 />
                 <button
                   type="button"
                   disabled={residenceFieldSaving}
                   onClick={() => handleInlineSaveResidenceField('zip_code', residenceDraftValue)}
-                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                   title="Save"
                 >
                   ✓
@@ -3946,50 +4155,51 @@ export default function HealthPolicyForm({
                 <button
                   type="button"
                   onClick={() => setEditingResidenceField(null)}
-                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                   title="Cancel"
                 >
                   ✕
                 </button>
-                {residenceFieldError && <span className="text-rose-500 text-[10px] pl-1">{residenceFieldError}</span>}
+                {residenceFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{residenceFieldError}</span>}
               </div>
-            ) : (
-              <span
-                onClick={() => {
-                  setEditingResidenceField('zip_code');
-                  setResidenceDraftValue(clientResidence?.zipCode || '');
-                  setResidenceFieldError(null);
-                }}
-                className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                title="Click to edit Zip Code"
-              >
-                {clientResidence?.zipCode || '—'}
-              </span>
             )}
-          </div>
+          />
 
           {/* 5. County */}
-          <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
-            <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">County</span>
-            {editingResidenceField === 'county' ? (
-              <div className="flex items-center gap-2 flex-nowrap min-w-0">
+          <HorizontalFieldRow
+            label="County"
+            value={clientResidence?.county}
+            isEditing={editingResidenceField === 'county'}
+            onStartEdit={() => {
+              setEditingResidenceField('county');
+              setResidenceDraftValue(clientResidence?.county || '');
+              setResidenceFieldError(null);
+            }}
+            renderEditor={() => (
+              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
                 <input
                   type="text"
                   value={residenceDraftValue}
                   onChange={e => setResidenceDraftValue(e.target.value)}
                   placeholder="County..."
-                  className="w-32 bg-slate-50 border border-blue-400 rounded px-2 py-0.5 text-xs text-slate-900 font-semibold outline-none"
+                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
                   autoFocus
                   onKeyDown={e => {
-                    if (e.key === 'Escape') setEditingResidenceField(null);
-                    if (e.key === 'Enter') handleInlineSaveResidenceField('county', residenceDraftValue);
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setEditingResidenceField(null);
+                    }
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      handleInlineSaveResidenceField('county', residenceDraftValue);
+                    }
                   }}
                 />
                 <button
                   type="button"
                   disabled={residenceFieldSaving}
                   onClick={() => handleInlineSaveResidenceField('county', residenceDraftValue)}
-                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold"
+                  className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
                   title="Save"
                 >
                   ✓
@@ -3997,27 +4207,15 @@ export default function HealthPolicyForm({
                 <button
                   type="button"
                   onClick={() => setEditingResidenceField(null)}
-                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold"
+                  className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
                   title="Cancel"
                 >
                   ✕
                 </button>
-                {residenceFieldError && <span className="text-rose-500 text-[10px] pl-1">{residenceFieldError}</span>}
+                {residenceFieldError && <span className="text-rose-500 text-xs pl-1 shrink-0">{residenceFieldError}</span>}
               </div>
-            ) : (
-              <span
-                onClick={() => {
-                  setEditingResidenceField('county');
-                  setResidenceDraftValue(clientResidence?.county || '');
-                  setResidenceFieldError(null);
-                }}
-                className="text-[15px] font-normal text-[#253247] leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors"
-                title="Click to edit County"
-              >
-                {clientResidence?.county || '—'}
-              </span>
             )}
-          </div>
+          />
         </div>
       </div>
 

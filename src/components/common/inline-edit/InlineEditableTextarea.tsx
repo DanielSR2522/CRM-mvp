@@ -82,7 +82,7 @@ export default function InlineEditableTextarea({
       {label && <span className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1">{label}</span>}
 
       {isEditing ? (
-        <div className="space-y-2 w-full max-w-[320px] sm:max-w-[420px]">
+        <div className="space-y-2 w-full flex-1 min-w-0">
           <textarea
             ref={textareaRef}
             rows={rows}

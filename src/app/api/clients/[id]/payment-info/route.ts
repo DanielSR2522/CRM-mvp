@@ -243,76 +243,58 @@ export async function POST(
     const { encryptPaymentField } = await import('@/lib/payments/encryption');
 
     // Process Bank Account Fields
-    let finalBankName = bank_name ? String(bank_name).trim() : null;
+    let finalBankName = bank_name !== undefined ? (bank_name ? String(bank_name).trim() : null) : (existing?.bank_name || null);
     let finalRoutingEnc = existing?.routing_number_encrypted || null;
     let finalAccountEnc = existing?.account_number_encrypted || null;
     let finalBankLast4 = existing?.bank_last4 || null;
 
-    if (has_bank_account) {
-      if (routing_number && account_number) {
-        const cleanRouting = String(routing_number).replace(/\D/g, '');
-        const cleanAccount = String(account_number).replace(/\D/g, '');
-
-        if (!cleanRouting || !cleanAccount) {
-          return NextResponse.json({ error: 'Routing number and account number must contain valid digits' }, { status: 400 });
-        }
-
+    if (routing_number && !String(routing_number).includes('•') && !String(routing_number).includes('*')) {
+      const cleanRouting = String(routing_number).replace(/\D/g, '');
+      if (cleanRouting) {
         const rEnc = encryptPaymentField(cleanRouting, clientId, 'routing_number');
-        const aEnc = encryptPaymentField(cleanAccount, clientId, 'account_number');
-
         finalRoutingEnc = JSON.stringify(rEnc);
+      }
+    }
+
+    if (account_number && !String(account_number).includes('•') && !String(account_number).includes('*')) {
+      const cleanAccount = String(account_number).replace(/\D/g, '');
+      if (cleanAccount) {
+        const aEnc = encryptPaymentField(cleanAccount, clientId, 'account_number');
         finalAccountEnc = JSON.stringify(aEnc);
         finalBankLast4 = cleanAccount.slice(-4);
       }
-    } else {
-      // Clear bank method details when disabled
-      finalBankName = null;
-      finalRoutingEnc = null;
-      finalAccountEnc = null;
-      finalBankLast4 = null;
     }
 
     // Process Card Fields
-    let finalCardType = card_type ? String(card_type).trim() : null;
+    let finalCardType = card_type !== undefined ? (card_type ? String(card_type).trim() : null) : (existing?.card_type || null);
     let finalCardEnc = existing?.card_number_encrypted || null;
     let finalCardLast4 = existing?.card_last4 || null;
-    let finalExpMonth = expiration_month ? String(expiration_month).trim() : null;
-    let finalExpYear = expiration_year ? String(expiration_year).trim() : null;
+    let finalExpMonth = expiration_month !== undefined ? (expiration_month ? String(expiration_month).trim() : null) : (existing?.expiration_month || null);
+    let finalExpYear = expiration_year !== undefined ? (expiration_year ? String(expiration_year).trim() : null) : (existing?.expiration_year || null);
 
-    if (has_card) {
-      if (card_number) {
-        const cleanCard = String(card_number).replace(/\D/g, '');
-        if (cleanCard.length < 12) {
-          return NextResponse.json({ error: 'Invalid card number' }, { status: 400 });
-        }
-
+    if (card_number && !String(card_number).includes('•') && !String(card_number).includes('*')) {
+      const cleanCard = String(card_number).replace(/\D/g, '');
+      if (cleanCard.length >= 12) {
         const cEnc = encryptPaymentField(cleanCard, clientId, 'card_number');
         finalCardEnc = JSON.stringify(cEnc);
         finalCardLast4 = cleanCard.slice(-4);
       }
-    } else {
-      // Clear card method details when disabled
-      finalCardType = null;
-      finalCardEnc = null;
-      finalCardLast4 = null;
-      finalExpMonth = null;
-      finalExpYear = null;
     }
 
     // Upsert payment information record
     const upsertPayload = {
       client_id: clientId,
       agent_id: user.id,
-      auto_pay: Boolean(auto_pay),
-      payment_day: pDay,
-      associated_address: associated_address ? String(associated_address).trim() : null,
-      account_holder_name: account_holder_name ? String(account_holder_name).trim() : null,
-      has_bank_account: Boolean(has_bank_account),
+      auto_pay: auto_pay !== undefined ? Boolean(auto_pay) : (existing?.auto_pay ?? false),
+      payment_day: payment_day !== undefined ? pDay : (existing?.payment_day ?? null),
+      associated_address: associated_address !== undefined ? (associated_address ? String(associated_address).trim() : null) : (existing?.associated_address || null),
+      account_holder_name: account_holder_name !== undefined ? (account_holder_name ? String(account_holder_name).trim() : null) : (existing?.account_holder_name || null),
+      has_bank_account: has_bank_account !== undefined ? Boolean(has_bank_account) : (existing?.has_bank_account ?? false),
       bank_name: finalBankName,
       routing_number_encrypted: finalRoutingEnc,
       account_number_encrypted: finalAccountEnc,
       bank_last4: finalBankLast4,
-      has_card: Boolean(has_card),
+      has_card: has_card !== undefined ? Boolean(has_card) : (existing?.has_card ?? false),
       card_type: finalCardType,
       card_number_encrypted: finalCardEnc,
       card_last4: finalCardLast4,

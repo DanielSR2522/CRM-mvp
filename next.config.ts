@@ -1,7 +1,14 @@
 import type { NextConfig } from "next";
 
+import path from "path";
+
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
   serverExternalPackages: [
+    'playwright',
+    'playwright-core',
     'tesseract.js',
     'tesseract.js-core',
     'bmp-js',

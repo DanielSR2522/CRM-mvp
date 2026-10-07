@@ -134,7 +134,7 @@ export default function InlineEditableAddress({
               onAddressSelected={handleGoogleAddressSelected}
               placeholder="Search or enter street address..."
               disabled={saving}
-              className={`${BASE_INLINE_INPUT_CLASSES} w-full max-w-[320px]`}
+              className={`${BASE_INLINE_INPUT_CLASSES} w-full`}
             />
           </div>
 
@@ -146,7 +146,7 @@ export default function InlineEditableAddress({
                 value={draftCity}
                 onChange={e => setDraftCity(e.target.value)}
                 disabled={saving}
-                className={`${BASE_INLINE_INPUT_CLASSES} w-full max-w-[260px]`}
+                className={`${BASE_INLINE_INPUT_CLASSES} w-full`}
               />
             </div>
             <div>
@@ -155,7 +155,7 @@ export default function InlineEditableAddress({
                 value={normalizeStateToCode(draftState)}
                 onChange={e => setDraftState(e.target.value)}
                 disabled={saving}
-                className={`${BASE_INLINE_SELECT_CLASSES} w-full max-w-[260px]`}
+                className={`${BASE_INLINE_SELECT_CLASSES} w-full`}
               >
                 <option value="">Select State...</option>
                 {US_STATES_52.map(s => (
@@ -172,7 +172,7 @@ export default function InlineEditableAddress({
                 value={draftZip}
                 onChange={e => setDraftZip(e.target.value)}
                 disabled={saving}
-                className={`${BASE_INLINE_INPUT_CLASSES} w-full max-w-[180px]`}
+                className={`${BASE_INLINE_INPUT_CLASSES} w-full`}
               />
             </div>
           </div>
@@ -185,7 +185,7 @@ export default function InlineEditableAddress({
               onChange={e => setDraftCounty(e.target.value)}
               disabled={saving}
               placeholder="County..."
-              className={`${BASE_INLINE_INPUT_CLASSES} w-full max-w-[260px]`}
+              className={`${BASE_INLINE_INPUT_CLASSES} w-full`}
             />
           </div>
 

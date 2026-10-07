@@ -25,13 +25,40 @@ export async function fetchAgentBusinessLines(userId: string): Promise<BusinessL
   try {
     const { data, error } = await supabase
       .from('profiles')
-      .select('business_lines')
+      .select('business_lines, role')
       .eq('id', userId)
       .maybeSingle();
 
     console.log('LOADED BUSINESS LINES FROM DB SERVICE:', data ? data.business_lines : null);
 
-    if (error || !data || data.business_lines === null || data.business_lines === undefined || !Array.isArray(data.business_lines)) {
+    if (error || !data) {
+      return DEFAULT_BUSINESS_LINES;
+    }
+
+    // If user is an assistant, check if they inherit from their supervising agent
+    if (data.role === 'assistant') {
+      const { data: rel } = await supabase
+        .from('agent_assistant_relationships')
+        .select('agent_profile_id')
+        .eq('assistant_profile_id', userId)
+        .maybeSingle();
+
+      if (rel?.agent_profile_id) {
+        const { data: agentProfile } = await supabase
+          .from('profiles')
+          .select('business_lines')
+          .eq('id', rel.agent_profile_id)
+          .maybeSingle();
+
+        if (agentProfile?.business_lines && Array.isArray(agentProfile.business_lines)) {
+          return agentProfile.business_lines.filter((b: any): b is BusinessLine =>
+            DEFAULT_BUSINESS_LINES.includes(b as BusinessLine)
+          );
+        }
+      }
+    }
+
+    if (data.business_lines === null || data.business_lines === undefined || !Array.isArray(data.business_lines)) {
       return DEFAULT_BUSINESS_LINES;
     }
 

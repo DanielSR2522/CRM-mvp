@@ -373,6 +373,90 @@ export async function fetchHealthDocuments(healthPolicyId: string): Promise<Heal
   return data || [];
 }
 
+/**
+ * Efficiently count all unique documents for a client profile across modules (client_documents,
+ * policy_documents, life_policy_documents, and health_policy_documents), matching profile inclusion rules.
+ */
+export async function fetchClientDocumentsCount(clientId: string): Promise<number> {
+  const docIds = new Set<string>();
+
+  // 1. General & Module client_documents
+  const generalPromise = supabase
+    .from('client_documents')
+    .select('id')
+    .eq('client_id', clientId);
+
+  // 2. P&C policy_documents
+  const pcPromise = supabase
+    .from('policies')
+    .select('id, policy_documents(id)')
+    .eq('client_id', clientId);
+
+  // 3. Life life_policy_documents
+  const lifePromise = supabase
+    .from('life_policies')
+    .select('id, life_policy_documents(id)')
+    .eq('client_id', clientId);
+
+  // 4. Health health_policy_documents
+  const healthPromise = supabase
+    .from('health_policies')
+    .select('id, health_policy_documents(id)')
+    .eq('client_id', clientId);
+
+  const [genRes, pcRes, lifeRes, healthRes] = await Promise.allSettled([
+    generalPromise,
+    pcPromise,
+    lifePromise,
+    healthPromise
+  ]);
+
+  let anySuccess = false;
+  let lastError: any = null;
+
+  if (genRes.status === 'fulfilled' && !genRes.value.error) {
+    anySuccess = true;
+    (genRes.value.data || []).forEach((d: any) => {
+      if (d.id) docIds.add(String(d.id));
+    });
+  } else if (genRes.status === 'rejected' || (genRes.status === 'fulfilled' && genRes.value.error)) {
+    lastError = genRes.status === 'rejected' ? genRes.reason : genRes.value.error;
+  }
+
+  if (pcRes.status === 'fulfilled' && !pcRes.value.error) {
+    anySuccess = true;
+    (pcRes.value.data || []).forEach((p: any) => {
+      (p.policy_documents || []).forEach((d: any) => {
+        if (d.id) docIds.add(String(d.id));
+      });
+    });
+  }
+
+  if (lifeRes.status === 'fulfilled' && !lifeRes.value.error) {
+    anySuccess = true;
+    (lifeRes.value.data || []).forEach((lp: any) => {
+      (lp.life_policy_documents || []).forEach((d: any) => {
+        if (d.id) docIds.add(String(d.id));
+      });
+    });
+  }
+
+  if (healthRes.status === 'fulfilled' && !healthRes.value.error) {
+    anySuccess = true;
+    (healthRes.value.data || []).forEach((hp: any) => {
+      (hp.health_policy_documents || []).forEach((d: any) => {
+        if (d.id) docIds.add(String(d.id));
+      });
+    });
+  }
+
+  if (!anySuccess && lastError) {
+    throw new Error(`Failed to fetch documents count: ${lastError?.message || lastError}`);
+  }
+
+  return docIds.size;
+}
+
 // --- Tax Household Members Helpers ---
 export async function fetchTaxHouseholdMembers(healthPolicyId: string): Promise<HealthTaxHouseholdMember[]> {
   const { data, error } = await supabase

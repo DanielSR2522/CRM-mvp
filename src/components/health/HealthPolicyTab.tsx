@@ -11,6 +11,7 @@ import HealthLeftRail from './HealthLeftRail';
 import HealthClientHeader, { ClientProfileNavTabs } from './HealthClientHeader';
 import MarketplaceSearchWorkspace from './MarketplaceSearchWorkspace';
 import HealthMedicalWorkspace from './HealthMedicalWorkspace';
+import HealthRenewalWorkspace from './HealthRenewalWorkspace';
 
 interface HealthPolicyTabProps {
   clientId: string;
@@ -42,10 +43,10 @@ export default function HealthPolicyTab({
   const [healthPolicy, setHealthPolicy] = useState<HealthPolicy | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
-  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links'>('summary');
+  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links' | 'renewals'>('summary');
   const [marketplacePlan, setMarketplacePlan] = useState<any | null>(null);
   const [marketplaceContextInfo, setMarketplaceContextInfo] = useState<any | null>(null);
-  
+
   const [toast, setToast] = useState<{ title: string; description: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
   const addToast = useCallback((t: { title: string; description: string; type: 'success' | 'error' | 'warning' }) => {
@@ -129,7 +130,56 @@ export default function HealthPolicyTab({
 
         {/* Right Main Content Panel (THE SOLE VERTICAL SCROLL CONTAINER) */}
         <main id="health-main-content-panel" className="p-6 flex-1 bg-white space-y-6 overflow-y-auto min-h-0 h-full">
-        {activeSubTab === 'marketplace' ? (
+        {activeSubTab === 'renewals' ? (
+          <HealthRenewalWorkspace
+            healthPolicy={healthPolicy}
+            clientId={clientId}
+            addToast={addToast}
+            onPolicyUpdated={(p) => {
+              setHealthPolicy(p);
+              loadPolicy(true);
+            }}
+            onReturnToSummary={() => setActiveSubTab('summary')}
+          />
+        ) : activeSubTab === 'marketplace' ? (
+          <MarketplaceSearchWorkspace
+            healthPolicyId={healthPolicy?.id}
+            context={marketplaceContextInfo?.context || {
+              coverageYear: 2026,
+              zipCode: null,
+              state: null,
+              countyName: null,
+              countyFips: null,
+              householdIncome: null,
+              householdSize: 1,
+              coveredApplicants: 1,
+              people: [],
+              validationErrors: [],
+            }}
+            onApplyPlan={async (plan) => {
+              if (marketplaceContextInfo?.onApplyPlan) {
+                const res = await marketplaceContextInfo.onApplyPlan(plan);
+                await loadPolicy();
+                return res;
+              }
+            }}
+            onUnlinkPlan={async () => {
+              if (healthPolicy?.id) {
+                const { unlinkMarketplacePlan } = await import('@/lib/marketplace/snapshot-service');
+                const res = await unlinkMarketplacePlan(healthPolicy.id);
+                if (res.success) {
+                  setMarketplacePlan(null);
+                  await loadPolicy();
+                }
+                return res;
+              }
+              return { success: false, error: 'No policy ID' };
+            }}
+            appliedPlan={marketplaceContextInfo?.appliedPlan || null}
+            addToast={addToast}
+            onReturnToSummary={() => setActiveSubTab('summary')}
+          />
+        ) : activeSubTab === 'medical' && healthPolicy ? (
           <MarketplaceSearchWorkspace
             healthPolicyId={healthPolicy?.id}
             context={marketplaceContextInfo?.context || {

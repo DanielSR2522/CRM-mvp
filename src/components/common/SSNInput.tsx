@@ -14,6 +14,7 @@ interface SSNInputProps {
   className?: string;
   name?: string;
   id?: string;
+  autoFocus?: boolean;
   onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void;
 }
 
@@ -28,6 +29,7 @@ export default function SSNInput({
   className = 'crm-input w-full',
   name = 'ssn',
   id,
+  autoFocus = false,
   onBlur,
 }: SSNInputProps) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -47,6 +49,7 @@ export default function SSNInput({
         disabled={disabled}
         readOnly={readOnly}
         required={required}
+        autoFocus={autoFocus}
         placeholder={placeholder}
         maxLength={11}
         className={`${className} ${error ? 'border-[#EF4444] focus:ring-[#EF4444]' : ''}`}

@@ -20,33 +20,7 @@ export type InlineFieldType =
   | 'textarea';
 
 export function getInlineEditorWidthClass(fieldType?: InlineFieldType | string): string {
-  switch (fieldType) {
-    case 'date':
-      return 'w-full max-w-[220px]';
-    case 'yes_no':
-    case 'zip':
-      return 'w-full max-w-[180px]';
-    case 'long_text':
-    case 'security_question':
-    case 'notes':
-      return 'w-full max-w-[320px]';
-    case 'textarea':
-      return 'w-full max-w-[320px] sm:max-w-[420px]';
-    case 'text':
-    case 'email':
-    case 'phone':
-    case 'ssn':
-    case 'secret':
-    case 'credential':
-    case 'number':
-    case 'currency':
-    case 'select':
-    case 'state':
-    case 'short_id':
-    case 'policy_number':
-    default:
-      return 'w-full max-w-[260px]';
-  }
+  return 'w-full flex-1 min-w-0';
 }
 
 export const BASE_INLINE_INPUT_CLASSES =

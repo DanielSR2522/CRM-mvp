@@ -1,10 +1,13 @@
+export type HealthPolicyStatus = 'Sold' | 'Enrolled' | 'Pending' | 'Cancelled' | 'Active';
+export type HealthActionPending = 'Payment' | 'Enroll' | 'Documents' | 'Verification' | 'Call To Marketplace' | 'Completed';
+
 export interface HealthPolicy {
   id: string;
   client_id: string;
   active: boolean;
   year_renovation: number | null;
-  policy_status: 'Active' | 'Pending' | 'Cancelled';
-  action_pending: 'Documents' | 'Verification' | 'Call To Marketplace' | 'Completed';
+  policy_status: HealthPolicyStatus;
+  action_pending: HealthActionPending;
   renovation_status: 'New Policy 2026' | 'Renewal 2026' | 'Only Service' | null;
   npn: string | null;
   company_2026: string | null;

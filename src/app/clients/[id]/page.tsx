@@ -200,6 +200,55 @@ const formatTimelineTag = (label: string | null | undefined): string => {
     .join(' | ');
 };
 
+function HorizontalFieldRow({
+  label,
+  value,
+  isEditing,
+  onStartEdit,
+  readOnly = false,
+  renderEditor,
+  valueClassName = '',
+}: {
+  label: string;
+  value: React.ReactNode;
+  isEditing?: boolean;
+  onStartEdit?: () => void;
+  readOnly?: boolean;
+  renderEditor?: () => React.ReactNode;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="py-[2px] grid grid-cols-[185px_minmax(0,1fr)] items-center gap-x-[18px] min-h-[36px]">
+      <span className="text-[15px] font-normal text-[#52627A] leading-snug text-right w-[185px] pr-[18px] leading-snug break-words shrink-0">
+        {label}
+      </span>
+      {isEditing && renderEditor ? (
+        renderEditor()
+      ) : readOnly ? (
+        <span className={`text-[15px] font-normal text-[#253247] leading-snug select-none ${valueClassName}`}>
+          {value || '—'}
+        </span>
+      ) : (
+        <div
+          onClick={onStartEdit}
+          className={`group inline-flex items-center gap-1.5 cursor-pointer text-[15px] font-normal text-[#253247] leading-snug transition-colors ${valueClassName}`}
+          title={`Click to edit ${label}`}
+        >
+          <span>{value || '—'}</span>
+          <svg
+            className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ClientProfilePage({ params }: { params: Promise<{ id: string }> }) {
   return (
     <Suspense fallback={
@@ -219,6 +268,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const searchParams = useSearchParams();
   const { id: clientId } = use(params);
   const { isLineEnabled, loading: businessLinesLoading } = useBusinessLines();
+  const isPcEnabled = isLineEnabled('property_casualty');
 
   const isValidUuid = (uuid: string) => {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid);
@@ -862,6 +912,171 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [cardCvvVal, setCardCvvVal] = useState(''); // TRANSIENT ONLY - NEVER PERSISTED
   const [isReplacingCard, setIsReplacingCard] = useState(false);
 
+  const detectCardBrand = (numberOrLast4?: string): string => {
+    if (!numberOrLast4) return '—';
+    const clean = numberOrLast4.replace(/\D/g, '');
+    if (clean.startsWith('4')) return 'Visa';
+    if (clean.startsWith('51') || clean.startsWith('52') || clean.startsWith('53') || clean.startsWith('54') || clean.startsWith('55')) return 'Mastercard';
+    if (clean.startsWith('34') || clean.startsWith('37')) return 'American Express';
+    if (clean.startsWith('6011') || clean.startsWith('65')) return 'Discover';
+    return 'Visa / Mastercard';
+  };
+
+  const getSelectedPaymentType = (): string => {
+    if (hasBankAccount && hasCardMethod) {
+      return cardTypeVal === 'Credit' ? 'Bank Account + Credit Card' : 'Bank Account + Debit Card';
+    }
+    if (hasBankAccount) {
+      return 'Bank Account';
+    }
+    if (hasCardMethod) {
+      return cardTypeVal === 'Credit' ? 'Credit Card' : 'Debit Card';
+    }
+    return 'None';
+  };
+
+  const handleSavePaymentType = async (selectedType: string) => {
+    if (!isValidUuid(clientId)) return;
+    try {
+      setPaymentInfoSaving(true);
+      setPaymentInfoError(null);
+
+      let newHasBank = false;
+      let newHasCard = false;
+      let newCardType: 'Debit' | 'Credit' = cardTypeVal || 'Debit';
+
+      if (selectedType === 'Bank Account') {
+        newHasBank = true;
+        newHasCard = false;
+      } else if (selectedType === 'Debit Card') {
+        newHasBank = false;
+        newHasCard = true;
+        newCardType = 'Debit';
+      } else if (selectedType === 'Credit Card') {
+        newHasBank = false;
+        newHasCard = true;
+        newCardType = 'Credit';
+      } else if (selectedType === 'Bank Account + Debit Card') {
+        newHasBank = true;
+        newHasCard = true;
+        newCardType = 'Debit';
+      } else if (selectedType === 'Bank Account + Credit Card') {
+        newHasBank = true;
+        newHasCard = true;
+        newCardType = 'Credit';
+      } else {
+        newHasBank = false;
+        newHasCard = false;
+      }
+
+      const payload: any = {
+        auto_pay: paymentAutoPay,
+        payment_day: paymentDayVal,
+        associated_address: paymentAddress,
+        account_holder_name: paymentHolderName,
+        has_bank_account: newHasBank,
+        bank_name: bankName,
+        routing_number: bankRoutingNumber,
+        account_number: bankAccountNumber,
+        has_card: newHasCard,
+        card_type: newCardType,
+        card_number: cardNumberVal,
+        expiration_month: cardExpMonth,
+        expiration_year: cardExpYear,
+      };
+
+      const res = await fetch(`/api/clients/${clientId}/payment-info`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to update payment type');
+      }
+
+      const saved = await res.json();
+      setHasBankAccount(Boolean(saved.has_bank_account));
+      setHasCardMethod(Boolean(saved.has_card));
+      setCardTypeVal(saved.card_type === 'Credit' ? 'Credit' : 'Debit');
+      if (saved.bank_name !== undefined) setBankName(saved.bank_name || '');
+      if (saved.routing_number !== undefined) setBankRoutingNumber(saved.routing_number || '');
+      if (saved.account_number !== undefined) setBankAccountNumber(saved.account_number || '');
+      if (saved.bank_last4 !== undefined) setBankLast4(saved.bank_last4 || '');
+      if (saved.card_number !== undefined) setCardNumberVal(saved.card_number || '');
+      if (saved.card_last4 !== undefined) setCardLast4Val(saved.card_last4 || '');
+      if (saved.expiration_month !== undefined) setCardExpMonth(saved.expiration_month || '');
+      if (saved.expiration_year !== undefined) setCardExpYear(saved.expiration_year || '');
+    } catch (err: any) {
+      console.error('handleSavePaymentType error:', err);
+      setPaymentInfoError(err.message || 'Failed to update payment type');
+    } finally {
+      setPaymentInfoSaving(false);
+    }
+  };
+
+  const saveSinglePaymentField = async (fieldName: string, value: any) => {
+    if (!isValidUuid(clientId)) return;
+    try {
+      setPaymentInfoSaving(true);
+      setPaymentInfoError(null);
+
+      const payload: any = {
+        auto_pay: fieldName === 'auto_pay' ? Boolean(value) : paymentAutoPay,
+        payment_day: fieldName === 'payment_day' ? (value === '' || value === null ? null : Number(value)) : paymentDayVal,
+        associated_address: fieldName === 'associated_address' ? value : paymentAddress,
+        account_holder_name: fieldName === 'account_holder_name' ? value : paymentHolderName,
+        has_bank_account: fieldName === 'has_bank_account' ? Boolean(value) : hasBankAccount,
+        bank_name: fieldName === 'bank_name' ? value : bankName,
+        routing_number: fieldName === 'routing_number' ? value : bankRoutingNumber,
+        account_number: fieldName === 'account_number' ? value : bankAccountNumber,
+        has_card: fieldName === 'has_card' ? Boolean(value) : hasCardMethod,
+        card_type: fieldName === 'card_type' ? value : cardTypeVal,
+        card_number: fieldName === 'card_number' ? value : cardNumberVal,
+        expiration_month: fieldName === 'expiration_month' ? value : cardExpMonth,
+        expiration_year: fieldName === 'expiration_year' ? value : cardExpYear,
+      };
+
+      const res = await fetch(`/api/clients/${clientId}/payment-info`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to save payment information');
+      }
+
+      const saved = await res.json();
+      setPaymentAutoPay(Boolean(saved.auto_pay));
+      setPaymentDayVal(saved.payment_day ? Number(saved.payment_day) : null);
+      setPaymentAddress(saved.associated_address || '');
+      setPaymentHolderName(saved.account_holder_name || '');
+
+      setHasBankAccount(Boolean(saved.has_bank_account));
+      setBankName(saved.bank_name || '');
+      setBankRoutingNumber(saved.routing_number || '');
+      setBankAccountNumber(saved.account_number || '');
+      setBankLast4(saved.bank_last4 || '');
+
+      setHasCardMethod(Boolean(saved.has_card));
+      setCardTypeVal(saved.card_type === 'Credit' ? 'Credit' : 'Debit');
+      setCardNumberVal(saved.card_number || '');
+      setCardLast4Val(saved.card_last4 || '');
+      setCardExpMonth(saved.expiration_month || '');
+      setCardExpYear(saved.expiration_year || '');
+      setCardCvvVal('');
+    } catch (err: any) {
+      console.error('saveSinglePaymentField error:', err);
+      setPaymentInfoError(err.message || 'Failed to save payment field');
+      throw err;
+    } finally {
+      setPaymentInfoSaving(false);
+    }
+  };
+
   const loadPaymentInfo = useCallback(async () => {
     try {
       setPaymentInfoLoading(true);
@@ -1012,6 +1227,11 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [savingPersonal, setSavingPersonal] = useState(false);
   const [personalError, setPersonalError] = useState<string | null>(null);
 
+  // Personal Info Horizontal Row Inline Editing States
+  const [editingPersonalKey, setEditingPersonalKey] = useState<string | null>(null);
+  const [personalDraftValue, setPersonalDraftValue] = useState<any>(null);
+  const [personalFieldError, setPersonalFieldError] = useState<string | null>(null);
+
   // Co-Applicant States
   const [coApplicantInfo, setCoApplicantInfo] = useState<CoApplicantInformation | null>(null);
   const [coApplicantForm, setCoApplicantForm] = useState<CoApplicantInformation>({
@@ -1033,6 +1253,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     immigration_other_description: '',
   });
   const [loadingCoApplicant, setLoadingCoApplicant] = useState(false);
+
+  // Tax Return Count & Dependents States
+  const [taxMemberCount, setTaxMemberCount] = useState<number>(1);
+  const [healthPolicyId, setHealthPolicyId] = useState<string | null>(null);
+  const [availableHealthPolicies, setAvailableHealthPolicies] = useState<any[]>([]);
+  const [taxHouseholdMembers, setTaxHouseholdMembers] = useState<any[]>([]);
+  const [expandedDependentNumbers, setExpandedDependentNumbers] = useState<number[]>([]);
 
   // Residence States
   const [residenceInfo, setResidenceInfo] = useState<ClientResidenceInformation | null>(null);
@@ -1505,79 +1732,26 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
     if (['full_name', 'email', 'phone'].includes(fieldName)) {
       const syncedValue = (valToSave && String(valToSave).trim().length > 0) ? String(valToSave).trim() : null;
-      await supabase
-        .from('clients')
-        .update({ [fieldName]: syncedValue, updated_at: new Date().toISOString() })
-        .eq('id', clientId);
-      await fetchClientDetails();
+      if (!isCompanyClient || fieldName !== 'full_name') {
+        await supabase
+          .from('clients')
+          .update({ [fieldName]: syncedValue, updated_at: new Date().toISOString() })
+          .eq('id', clientId);
+        await fetchClientDetails();
+      }
     }
 
     setPersonalForm(prev => ({ ...prev, [fieldName]: valToSave }));
-    await fetchPersonalInformation();
+    await fetchPersonalInformation(false);
   };
-
-  
-
-
-  const saveResidenceField = async (fieldOrObject: string | Record<string, any>, val?: any) => {
-    if (!isValidUuid(clientId)) return;
-    let patch: Record<string, any> = {};
-    if (typeof fieldOrObject === 'string') {
-      patch[fieldOrObject] = val;
-    } else {
-      patch = { ...fieldOrObject };
-    }
-
-    const { data: existing } = await supabase
-      .from('client_residence_information')
-      .select('id')
-      .eq('client_id', clientId)
-      .maybeSingle();
-
-    if (existing) {
-      const { data: updated, error } = await supabase
-        .from('client_residence_information')
-        .update({ ...patch, updated_at: new Date().toISOString() })
-        .eq('client_id', clientId)
-        .select('*')
-        .maybeSingle();
-
-      if (error || !updated) throw error || new Error('Zero rows returned from residence update.');
-      setResidenceInfo(updated);
-    } else {
-      const { data: inserted, error } = await supabase
-        .from('client_residence_information')
-        .insert({ client_id: clientId, ...patch })
-        .select('*')
-        .maybeSingle();
-
-      if (error || !inserted) throw error || new Error('Zero rows returned from residence insert.');
-      setResidenceInfo(inserted);
-    }
-
-    setResidenceForm(prev => ({ ...prev, ...patch }));
-    if (patch.address) {
-      await supabase.from('clients').update({ address: patch.address, updated_at: new Date().toISOString() }).eq('id', clientId);
-      setClient((prev: any) => prev ? { ...prev, address: patch.address } : prev);
-    }
-  };
-
-  const saveIncomeField = async (incomeId: string, fieldName: string, value: any) => {
-    const { data: updated, error } = await supabase
-      .from('client_income_information')
-      .update({ [fieldName]: value, updated_at: new Date().toISOString() })
-      .eq('id', incomeId)
-      .select('*')
-      .maybeSingle();
-
-    if (error || !updated) throw error || new Error('Zero rows returned from income update.');
-    setIncomeList(prev => prev.map(inc => inc.id === incomeId ? updated : inc));
-  };
-
-
 
   const saveCoApplicantField = async (fieldName: string, value: any) => {
     if (!isValidUuid(clientId)) return;
+    let valToSave = value;
+    if ((fieldName === 'primary_phone' || fieldName === 'secondary_phone') && typeof value === 'string' && value.trim()) {
+      valToSave = normalizePhoneE164(value) ?? value;
+    }
+
     const { data: existing } = await supabase
       .from('client_co_applicant_information')
       .select('id')
@@ -1587,29 +1761,140 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     if (existing) {
       const { error } = await supabase
         .from('client_co_applicant_information')
-        .update({ [fieldName]: value, updated_at: new Date().toISOString() })
+        .update({ [fieldName]: valToSave, updated_at: new Date().toISOString() })
         .eq('client_id', clientId);
       if (error) throw error;
     } else {
       const { error } = await supabase
         .from('client_co_applicant_information')
-        .insert({ client_id: clientId, [fieldName]: value });
+        .insert({ client_id: clientId, [fieldName]: valToSave });
       if (error) throw error;
     }
 
-    setCoApplicantForm(prev => ({ ...prev, [fieldName]: value }));
-    await fetchCoApplicantInformation();
+    setCoApplicantForm(prev => ({ ...prev, [fieldName]: valToSave }));
+    await fetchCoApplicantInformation(false);
   };
 
-  const fetchPersonalInformation = useCallback(async () => {
+  const syncHouseholdDraftToSession = (count: number, members: any[]) => {
+    if (typeof window !== 'undefined' && clientId) {
+      try {
+        const draft = {
+          taxMemberCount: count,
+          members: (members || []).map(m => ({
+            member_number: m.member_number,
+            coverage: m.coverage !== false,
+            full_name: m.full_name || '',
+            date_of_birth: m.date_of_birth || null,
+            relationship_to_applicant: m.relationship_to_applicant || 'Son',
+            gender: m.gender || '',
+            us_citizen: m.us_citizen !== false,
+            uses_tobacco: !!m.uses_tobacco,
+            annual_income: m.annual_income || 0,
+            immigration_status: m.immigration_status || ''
+            // Note: SSN is intentionally excluded from browser storage for privacy
+          }))
+        };
+        sessionStorage.setItem(`health_household_draft_${clientId}`, JSON.stringify(draft));
+      } catch {}
+    }
+  };
+
+  const saveTaxMemberCount = async (count: number) => {
+    setTaxMemberCount(count);
+    syncHouseholdDraftToSession(count, taxHouseholdMembers);
+    if (!isValidUuid(clientId) || !healthPolicyId) return;
+
+    const { error } = await supabase
+      .from('health_policies')
+      .update({
+        number_of_people_on_tax_return: count,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', healthPolicyId);
+    if (error) throw error;
+  };
+
+  const saveDependentField = async (memberNumber: number, fieldName: string, value: any) => {
+    let updatedMembers: any[] = [];
+    setTaxHouseholdMembers(prev => {
+      const idx = prev.findIndex(m => m.member_number === memberNumber);
+      const existing = idx >= 0 ? prev[idx] : {
+        health_policy_id: healthPolicyId || '',
+        member_number: memberNumber,
+        coverage: true,
+        full_name: '',
+        date_of_birth: null,
+        relationship_to_applicant: 'Son',
+        gender: '',
+        us_citizen: true,
+        uses_tobacco: false,
+        annual_income: 0,
+        ssn_encrypted: null,
+      };
+      const updated = { ...existing, [fieldName]: value };
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = updated;
+        updatedMembers = copy;
+        return copy;
+      }
+      updatedMembers = [...prev, updated];
+      return updatedMembers;
+    });
+
+    syncHouseholdDraftToSession(taxMemberCount, updatedMembers);
+
+    if (!isValidUuid(clientId) || !healthPolicyId) {
+      return;
+    }
+
+    const existingDep = taxHouseholdMembers.find(m => m.member_number === memberNumber);
+    const updatedPayload: any = {
+      health_policy_id: healthPolicyId,
+      member_number: memberNumber,
+      coverage: existingDep?.coverage ?? true,
+      full_name: existingDep?.full_name || '',
+      date_of_birth: existingDep?.date_of_birth || null,
+      relationship_to_applicant: existingDep?.relationship_to_applicant || 'Son',
+      gender: existingDep?.gender || '',
+      us_citizen: existingDep?.us_citizen ?? true,
+      uses_tobacco: existingDep?.uses_tobacco ?? false,
+      annual_income: existingDep?.annual_income ?? 0,
+      ssn_encrypted: existingDep?.ssn_encrypted || null,
+      [fieldName]: value,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: saved, error } = await supabase
+      .from('health_tax_household_members')
+      .upsert(updatedPayload, { onConflict: 'health_policy_id,member_number' })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+
+    if (saved) {
+      setTaxHouseholdMembers(prev => {
+        const idx = prev.findIndex(m => m.member_number === memberNumber);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = saved;
+          return copy;
+        }
+        return [...prev, saved];
+      });
+    }
+  };
+
+  const fetchPersonalInformation = useCallback(async (isInitial = true) => {
     try {
-      setLoadingPersonal(true);
+      if (isInitial) setLoadingPersonal(true);
       if (!isValidUuid(clientId)) {
         setPersonalInfo(null);
         return;
       }
 
-      const [personalRes, clientRes] = await Promise.all([
+      const [personalRes, clientRes, allHpRes] = await Promise.all([
         supabase
           .from('client_personal_information')
           .select('*')
@@ -1619,7 +1904,13 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           .from('clients')
           .select('full_name, email, phone')
           .eq('id', clientId)
-          .maybeSingle()
+          .maybeSingle(),
+        supabase
+          .from('health_policies')
+          .select('id, plan_name, company_2026, year_renovation, policy_status, active, number_of_people_on_tax_return, created_at')
+          .eq('client_id', clientId)
+          .order('year_renovation', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false }),
       ]);
 
       if (personalRes.error) throw personalRes.error;
@@ -1645,6 +1936,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           gender: data.gender || '',
           marital_status: data.marital_status || '',
           preferred_language: data.preferred_language || '',
+          occupation: data.occupation || '',
           born_in_usa: data.born_in_usa ?? null,
           immigration_status: data.immigration_status || '',
           alien_number: data.alien_number || '',
@@ -1667,6 +1959,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           gender: '',
           marital_status: '',
           preferred_language: '',
+          occupation: '',
           born_in_usa: null,
           immigration_status: '',
           alien_number: '',
@@ -1677,6 +1970,47 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           immigration_other_description: '',
         });
       }
+
+      const healthPoliciesList = allHpRes.data || [];
+      setAvailableHealthPolicies(healthPoliciesList);
+
+      if (healthPoliciesList.length > 0) {
+        const chosenPolicy = healthPoliciesList.find(p => p.id === healthPolicyId) || healthPoliciesList[0];
+        setHealthPolicyId(chosenPolicy.id);
+
+        if (typeof chosenPolicy.number_of_people_on_tax_return === 'number' && chosenPolicy.number_of_people_on_tax_return >= 1) {
+          setTaxMemberCount(chosenPolicy.number_of_people_on_tax_return);
+        }
+        const { data: members } = await supabase
+          .from('health_tax_household_members')
+          .select('*')
+          .eq('health_policy_id', chosenPolicy.id)
+          .order('member_number', { ascending: true });
+
+        setTaxHouseholdMembers(members || []);
+      } else {
+        setHealthPolicyId(null);
+        if (typeof window !== 'undefined') {
+          try {
+            const rawDraft = sessionStorage.getItem(`health_household_draft_${clientId}`);
+            if (rawDraft) {
+              const parsed = JSON.parse(rawDraft);
+              if (parsed && typeof parsed.taxMemberCount === 'number') {
+                setTaxMemberCount(Math.max(1, parsed.taxMemberCount));
+                if (Array.isArray(parsed.members)) {
+                  setTaxHouseholdMembers(parsed.members);
+                }
+              }
+            } else {
+              setTaxHouseholdMembers([]);
+            }
+          } catch {
+            setTaxHouseholdMembers([]);
+          }
+        } else {
+          setTaxHouseholdMembers([]);
+        }
+      }
     } catch (err: any) {
       console.error('Error fetching personal info:', err);
     } finally {
@@ -1685,9 +2019,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   }, [clientId]);
 
   // Fetch Co-Applicant Information
-  const fetchCoApplicantInformation = useCallback(async () => {
+  const fetchCoApplicantInformation = useCallback(async (isInitial = true) => {
     try {
-      setLoadingCoApplicant(true);
+      if (isInitial) setLoadingCoApplicant(true);
       if (!isValidUuid(clientId)) {
         setCoApplicantInfo(null);
         setLoadingCoApplicant(false);
@@ -1715,6 +2049,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           secondary_email: data.secondary_email || '',
           gender: data.gender || '',
           marital_status: data.marital_status || '',
+          language_preference: data.language_preference || '',
+          occupation: data.occupation || '',
           immigration_status: data.immigration_status || '',
           alien_number: data.alien_number || '',
           card_number: data.card_number || '',
@@ -1734,6 +2070,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           secondary_email: '',
           gender: '',
           marital_status: '',
+          language_preference: '',
+          occupation: '',
           immigration_status: '',
           alien_number: '',
           card_number: '',
@@ -1799,6 +2137,41 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       setLoadingResidence(false);
     }
   }, [clientId]);
+
+  const saveResidenceField = async (residenceData: Partial<ClientResidenceInformation>) => {
+    if (!isValidUuid(clientId)) return;
+    const payload = {
+      client_id: clientId,
+      address: residenceData.address ?? residenceForm.address,
+      city: residenceData.city ?? residenceForm.city,
+      state: residenceData.state ?? residenceForm.state,
+      zip_code: residenceData.zip_code ?? residenceForm.zip_code,
+      county: residenceData.county ?? residenceForm.county,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: existing } = await supabase
+      .from('client_residence_information')
+      .select('id')
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    if (existing) {
+      const { error } = await supabase
+        .from('client_residence_information')
+        .update(payload)
+        .eq('client_id', clientId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('client_residence_information')
+        .insert(payload);
+      if (error) throw error;
+    }
+
+    setResidenceForm(prev => ({ ...prev, ...residenceData }));
+    await fetchResidenceInformation();
+  };
 
   // Fetch Linked Company Profiles and their Commercial Policies
   const fetchLinkedCompanyPolicies = useCallback(async () => {
@@ -2952,8 +3325,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                   </div>
                 )}
 
-                {/* Company Search & Linking Block for Personal Profiles (Excluded from Documents and Notes views) */}
-                {!isCompanyClient && activeTab !== 'documents' && activeTab !== 'notes' && (
+                {/* Company Search & Linking Block for Personal Profiles (Only when agent has property_casualty enabled; Excluded from Documents and Notes views) */}
+                {isPcEnabled && !isCompanyClient && activeTab !== 'documents' && activeTab !== 'notes' && (
                   <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
                     <span className="block text-xs font-medium text-slate-400">Link company</span>
                     <div className="relative">
@@ -3028,8 +3401,8 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                   </div>
                 )}
 
-                {/* Persistent LINKED COMPANY Cards in Sidebar (Excluded from Documents and Notes views) */}
-                {!isCompanyClient && activeTab !== 'documents' && activeTab !== 'notes' && (
+                {/* Persistent LINKED COMPANY Cards in Sidebar (Only when agent has property_casualty enabled; Excluded from Documents and Notes views) */}
+                {isPcEnabled && !isCompanyClient && activeTab !== 'documents' && activeTab !== 'notes' && (
                   <div className="border-t border-slate-100 pt-4 space-y-3 font-sans">
                     <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
                       {linkedCompanyProfiles && linkedCompanyProfiles.length > 1 ? 'Linked Companies' : 'Linked Company'}
@@ -3636,7 +4009,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       <select
                         value={lobFilter}
                         onChange={e => setLobFilter(e.target.value)}
-                        className="bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-705 text-xs outline-none transition-all max-w-[180px]"
+                        className="bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-705 text-xs outline-none transition-all w-full flex-1 min-w-0"
                       >
                         <option value="">All Lines of Business</option>
                         {uniqueLobs.map(lob => (
@@ -3648,7 +4021,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                       <select
                         value={companyFilter}
                         onChange={e => setCompanyFilter(e.target.value)}
-                        className="bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-705 text-xs outline-none transition-all max-w-[180px]"
+                        className="bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2 text-slate-705 text-xs outline-none transition-all w-full flex-1 min-w-0"
                       >
                         <option value="">All Companies</option>
                         {uniqueCompanies.map(company => (
@@ -3950,367 +4323,1289 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                             </div>
                           </div>
                         ) : (
-                          <div className="space-y-8">
-                            {/* Main Applicant Grid */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 max-w-4xl gap-x-8 gap-y-3.5">
-                              {/* Left Column */}
-                              <div className="space-y-3.5">
-                                <InlineEditableText
-                                  label="Applicant name"
-                                  value={personalForm.full_name}
-                                  onSave={val => savePersonalField('full_name', val)}
-                                />
-
-                                <InlineEditableDate
-                                  label="DOB"
-                                  value={personalForm.date_of_birth}
-                                  onSave={iso => savePersonalField('date_of_birth', iso || '')}
-                                />
-
-                                <div>
-                                  <span className="block text-sm font-medium text-slate-500 mb-1">Age</span>
-                                  <div className="py-1 px-2 -mx-2">
-                                    <span className="text-[15px] font-bold text-slate-900 block">
-                                      {calculateAge(personalForm.date_of_birth)}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                <InlineEditableSSN
-                                  label="SSN"
-                                  value={personalForm.ssn}
-                                  onSave={val => savePersonalField('ssn', val)}
-                                />
-
-                                <InlineEditablePhone
-                                  label="Primary phone"
-                                  value={personalForm.phone}
-                                  onSave={val => savePersonalField('phone', val)}
-                                />
-
-                                <InlineEditablePhone
-                                  label="Secondary phone"
-                                  value={personalForm.secondary_phone}
-                                  onSave={val => savePersonalField('secondary_phone', val)}
-                                />
-
-                                <InlineEditableText
-                                  label="Primary email"
-                                  type="email"
-                                  value={personalForm.email}
-                                  onSave={val => savePersonalField('email', val)}
-                                />
-
-                                <InlineEditableText
-                                  label="Secondary email"
-                                  type="email"
-                                  value={personalForm.secondary_email}
-                                  onSave={val => savePersonalField('secondary_email', val)}
-                                />
-                              </div>
-
-                              {/* Right Column */}
-                              <div className="space-y-4">
-                                <InlineEditableSelect
-                                  label="Gender"
-                                  value={personalForm.gender}
-                                  options={[
-                                    { label: 'Select Gender', value: '' },
-                                    { label: 'Female', value: 'Female' },
-                                    { label: 'Male', value: 'Male' },
-                                  ]}
-                                  onSave={val => savePersonalField('gender', val)}
-                                />
-
-                                <InlineEditableSelect
-                                  label="Marital status"
-                                  value={personalForm.marital_status}
-                                  options={[
-                                    { label: 'Select Marital Status', value: '' },
-                                    { label: 'Single', value: 'Single' },
-                                    { label: 'Married', value: 'Married' },
-                                    { label: 'Divorced', value: 'Divorced' },
-                                    { label: 'Widowed', value: 'Widowed' },
-                                    { label: 'Separated', value: 'Separated' },
-                                  ]}
-                                  onSave={val => savePersonalField('marital_status', val)}
-                                />
-
-                                <InlineEditableSelect
-                                  label="Preferred language"
-                                  value={personalForm.preferred_language}
-                                  options={[
-                                    { label: 'Spanish', value: 'Spanish' },
-                                    { label: 'English', value: 'English' },
-                                    { label: 'Other', value: 'Other' },
-                                  ]}
-                                  onSave={val => savePersonalField('preferred_language', val)}
-                                />
-
-                                <InlineEditableText
-                                  label="Occupation"
-                                  value={personalForm.occupation}
-                                  onSave={val => savePersonalField('occupation', val)}
-                                />
-
-                                <InlineEditableSelect
-                                  label="Immigration status"
-                                  value={personalForm.immigration_status}
-                                  options={[
-                                    { label: 'Select Status', value: '' },
-                                    { label: 'US Citizen', value: 'US Citizen' },
-                                    { label: 'Permanent Resident (Green Card)', value: 'Permanent Resident' },
-                                    { label: 'Work Permit (EAD)', value: 'Work Permit' },
-                                    { label: 'Other', value: 'Other' },
-                                  ]}
-                                  onSave={val => savePersonalField('immigration_status', val)}
-                                />
-
-                                {personalForm.immigration_status === 'Permanent Resident' && (
-                                  <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                    <InlineEditableText
-                                      label="Card number"
-                                      value={personalForm.card_number}
-                                      onSave={val => savePersonalField('card_number', val)}
-                                    />
-                                    <InlineEditableDate
-                                      label="Expiration date"
-                                      value={personalForm.immigration_expiration_date}
-                                      onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
-                                    />
-                                  </div>
-                                )}
-
-                                {personalForm.immigration_status === 'Work Permit' && (
-                                  <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                    <InlineEditableText
-                                      label="Card number"
-                                      value={personalForm.card_number}
-                                      onSave={val => savePersonalField('card_number', val)}
-                                    />
-                                    <InlineEditableText
-                                      label="USCIS number"
-                                      value={personalForm.uscis_number}
-                                      onSave={val => savePersonalField('uscis_number', val)}
-                                    />
-                                    <InlineEditableText
-                                      label="Category"
-                                      value={personalForm.immigration_category}
-                                      onSave={val => savePersonalField('immigration_category', val)}
-                                    />
-                                    <InlineEditableDate
-                                      label="Expiration date"
-                                      value={personalForm.immigration_expiration_date}
-                                      onSave={iso => savePersonalField('immigration_expiration_date', iso || '')}
-                                    />
-                                  </div>
-                                )}
-
-                                {personalForm.immigration_status === 'Other' && (
-                                  <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
-                                    <InlineEditableTextarea
-                                      label="Other description"
-                                      value={personalForm.immigration_other_description}
-                                      onSave={val => savePersonalField('immigration_other_description', val)}
-                                    />
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Co-Applicant Section Toggle */}
-                            <div className="border-t border-slate-100 pt-6">
-                              <label className="flex items-center gap-3 cursor-pointer select-none">
-                                <input
-                                  type="checkbox"
-                                  checked={personalForm.has_co_applicant}
-                                  onChange={async (e) => {
-                                    const checked = e.target.checked;
-                                    setPersonalForm(prev => ({ ...prev, has_co_applicant: checked }));
-                                    setPersonalInfo(prev => prev ? { ...prev, has_co_applicant: checked } : prev);
-                                    await savePersonalField('has_co_applicant', checked);
-                                    if (!checked) {
-                                      await supabase.from('client_co_applicant_information').delete().eq('client_id', clientId);
-                                      setCoApplicantInfo(null);
-                                    } else {
-                                      await fetchCoApplicantInformation();
-                                    }
+                          <div className="space-y-8 font-sans">
+                            {/* Main Applicant Grid (Horizontal label/value rows matching Health style) */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
+                              {/* PRIMARY COLUMN (Exact requested order) */}
+                              <div className="space-y-0">
+                                {/* 1. Applicant Name */}
+                                <HorizontalFieldRow
+                                  label="Applicant Name"
+                                  value={personalForm.full_name || '—'}
+                                  isEditing={editingPersonalKey === 'full_name'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('full_name');
+                                    setPersonalDraftValue(personalForm.full_name);
+                                    setPersonalFieldError(null);
                                   }}
-                                  className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <input
+                                        type="text"
+                                        value={personalDraftValue || ''}
+                                        onChange={e => setPersonalDraftValue(e.target.value)}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                                        autoFocus
+                                        onKeyDown={e => {
+                                          if (e.key === 'Escape') setEditingPersonalKey(null);
+                                          if (e.key === 'Enter') {
+                                            savePersonalField('full_name', personalDraftValue);
+                                            setEditingPersonalKey(null);
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          savePersonalField('full_name', personalDraftValue);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
                                 />
-                                <span className="text-sm font-bold text-slate-800">Add Spouse / Co-Applicant</span>
-                              </label>
+
+                                {/* 2. DOB */}
+                                <HorizontalFieldRow
+                                  label="DOB"
+                                  value={personalForm.date_of_birth ? formatDateMMDDYYYY(personalForm.date_of_birth) : '—'}
+                                  isEditing={editingPersonalKey === 'date_of_birth'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('date_of_birth');
+                                    setPersonalDraftValue(personalForm.date_of_birth ? formatDateMMDDYYYY(personalForm.date_of_birth) : '');
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <input
+                                        type="text"
+                                        value={personalDraftValue || ''}
+                                        onChange={e => setPersonalDraftValue(formatAsDateInput(e.target.value))}
+                                        placeholder="MM/DD/YYYY"
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                                        autoFocus
+                                        onKeyDown={e => {
+                                          if (e.key === 'Escape') setEditingPersonalKey(null);
+                                          if (e.key === 'Enter') {
+                                            const iso = usDateToIso(personalDraftValue);
+                                            savePersonalField('date_of_birth', iso || '');
+                                            setEditingPersonalKey(null);
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const iso = usDateToIso(personalDraftValue);
+                                          savePersonalField('date_of_birth', iso || '');
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+
+                                {/* 3. Age (Read-Only) */}
+                                <HorizontalFieldRow
+                                  label="Age"
+                                  value={calculateAge(personalForm.date_of_birth)}
+                                  readOnly={true}
+                                />
+
+                                {/* 4. SSN */}
+                                <HorizontalFieldRow
+                                  label="SSN"
+                                  value={personalForm.ssn ? formatSSN(personalForm.ssn) : '—'}
+                                  isEditing={editingPersonalKey === 'ssn'}
+                                  valueClassName="font-mono"
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('ssn');
+                                    setPersonalDraftValue(personalForm.ssn || '');
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <SSNInput
+                                        value={personalDraftValue || ''}
+                                        onChange={val => setPersonalDraftValue(val)}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-mono outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors w-full flex-1 min-w-0"
+                                        autoFocus
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          savePersonalField('ssn', personalDraftValue);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+
+                                {/* 5. Primary Email */}
+                                <HorizontalFieldRow
+                                  label="Primary Email"
+                                  value={personalForm.email || '—'}
+                                  isEditing={editingPersonalKey === 'email'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('email');
+                                    setPersonalDraftValue(personalForm.email);
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <input
+                                        type="email"
+                                        value={personalDraftValue || ''}
+                                        onChange={e => setPersonalDraftValue(e.target.value)}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                                        autoFocus
+                                        onKeyDown={e => {
+                                          if (e.key === 'Escape') setEditingPersonalKey(null);
+                                          if (e.key === 'Enter') {
+                                            savePersonalField('email', personalDraftValue);
+                                            setEditingPersonalKey(null);
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          savePersonalField('email', personalDraftValue);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+
+                                {/* 6. Primary Phone */}
+                                <HorizontalFieldRow
+                                  label="Primary Phone"
+                                  value={personalForm.phone ? formatUSPhone(personalForm.phone) : '—'}
+                                  isEditing={editingPersonalKey === 'phone'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('phone');
+                                    setPersonalDraftValue(personalForm.phone);
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <PhoneInput
+                                        value={personalDraftValue || ''}
+                                        onChange={val => setPersonalDraftValue(val)}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                                        autoFocus
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          savePersonalField('phone', personalDraftValue);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+
+                                {/* 7. Secondary Phone */}
+                                <HorizontalFieldRow
+                                  label="Secondary Phone"
+                                  value={personalForm.secondary_phone ? formatUSPhone(personalForm.secondary_phone) : '—'}
+                                  isEditing={editingPersonalKey === 'secondary_phone'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('secondary_phone');
+                                    setPersonalDraftValue(personalForm.secondary_phone);
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <PhoneInput
+                                        value={personalDraftValue || ''}
+                                        onChange={val => setPersonalDraftValue(val)}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                                        autoFocus
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          savePersonalField('secondary_phone', personalDraftValue);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+
+                                {/* 8. Secondary Email */}
+                                <HorizontalFieldRow
+                                  label="Secondary Email"
+                                  value={personalForm.secondary_email || '—'}
+                                  isEditing={editingPersonalKey === 'secondary_email'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('secondary_email');
+                                    setPersonalDraftValue(personalForm.secondary_email);
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <input
+                                        type="email"
+                                        value={personalDraftValue || ''}
+                                        onChange={e => setPersonalDraftValue(e.target.value)}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                                        autoFocus
+                                        onKeyDown={e => {
+                                          if (e.key === 'Escape') setEditingPersonalKey(null);
+                                          if (e.key === 'Enter') {
+                                            savePersonalField('secondary_email', personalDraftValue);
+                                            setEditingPersonalKey(null);
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          savePersonalField('secondary_email', personalDraftValue);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+
+                                {/* 9. Number of People on Tax Return */}
+                                <HorizontalFieldRow
+                                  label="Number of People on Tax Return"
+                                  value={taxMemberCount}
+                                  isEditing={editingPersonalKey === 'tax_household_count'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('tax_household_count');
+                                    setPersonalDraftValue(taxMemberCount);
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <select
+                                        value={personalDraftValue}
+                                        onChange={e => setPersonalDraftValue(Number(e.target.value))}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                                        autoFocus
+                                        onKeyDown={e => {
+                                          if (e.key === 'Escape') setEditingPersonalKey(null);
+                                          if (e.key === 'Enter') {
+                                            const count = Math.max(1, Number(personalDraftValue) || 1);
+                                            setTaxMemberCount(count);
+                                            saveTaxMemberCount(count);
+                                            setEditingPersonalKey(null);
+                                          }
+                                        }}
+                                      >
+                                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                                          <option key={n} value={n}>{n}</option>
+                                        ))}
+                                      </select>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const count = Math.max(1, Number(personalDraftValue) || 1);
+                                          setTaxMemberCount(count);
+                                          saveTaxMemberCount(count);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+                              </div>
+
+                              {/* SECONDARY COLUMN (Right) */}
+                              <div className="space-y-0">
+                                {/* 1. Gender */}
+                                <HorizontalFieldRow
+                                  label="Gender"
+                                  value={personalForm.gender || '—'}
+                                  isEditing={editingPersonalKey === 'gender'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('gender');
+                                    setPersonalDraftValue(personalForm.gender || '');
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <select
+                                        value={personalDraftValue}
+                                        onChange={e => setPersonalDraftValue(e.target.value)}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                                        autoFocus
+                                        onKeyDown={e => {
+                                          if (e.key === 'Escape') setEditingPersonalKey(null);
+                                          if (e.key === 'Enter') {
+                                            savePersonalField('gender', personalDraftValue);
+                                            setEditingPersonalKey(null);
+                                          }
+                                        }}
+                                      >
+                                        <option value="">Select Gender...</option>
+                                        <option value="Female">Female</option>
+                                        <option value="Male">Male</option>
+                                      </select>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          savePersonalField('gender', personalDraftValue);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+
+                                {/* 2. Marital Status */}
+                                <HorizontalFieldRow
+                                  label="Marital Status"
+                                  value={personalForm.marital_status || '—'}
+                                  isEditing={editingPersonalKey === 'marital_status'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('marital_status');
+                                    setPersonalDraftValue(personalForm.marital_status || '');
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <select
+                                        value={personalDraftValue}
+                                        onChange={e => setPersonalDraftValue(e.target.value)}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                                        autoFocus
+                                        onKeyDown={e => {
+                                          if (e.key === 'Escape') setEditingPersonalKey(null);
+                                          if (e.key === 'Enter') {
+                                            savePersonalField('marital_status', personalDraftValue);
+                                            setEditingPersonalKey(null);
+                                          }
+                                        }}
+                                      >
+                                        <option value="">Select Marital Status...</option>
+                                        <option value="Single">Single</option>
+                                        <option value="Married">Married</option>
+                                        <option value="Divorced">Divorced</option>
+                                        <option value="Widowed">Widowed</option>
+                                        <option value="Separated">Separated</option>
+                                      </select>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          savePersonalField('marital_status', personalDraftValue);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+
+                                {/* 3. Preferred Language */}
+                                <HorizontalFieldRow
+                                  label="Preferred Language"
+                                  value={personalForm.preferred_language || '—'}
+                                  isEditing={editingPersonalKey === 'preferred_language'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('preferred_language');
+                                    setPersonalDraftValue(personalForm.preferred_language || '');
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <select
+                                        value={personalDraftValue}
+                                        onChange={e => setPersonalDraftValue(e.target.value)}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                                        autoFocus
+                                        onKeyDown={e => {
+                                          if (e.key === 'Escape') setEditingPersonalKey(null);
+                                          if (e.key === 'Enter') {
+                                            savePersonalField('preferred_language', personalDraftValue);
+                                            setEditingPersonalKey(null);
+                                          }
+                                        }}
+                                      >
+                                        <option value="Spanish">Spanish</option>
+                                        <option value="English">English</option>
+                                        <option value="Other">Other</option>
+                                      </select>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          savePersonalField('preferred_language', personalDraftValue);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+
+                                {/* 4. Occupation */}
+                                <HorizontalFieldRow
+                                  label="Occupation"
+                                  value={personalForm.occupation || '—'}
+                                  isEditing={editingPersonalKey === 'occupation'}
+                                  onStartEdit={() => {
+                                    setEditingPersonalKey('occupation');
+                                    setPersonalDraftValue(personalForm.occupation || '');
+                                    setPersonalFieldError(null);
+                                  }}
+                                  renderEditor={() => (
+                                    <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                      <input
+                                        type="text"
+                                        value={personalDraftValue || ''}
+                                        onChange={e => setPersonalDraftValue(e.target.value)}
+                                        className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                                        autoFocus
+                                        onKeyDown={e => {
+                                          if (e.key === 'Escape') setEditingPersonalKey(null);
+                                          if (e.key === 'Enter') {
+                                            savePersonalField('occupation', personalDraftValue);
+                                            setEditingPersonalKey(null);
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          savePersonalField('occupation', personalDraftValue);
+                                          setEditingPersonalKey(null);
+                                        }}
+                                        className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                        title="Save"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingPersonalKey(null)}
+                                        className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                        title="Cancel"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                />
+                              </div>
                             </div>
 
-                            {personalForm.has_co_applicant && (
-                              <div className="border border-blue-100 rounded-2xl bg-blue-50/30 p-6 space-y-6 animate-fade-in">
-                                <h4 className="text-base font-extrabold text-slate-900 border-b border-blue-100 pb-3">
-                                  Spouse / Co-Applicant Information
-                                </h4>
+                            {/* Agent Product Visibility Scoping: Co-Applicant for P&C agents, Tax Household block for Health agents */}
+                            {isLineEnabled('property_casualty') && (
+                              <div className="pt-6 space-y-4">
+                                <label className="flex items-center gap-3 cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    checked={personalForm.has_co_applicant}
+                                    onChange={async (e) => {
+                                      const checked = e.target.checked;
+                                      setPersonalForm(prev => ({ ...prev, has_co_applicant: checked }));
+                                      setPersonalInfo(prev => prev ? { ...prev, has_co_applicant: checked } : prev);
+                                      await savePersonalField('has_co_applicant', checked);
+                                      if (checked) {
+                                        await fetchCoApplicantInformation();
+                                      }
+                                    }}
+                                    className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
+                                  />
+                                  <span className="text-sm font-bold text-slate-800">Add Spouse / Co-Applicant</span>
+                                </label>
 
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
-                                  {/* Left Column */}
-                                  <div className="space-y-4">
-                                    <InlineEditableText
-                                      label="Co-Applicant Name"
-                                      value={coApplicantForm.full_name}
-                                      onSave={val => saveCoApplicantField('full_name', val)}
-                                    />
+                                {personalForm.has_co_applicant && (
+                                  <div className="pt-2 space-y-4 animate-fade-in">
+                                    <h4 className="text-[16px] font-semibold text-[#111827]">
+                                      Spouse / Co-Applicant Information
+                                    </h4>
 
-                                    <InlineEditableDate
-                                      label="DOB"
-                                      value={coApplicantForm.date_of_birth}
-                                      onSave={iso => saveCoApplicantField('date_of_birth', iso || '')}
-                                    />
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
+                                      {/* Left Column */}
+                                      <div className="space-y-0">
+                                        <HorizontalFieldRow
+                                          label="Co-Applicant Name"
+                                          value={coApplicantForm.full_name || '—'}
+                                          isEditing={editingPersonalKey === 'co_full_name'}
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_full_name');
+                                            setPersonalDraftValue(coApplicantForm.full_name || '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <input
+                                                type="text"
+                                                value={personalDraftValue || ''}
+                                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] font-sans w-full flex-1 min-w-0"
+                                                autoFocus
+                                                onKeyDown={e => {
+                                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                                  if (e.key === 'Enter') {
+                                                    saveCoApplicantField('full_name', personalDraftValue);
+                                                    setEditingPersonalKey(null);
+                                                  }
+                                                }}
+                                              />
+                                              <button type="button" onClick={() => { saveCoApplicantField('full_name', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
 
-                                    <div>
-                                      <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Age</span>
-                                      <span className="font-semibold text-slate-700 block bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 min-h-[42px] flex items-center text-xs">
-                                        {calculateAge(coApplicantForm.date_of_birth)}
-                                      </span>
+                                        <HorizontalFieldRow
+                                          label="DOB"
+                                          value={coApplicantForm.date_of_birth ? formatDateMMDDYYYY(coApplicantForm.date_of_birth) : '—'}
+                                          isEditing={editingPersonalKey === 'co_date_of_birth'}
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_date_of_birth');
+                                            setPersonalDraftValue(coApplicantForm.date_of_birth ? formatDateMMDDYYYY(coApplicantForm.date_of_birth) : '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <input
+                                                type="text"
+                                                value={personalDraftValue || ''}
+                                                onChange={e => setPersonalDraftValue(formatAsDateInput(e.target.value))}
+                                                placeholder="MM/DD/YYYY"
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] font-sans w-full flex-1 min-w-0"
+                                                autoFocus
+                                                onKeyDown={e => {
+                                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                                  if (e.key === 'Enter') {
+                                                    const iso = usDateToIso(personalDraftValue);
+                                                    saveCoApplicantField('date_of_birth', iso || '');
+                                                    setEditingPersonalKey(null);
+                                                  }
+                                                }}
+                                              />
+                                              <button type="button" onClick={() => { const iso = usDateToIso(personalDraftValue); saveCoApplicantField('date_of_birth', iso || ''); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
+
+                                        <HorizontalFieldRow
+                                          label="Age"
+                                          value={calculateAge(coApplicantForm.date_of_birth)}
+                                          readOnly={true}
+                                        />
+
+                                        <HorizontalFieldRow
+                                          label="SSN"
+                                          value={coApplicantForm.ssn ? formatSSN(coApplicantForm.ssn) : '—'}
+                                          isEditing={editingPersonalKey === 'co_ssn'}
+                                          valueClassName="font-mono"
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_ssn');
+                                            setPersonalDraftValue(coApplicantForm.ssn || '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <SSNInput
+                                                value={personalDraftValue || ''}
+                                                onChange={val => setPersonalDraftValue(val)}
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] font-mono w-full flex-1 min-w-0"
+                                                autoFocus
+                                              />
+                                              <button type="button" onClick={() => { saveCoApplicantField('ssn', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
+
+                                        <HorizontalFieldRow
+                                          label="Primary Email"
+                                          value={coApplicantForm.primary_email || '—'}
+                                          isEditing={editingPersonalKey === 'co_primary_email'}
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_primary_email');
+                                            setPersonalDraftValue(coApplicantForm.primary_email || '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <input
+                                                type="email"
+                                                value={personalDraftValue || ''}
+                                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                autoFocus
+                                                onKeyDown={e => {
+                                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                                  if (e.key === 'Enter') {
+                                                    saveCoApplicantField('primary_email', personalDraftValue);
+                                                    setEditingPersonalKey(null);
+                                                  }
+                                                }}
+                                              />
+                                              <button type="button" onClick={() => { saveCoApplicantField('primary_email', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
+
+                                        <HorizontalFieldRow
+                                          label="Primary Phone"
+                                          value={coApplicantForm.primary_phone ? formatUSPhone(coApplicantForm.primary_phone) : '—'}
+                                          isEditing={editingPersonalKey === 'co_primary_phone'}
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_primary_phone');
+                                            setPersonalDraftValue(coApplicantForm.primary_phone || '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <PhoneInput
+                                                value={personalDraftValue || ''}
+                                                onChange={val => setPersonalDraftValue(val)}
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] w-full flex-1 min-w-0"
+                                                autoFocus
+                                              />
+                                              <button type="button" onClick={() => { saveCoApplicantField('primary_phone', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
+
+                                        <HorizontalFieldRow
+                                          label="Secondary Phone"
+                                          value={coApplicantForm.secondary_phone ? formatUSPhone(coApplicantForm.secondary_phone) : '—'}
+                                          isEditing={editingPersonalKey === 'co_secondary_phone'}
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_secondary_phone');
+                                            setPersonalDraftValue(coApplicantForm.secondary_phone || '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <PhoneInput
+                                                value={personalDraftValue || ''}
+                                                onChange={val => setPersonalDraftValue(val)}
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] w-full flex-1 min-w-0"
+                                                autoFocus
+                                              />
+                                              <button type="button" onClick={() => { saveCoApplicantField('secondary_phone', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
+
+                                        <HorizontalFieldRow
+                                          label="Secondary Email"
+                                          value={coApplicantForm.secondary_email || '—'}
+                                          isEditing={editingPersonalKey === 'co_secondary_email'}
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_secondary_email');
+                                            setPersonalDraftValue(coApplicantForm.secondary_email || '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <input
+                                                type="email"
+                                                value={personalDraftValue || ''}
+                                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                autoFocus
+                                                onKeyDown={e => {
+                                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                                  if (e.key === 'Enter') {
+                                                    saveCoApplicantField('secondary_email', personalDraftValue);
+                                                    setEditingPersonalKey(null);
+                                                  }
+                                                }}
+                                              />
+                                              <button type="button" onClick={() => { saveCoApplicantField('secondary_email', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
+                                      </div>
+
+                                      {/* Right Column */}
+                                      <div className="space-y-0">
+                                        <HorizontalFieldRow
+                                          label="Gender"
+                                          value={coApplicantForm.gender || '—'}
+                                          isEditing={editingPersonalKey === 'co_gender'}
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_gender');
+                                            setPersonalDraftValue(coApplicantForm.gender || '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <select
+                                                value={personalDraftValue}
+                                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                autoFocus
+                                                onKeyDown={e => {
+                                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                                  if (e.key === 'Enter') {
+                                                    saveCoApplicantField('gender', personalDraftValue);
+                                                    setEditingPersonalKey(null);
+                                                  }
+                                                }}
+                                              >
+                                                <option value="">Select Gender...</option>
+                                                <option value="Female">Female</option>
+                                                <option value="Male">Male</option>
+                                              </select>
+                                              <button type="button" onClick={() => { saveCoApplicantField('gender', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
+
+                                        <HorizontalFieldRow
+                                          label="Marital Status"
+                                          value={coApplicantForm.marital_status || '—'}
+                                          isEditing={editingPersonalKey === 'co_marital_status'}
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_marital_status');
+                                            setPersonalDraftValue(coApplicantForm.marital_status || '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <select
+                                                value={personalDraftValue}
+                                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                autoFocus
+                                                onKeyDown={e => {
+                                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                                  if (e.key === 'Enter') {
+                                                    saveCoApplicantField('marital_status', personalDraftValue);
+                                                    setEditingPersonalKey(null);
+                                                  }
+                                                }}
+                                              >
+                                                <option value="">Select Marital Status...</option>
+                                                <option value="Single">Single</option>
+                                                <option value="Married">Married</option>
+                                                <option value="Divorced">Divorced</option>
+                                                <option value="Widowed">Widowed</option>
+                                                <option value="Separated">Separated</option>
+                                              </select>
+                                              <button type="button" onClick={() => { saveCoApplicantField('marital_status', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
+
+                                        <HorizontalFieldRow
+                                          label="Preferred Language"
+                                          value={coApplicantForm.language_preference || '—'}
+                                          isEditing={editingPersonalKey === 'co_language_preference'}
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_language_preference');
+                                            setPersonalDraftValue(coApplicantForm.language_preference || '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <select
+                                                value={personalDraftValue}
+                                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                autoFocus
+                                                onKeyDown={e => {
+                                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                                  if (e.key === 'Enter') {
+                                                    saveCoApplicantField('language_preference', personalDraftValue);
+                                                    setEditingPersonalKey(null);
+                                                  }
+                                                }}
+                                              >
+                                                <option value="Spanish">Spanish</option>
+                                                <option value="English">English</option>
+                                                <option value="Other">Other</option>
+                                              </select>
+                                              <button type="button" onClick={() => { saveCoApplicantField('language_preference', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
+
+                                        <HorizontalFieldRow
+                                          label="Occupation"
+                                          value={coApplicantForm.occupation || '—'}
+                                          isEditing={editingPersonalKey === 'co_occupation'}
+                                          onStartEdit={() => {
+                                            setEditingPersonalKey('co_occupation');
+                                            setPersonalDraftValue(coApplicantForm.occupation || '');
+                                          }}
+                                          renderEditor={() => (
+                                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                              <input
+                                                type="text"
+                                                value={personalDraftValue || ''}
+                                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                autoFocus
+                                                onKeyDown={e => {
+                                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                                  if (e.key === 'Enter') {
+                                                    saveCoApplicantField('occupation', personalDraftValue);
+                                                    setEditingPersonalKey(null);
+                                                  }
+                                                }}
+                                              />
+                                              <button type="button" onClick={() => { saveCoApplicantField('occupation', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                              <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                            </div>
+                                          )}
+                                        />
+                                      </div>
                                     </div>
-
-                                    <InlineEditableSSN
-                                      label="SSN"
-                                      value={coApplicantForm.ssn}
-                                      onSave={val => saveCoApplicantField('ssn', val)}
-                                    />
-
-                                    <InlineEditablePhone
-                                      label="Primary Phone"
-                                      value={coApplicantForm.primary_phone}
-                                      onSave={val => saveCoApplicantField('primary_phone', val)}
-                                    />
-
-                                    <InlineEditablePhone
-                                      label="Secondary Phone"
-                                      value={coApplicantForm.secondary_phone}
-                                      onSave={val => saveCoApplicantField('secondary_phone', val)}
-                                    />
-
-                                    <InlineEditableText
-                                      label="Primary Email"
-                                      type="email"
-                                      value={coApplicantForm.primary_email}
-                                      onSave={val => saveCoApplicantField('primary_email', val)}
-                                    />
-
-                                    <InlineEditableText
-                                      label="Secondary Email"
-                                      type="email"
-                                      value={coApplicantForm.secondary_email}
-                                      onSave={val => saveCoApplicantField('secondary_email', val)}
-                                    />
                                   </div>
+                                )}
+                              </div>
+                            )}
 
-                                  {/* Right Column */}
-                                  <div className="space-y-4">
-                                    <InlineEditableSelect
-                                      label="Gender"
-                                      value={coApplicantForm.gender}
-                                      options={[
-                                        { label: 'Select Gender', value: '' },
-                                        { label: 'Female', value: 'Female' },
-                                        { label: 'Male', value: 'Male' },
-                                      ]}
-                                      onSave={val => saveCoApplicantField('gender', val)}
-                                    />
-
-                                    <InlineEditableSelect
-                                      label="Marital Status"
-                                      value={coApplicantForm.marital_status}
-                                      options={[
-                                        { label: 'Select Marital Status', value: '' },
-                                        { label: 'Single', value: 'Single' },
-                                        { label: 'Married', value: 'Married' },
-                                        { label: 'Divorced', value: 'Divorced' },
-                                        { label: 'Widowed', value: 'Widowed' },
-                                        { label: 'Separated', value: 'Separated' },
-                                      ]}
-                                      onSave={val => saveCoApplicantField('marital_status', val)}
-                                    />
-
-                                    <InlineEditableSelect
-                                      label="Preferred Language"
-                                      value={coApplicantForm.language_preference}
-                                      options={[
-                                        { label: 'Spanish', value: 'Spanish' },
-                                        { label: 'English', value: 'English' },
-                                        { label: 'Other', value: 'Other' },
-                                      ]}
-                                      onSave={val => saveCoApplicantField('language_preference', val)}
-                                    />
-
-                                    <InlineEditableText
-                                      label="Occupation"
-                                      value={coApplicantForm.occupation}
-                                      onSave={val => saveCoApplicantField('occupation', val)}
-                                    />
-
-                                    <InlineEditableSelect
-                                      label="Immigration Status"
-                                      value={coApplicantForm.immigration_status}
-                                      options={[
-                                        { label: 'Select Status', value: '' },
-                                        { label: 'US Citizen', value: 'US Citizen' },
-                                        { label: 'Permanent Resident (Green Card)', value: 'Permanent Resident' },
-                                        { label: 'Work Permit (EAD)', value: 'Work Permit' },
-                                        { label: 'Other', value: 'Other' },
-                                      ]}
-                                      onSave={val => saveCoApplicantField('immigration_status', val)}
-                                    />
-
-                                    {coApplicantForm.immigration_status === 'Permanent Resident' && (
-                                      <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                        <InlineEditableText
-                                          label="Card Number"
-                                          value={coApplicantForm.card_number}
-                                          onSave={val => saveCoApplicantField('card_number', val)}
-                                        />
-                                        <InlineEditableDate
-                                          label="Expiration Date"
-                                          value={coApplicantForm.immigration_expiration_date}
-                                          onSave={iso => saveCoApplicantField('immigration_expiration_date', iso || '')}
-                                        />
-                                      </div>
-                                    )}
-
-                                    {coApplicantForm.immigration_status === 'Work Permit' && (
-                                      <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-4 animate-fade-in">
-                                        <InlineEditableText
-                                          label="Card Number"
-                                          value={coApplicantForm.card_number}
-                                          onSave={val => saveCoApplicantField('card_number', val)}
-                                        />
-                                        <InlineEditableText
-                                          label="USCIS Number"
-                                          value={coApplicantForm.uscis_number}
-                                          onSave={val => saveCoApplicantField('uscis_number', val)}
-                                        />
-                                        <InlineEditableText
-                                          label="Category"
-                                          value={coApplicantForm.immigration_category}
-                                          onSave={val => saveCoApplicantField('immigration_category', val)}
-                                        />
-                                        <InlineEditableDate
-                                          label="Expiration Date"
-                                          value={coApplicantForm.immigration_expiration_date}
-                                          onSave={iso => saveCoApplicantField('immigration_expiration_date', iso || '')}
-                                        />
-                                      </div>
-                                    )}
-
-                                    {coApplicantForm.immigration_status === 'Other' && (
-                                      <div className="p-4 border border-slate-100 rounded-xl bg-slate-50/50 space-y-2 animate-fade-in">
-                                        <InlineEditableTextarea
-                                          label="Other Description"
-                                          value={coApplicantForm.immigration_other_description}
-                                          onSave={val => saveCoApplicantField('immigration_other_description', val)}
-                                        />
-                                      </div>
-                                    )}
-                                  </div>
+                            {/* Tax Household Members Dynamic Sections (when taxMemberCount > 1) */}
+                            {taxMemberCount > 1 && (
+                              <div className="pt-8 border-t border-slate-100 font-sans">
+                                <div className="flex items-center justify-between mb-4">
+                                  <h4 className="text-[16px] font-semibold text-[#111827]">
+                                    Tax Household Members
+                                  </h4>
+                                  <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
+                                    Primary Applicant + {taxMemberCount - 1} Additional Member{taxMemberCount > 2 ? 's' : ''}
+                                  </span>
                                 </div>
+
+                                {availableHealthPolicies.length > 1 && (
+                                  <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 border border-slate-200/80 rounded-xl p-3 text-xs">
+                                    <span className="font-semibold text-slate-700">Linked Health Policy:</span>
+                                    <select
+                                      value={healthPolicyId || ''}
+                                      onChange={async (e) => {
+                                        const newHpId = e.target.value;
+                                        setHealthPolicyId(newHpId);
+                                        const chosen = availableHealthPolicies.find(p => p.id === newHpId);
+                                        if (chosen && typeof chosen.number_of_people_on_tax_return === 'number' && chosen.number_of_people_on_tax_return >= 1) {
+                                          setTaxMemberCount(chosen.number_of_people_on_tax_return);
+                                        }
+                                        const { data: members } = await supabase
+                                          .from('health_tax_household_members')
+                                          .select('*')
+                                          .eq('health_policy_id', newHpId)
+                                          .order('member_number', { ascending: true });
+                                        setTaxHouseholdMembers(members || []);
+                                      }}
+                                      className="bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 text-xs outline-none focus:border-blue-500"
+                                    >
+                                      {availableHealthPolicies.map(p => {
+                                        const isPolActive = p.active === true && p.policy_status === 'Active';
+                                        return (
+                                          <option key={p.id} value={p.id}>
+                                            {p.year_renovation ? `Year ${p.year_renovation}` : 'Coverage'} — {p.company_2026 || p.plan_name || 'Health Policy'} ({isPolActive ? 'Active' : p.policy_status || 'Inactive'})
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                  </div>
+                                )}
+
+                                {!healthPolicyId && (
+                                  <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50/80 p-3.5 text-xs text-amber-800 flex items-start gap-2.5">
+                                    <svg className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <div>
+                                      <span className="font-semibold text-amber-900 block mb-0.5">No Active Health Policy Linked</span>
+                                      Tax household member data entered here is retained in this session draft. To permanently persist household members to the database, create or link a Health Policy in the Health tab.
+                                    </div>
+                                  </div>
+                                )}
+
+                                {Array.from({ length: taxMemberCount - 1 }, (_, index) => {
+                                  const memberNumber = index + 2;
+                                  const member = taxHouseholdMembers.find((m: any) => m.member_number === memberNumber) || {
+                                    health_policy_id: healthPolicyId || '',
+                                    member_number: memberNumber,
+                                    coverage: true,
+                                    full_name: '',
+                                    date_of_birth: null,
+                                    relationship_to_applicant: 'Son',
+                                    gender: '',
+                                    us_citizen: true,
+                                    uses_tobacco: false,
+                                    ssn_encrypted: null
+                                  };
+
+                                  return (
+                                    <div key={memberNumber} className="font-sans mt-6">
+                                      <div className="flex items-center justify-between mb-3">
+                                        <h4 className="text-[15px] font-semibold text-[#111827]">
+                                          Tax Household Member {memberNumber}
+                                        </h4>
+                                        <span className="text-[11px] font-medium text-slate-400">
+                                          Click value to edit
+                                        </span>
+                                      </div>
+
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 text-sm font-sans">
+                                        {/* LEFT COLUMN */}
+                                        <div className="space-y-0">
+                                          <HorizontalFieldRow
+                                            label="Coverage"
+                                            value={member.coverage !== false ? 'Yes' : 'No'}
+                                            isEditing={editingPersonalKey === `m_${memberNumber}_coverage`}
+                                            onStartEdit={() => {
+                                              setEditingPersonalKey(`m_${memberNumber}_coverage`);
+                                              setPersonalDraftValue(member.coverage !== false);
+                                            }}
+                                            renderEditor={() => (
+                                              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                                <select
+                                                  value={personalDraftValue ? 'Yes' : 'No'}
+                                                  onChange={e => setPersonalDraftValue(e.target.value === 'Yes')}
+                                                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                  autoFocus
+                                                >
+                                                  <option value="Yes">Yes</option>
+                                                  <option value="No">No</option>
+                                                </select>
+                                                <button type="button" onClick={() => { saveDependentField(memberNumber, 'coverage', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                                <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                              </div>
+                                            )}
+                                          />
+
+                                          <HorizontalFieldRow
+                                            label="Full Name"
+                                            value={member.full_name || '—'}
+                                            isEditing={editingPersonalKey === `m_${memberNumber}_full_name`}
+                                            onStartEdit={() => {
+                                              setEditingPersonalKey(`m_${memberNumber}_full_name`);
+                                              setPersonalDraftValue(member.full_name || '');
+                                            }}
+                                            renderEditor={() => (
+                                              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                                <input
+                                                  type="text"
+                                                  value={personalDraftValue || ''}
+                                                  onChange={e => setPersonalDraftValue(e.target.value)}
+                                                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                  autoFocus
+                                                  onKeyDown={e => {
+                                                    if (e.key === 'Escape') setEditingPersonalKey(null);
+                                                    if (e.key === 'Enter') {
+                                                      saveDependentField(memberNumber, 'full_name', personalDraftValue);
+                                                      setEditingPersonalKey(null);
+                                                    }
+                                                  }}
+                                                />
+                                                <button type="button" onClick={() => { saveDependentField(memberNumber, 'full_name', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                                <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                              </div>
+                                            )}
+                                          />
+
+                                          <HorizontalFieldRow
+                                            label="DOB"
+                                            value={member.date_of_birth ? formatDateMMDDYYYY(member.date_of_birth) : '—'}
+                                            isEditing={editingPersonalKey === `m_${memberNumber}_dob`}
+                                            onStartEdit={() => {
+                                              setEditingPersonalKey(`m_${memberNumber}_dob`);
+                                              setPersonalDraftValue(member.date_of_birth ? formatDateMMDDYYYY(member.date_of_birth) : '');
+                                            }}
+                                            renderEditor={() => (
+                                              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                                <input
+                                                  type="text"
+                                                  value={personalDraftValue || ''}
+                                                  onChange={e => setPersonalDraftValue(formatAsDateInput(e.target.value))}
+                                                  placeholder="MM/DD/YYYY"
+                                                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                  autoFocus
+                                                  onKeyDown={e => {
+                                                    if (e.key === 'Escape') setEditingPersonalKey(null);
+                                                    if (e.key === 'Enter') {
+                                                      const iso = usDateToIso(personalDraftValue);
+                                                      saveDependentField(memberNumber, 'date_of_birth', iso || null);
+                                                      setEditingPersonalKey(null);
+                                                    }
+                                                  }}
+                                                />
+                                                <button type="button" onClick={() => { const iso = usDateToIso(personalDraftValue); saveDependentField(memberNumber, 'date_of_birth', iso || null); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                                <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                              </div>
+                                            )}
+                                          />
+
+                                          <HorizontalFieldRow
+                                            label="Age"
+                                            value={calculateAge(member.date_of_birth)}
+                                            readOnly={true}
+                                          />
+
+                                          <HorizontalFieldRow
+                                            label="SSN"
+                                            value={member.ssn_encrypted ? formatSSN(member.ssn_encrypted) : '—'}
+                                            isEditing={editingPersonalKey === `m_${memberNumber}_ssn`}
+                                            valueClassName="font-mono"
+                                            onStartEdit={() => {
+                                              setEditingPersonalKey(`m_${memberNumber}_ssn`);
+                                              setPersonalDraftValue(member.ssn_encrypted || '');
+                                            }}
+                                            renderEditor={() => (
+                                              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                                <SSNInput
+                                                  value={personalDraftValue || ''}
+                                                  onChange={val => setPersonalDraftValue(val)}
+                                                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] font-mono w-full flex-1 min-w-0"
+                                                  autoFocus
+                                                />
+                                                <button type="button" onClick={() => { saveDependentField(memberNumber, 'ssn_encrypted', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                                <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                              </div>
+                                            )}
+                                          />
+                                        </div>
+
+                                        {/* RIGHT COLUMN */}
+                                        <div className="space-y-0">
+                                          <HorizontalFieldRow
+                                            label="Relationship to Applicant"
+                                            value={member.relationship_to_applicant || 'Son'}
+                                            isEditing={editingPersonalKey === `m_${memberNumber}_relationship`}
+                                            onStartEdit={() => {
+                                              setEditingPersonalKey(`m_${memberNumber}_relationship`);
+                                              setPersonalDraftValue(member.relationship_to_applicant || 'Son');
+                                            }}
+                                            renderEditor={() => (
+                                              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                                <select
+                                                  value={personalDraftValue}
+                                                  onChange={e => setPersonalDraftValue(e.target.value)}
+                                                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                  autoFocus
+                                                >
+                                                  <option value="Spouse">Spouse</option>
+                                                  <option value="Son">Son</option>
+                                                  <option value="Daughter">Daughter</option>
+                                                  <option value="Parent">Parent</option>
+                                                  <option value="Other">Other</option>
+                                                </select>
+                                                <button type="button" onClick={() => { saveDependentField(memberNumber, 'relationship_to_applicant', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                                <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                              </div>
+                                            )}
+                                          />
+
+                                          <HorizontalFieldRow
+                                            label="Gender"
+                                            value={member.gender || '—'}
+                                            isEditing={editingPersonalKey === `m_${memberNumber}_gender`}
+                                            onStartEdit={() => {
+                                              setEditingPersonalKey(`m_${memberNumber}_gender`);
+                                              setPersonalDraftValue(member.gender || '');
+                                            }}
+                                            renderEditor={() => (
+                                              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                                <select
+                                                  value={personalDraftValue}
+                                                  onChange={e => setPersonalDraftValue(e.target.value)}
+                                                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                  autoFocus
+                                                >
+                                                  <option value="">Select Gender...</option>
+                                                  <option value="Female">Female</option>
+                                                  <option value="Male">Male</option>
+                                                </select>
+                                                <button type="button" onClick={() => { saveDependentField(memberNumber, 'gender', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                                <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                              </div>
+                                            )}
+                                          />
+
+                                          <HorizontalFieldRow
+                                            label="U.S. Citizen"
+                                            value={member.us_citizen !== false ? 'Yes' : 'No'}
+                                            isEditing={editingPersonalKey === `m_${memberNumber}_citizen`}
+                                            onStartEdit={() => {
+                                              setEditingPersonalKey(`m_${memberNumber}_citizen`);
+                                              setPersonalDraftValue(member.us_citizen !== false);
+                                            }}
+                                            renderEditor={() => (
+                                              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                                <select
+                                                  value={personalDraftValue ? 'Yes' : 'No'}
+                                                  onChange={e => setPersonalDraftValue(e.target.value === 'Yes')}
+                                                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                  autoFocus
+                                                >
+                                                  <option value="Yes">Yes</option>
+                                                  <option value="No">No</option>
+                                                </select>
+                                                <button type="button" onClick={() => { saveDependentField(memberNumber, 'us_citizen', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                                <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                              </div>
+                                            )}
+                                          />
+
+                                          <HorizontalFieldRow
+                                            label="Uses Tobacco"
+                                            value={member.uses_tobacco ? 'Yes' : 'No'}
+                                            isEditing={editingPersonalKey === `m_${memberNumber}_tobacco`}
+                                            onStartEdit={() => {
+                                              setEditingPersonalKey(`m_${memberNumber}_tobacco`);
+                                              setPersonalDraftValue(!!member.uses_tobacco);
+                                            }}
+                                            renderEditor={() => (
+                                              <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                                <select
+                                                  value={personalDraftValue ? 'Yes' : 'No'}
+                                                  onChange={e => setPersonalDraftValue(e.target.value === 'Yes')}
+                                                  className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] text-[#253247] w-full flex-1 min-w-0"
+                                                  autoFocus
+                                                >
+                                                  <option value="Yes">Yes</option>
+                                                  <option value="No">No</option>
+                                                </select>
+                                                <button type="button" onClick={() => { saveDependentField(memberNumber, 'uses_tobacco', personalDraftValue); setEditingPersonalKey(null); }} className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0">✓</button>
+                                                <button type="button" onClick={() => setEditingPersonalKey(null)} className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0">✕</button>
+                                              </div>
+                                            )}
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
@@ -4361,262 +5656,609 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
 
                   {/* SECTION 4: Payment Information */}
                   <div className="border-t border-slate-100 pt-8 mt-8 space-y-4 font-sans">
-                    <div>
+                    <div className="flex items-center justify-between">
                       <h3 className="text-[16px] font-semibold text-[#111827] leading-6 font-sans">Payment Information</h3>
-                      <p className="text-xs text-slate-400 mt-0.5 font-sans">Manage auto pay, payment day, bank account, and card details.</p>
+                      {paymentInfoSaving && (
+                        <span className="text-xs text-blue-600 font-semibold flex items-center gap-1.5 animate-pulse">
+                          <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          Saving...
+                        </span>
+                      )}
                     </div>
 
-                    <div className="pt-2">
-                        {paymentInfoLoading ? (
-                          <div className="flex justify-center items-center py-10">
-                            <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                            </svg>
-                          </div>
-                        ) : (
-                          <form onSubmit={handleSavePaymentInfo} className="space-y-6">
-                            {paymentInfoError && (
-                              <div className="p-3.5 bg-rose-50 border border-rose-100 rounded-xl text-xs font-semibold text-rose-600 font-sans">
-                                {paymentInfoError}
-                              </div>
-                            )}
+                    {paymentInfoError && (
+                      <div className="p-3.5 bg-rose-50 border border-rose-100 rounded-xl text-xs font-semibold text-rose-600 font-sans">
+                        {paymentInfoError}
+                      </div>
+                    )}
 
-                            {paymentInfoSuccess && (
-                              <div className="p-3.5 bg-emerald-50 border border-emerald-100 rounded-xl text-xs font-semibold text-emerald-700 font-sans">
-                                {paymentInfoSuccess}
-                              </div>
-                            )}
-
-                            {/* STATIC / COMMON FIELDS */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                              <div>
-                                <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1.5">Auto Pay</label>
-                                <div className="flex items-center gap-3 pt-1">
-                                  <label className="relative inline-flex items-center cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={paymentAutoPay}
-                                      onChange={(e) => setPaymentAutoPay(e.target.checked)}
-                                      className="sr-only peer"
-                                    />
-                                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                    <span className="ml-2 text-xs font-bold text-slate-700">
-                                      {paymentAutoPay ? 'Enabled' : 'Disabled'}
-                                    </span>
-                                  </label>
-                                </div>
-                              </div>
-
-                              <div>
-                                <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1.5">Payment Day</label>
-                                <select
-                                  value={paymentDayVal || ''}
-                                  onChange={(e) => setPaymentDayVal(e.target.value === '' ? null : Number(e.target.value))}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans"
-                                >
-                                  <option value="">Select Day (1–31)...</option>
-                                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                                    <option key={day} value={day}>
-                                      Day {day}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-
-                              <div>
-                                <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1.5">Associated Address</label>
-                                <input
-                                  type="text"
-                                  value={paymentAddress}
-                                  onChange={(e) => setPaymentAddress(e.target.value)}
-                                  placeholder="e.g. 123 Main St, Miami, FL"
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans"
-                                />
-                              </div>
-
-                              <div>
-                                <label className="block text-[15px] font-normal text-[#52627A] leading-snug mb-1.5">A Nombre De (Holder Name)</label>
-                                <input
-                                  type="text"
-                                  value={paymentHolderName}
-                                  onChange={(e) => setPaymentHolderName(e.target.value)}
-                                  placeholder="e.g. Account Holder Name"
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-sans"
-                                />
-                              </div>
-                            </div>
-
-                            <div className="border-t border-slate-100 pt-5 space-y-4">
-                              <h4 className="text-[16px] font-semibold text-[#111827] leading-6">Payment Methods</h4>
-
-                              {/* BANK ACCOUNT SUBSECTION */}
-                              <div className="p-4 border border-slate-200 rounded-xl bg-slate-50/50 space-y-4">
-                                <div className="flex items-center justify-between">
-                                  <label className="flex items-center gap-2.5 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={hasBankAccount}
-                                      onChange={(e) => {
-                                        const checked = e.target.checked;
-                                        setHasBankAccount(checked);
-                                        if (!checked) {
-                                          setBankName('');
-                                          setBankRoutingNumber('');
-                                          setBankAccountNumber('');
-                                          setBankLast4('');
-                                        }
-                                      }}
-                                      className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
-                                    />
-                                    <span className="text-sm font-bold text-slate-800 font-sans">Bank Account</span>
-                                  </label>
-                                </div>
-
-                                {hasBankAccount && (
-                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-slate-200/60 animate-fade-in">
-                                    <div>
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">Bank Name</label>
-                                      <input
-                                        type="text"
-                                        value={bankName}
-                                        onChange={(e) => setBankName(e.target.value)}
-                                        placeholder="e.g. Chase Bank"
-                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-sans"
-                                        required={hasBankAccount}
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">Routing Number</label>
-                                      <input
-                                        type="text"
-                                        value={bankRoutingNumber}
-                                        onChange={(e) => setBankRoutingNumber(e.target.value)}
-                                        placeholder="9-digit Routing Number"
-                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono"
-                                        required={hasBankAccount}
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">Account Number</label>
-                                      <input
-                                        type="text"
-                                        value={bankAccountNumber}
-                                        onChange={(e) => setBankAccountNumber(e.target.value)}
-                                        placeholder="Account Number"
-                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono font-bold"
-                                        required={hasBankAccount}
-                                      />
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* CARD SUBSECTION */}
-                              <div className="p-4 border border-slate-200 rounded-xl bg-slate-50/50 space-y-4">
-                                <div className="flex items-center justify-between">
-                                  <label className="flex items-center gap-2.5 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={hasCardMethod}
-                                      onChange={(e) => {
-                                        const checked = e.target.checked;
-                                        setHasCardMethod(checked);
-                                        if (!checked) {
-                                          setCardTypeVal('Debit');
-                                          setCardNumberVal('');
-                                          setCardLast4Val('');
-                                          setCardExpMonth('');
-                                          setCardExpYear('');
-                                          setCardCvvVal('');
-                                        }
-                                      }}
-                                      className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
-                                    />
-                                    <span className="text-sm font-bold text-slate-800 font-sans">Card</span>
-                                  </label>
-                                </div>
-
-                                {hasCardMethod && (
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2 border-t border-slate-200/60 animate-fade-in">
-                                    <div>
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">Card Type</label>
-                                      <select
-                                        value={cardTypeVal}
-                                        onChange={(e) => setCardTypeVal(e.target.value as 'Debit' | 'Credit')}
-                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-sans"
-                                      >
-                                        <option value="Debit">Debit</option>
-                                        <option value="Credit">Credit</option>
-                                      </select>
-                                    </div>
-
-                                    <div>
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">Card Number</label>
-                                      <input
-                                        type="text"
-                                        value={cardNumberVal}
-                                        onChange={(e) => setCardNumberVal(e.target.value)}
-                                        placeholder="16-digit Card Number"
-                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono font-bold"
-                                        required={hasCardMethod}
-                                      />
-                                    </div>
-
-                                    <div>
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">Expiration Date (MM/YYYY)</label>
-                                      <div className="grid grid-cols-2 gap-2">
-                                        <input
-                                          type="text"
-                                          value={cardExpMonth}
-                                          onChange={(e) => setCardExpMonth(e.target.value)}
-                                          placeholder="MM"
-                                          maxLength={2}
-                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-sans text-center"
-                                          required={hasCardMethod}
-                                        />
-                                        <input
-                                          type="text"
-                                          value={cardExpYear}
-                                          onChange={(e) => setCardExpYear(e.target.value)}
-                                          placeholder="YYYY"
-                                          maxLength={4}
-                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-sans text-center"
-                                          required={hasCardMethod}
-                                        />
-                                      </div>
-                                    </div>
-
-                                    <div>
-                                      <label className="block text-xs font-bold text-slate-500 mb-1">
-                                        CVV <span className="text-[10px] text-slate-400 font-normal">(Transient entry - never saved)</span>
-                                      </label>
-                                      <input
-                                        type="password"
-                                        value={cardCvvVal}
-                                        onChange={(e) => setCardCvvVal(e.target.value)}
-                                        placeholder="CVV"
-                                        maxLength={4}
-                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 transition-all font-mono text-center"
-                                      />
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-end pt-3 border-t border-slate-100">
-                              <button
-                                type="submit"
-                                disabled={paymentInfoSaving}
-                                className="px-5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-all shadow-md shadow-blue-500/10 font-sans"
+                    {paymentInfoLoading ? (
+                      <div className="flex justify-center items-center py-10">
+                        <svg className="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                      </div>
+                    ) : (
+                      <div className="space-y-0 pt-2 font-sans">
+                        {/* 1. Auto Pay */}
+                        <HorizontalFieldRow
+                          label="Auto Pay"
+                          value={paymentAutoPay ? 'Yes' : 'No'}
+                          isEditing={editingPersonalKey === 'pay_auto_pay'}
+                          onStartEdit={() => {
+                            setEditingPersonalKey('pay_auto_pay');
+                            setPersonalDraftValue(paymentAutoPay ? 'true' : 'false');
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                              <select
+                                value={personalDraftValue}
+                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                                autoFocus
+                                onKeyDown={e => {
+                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                  if (e.key === 'Enter') {
+                                    saveSinglePaymentField('auto_pay', personalDraftValue === 'true');
+                                    setEditingPersonalKey(null);
+                                  }
+                                }}
                               >
-                                {paymentInfoSaving ? 'Saving...' : 'Save Payment Information'}
+                                <option value="true">Yes</option>
+                                <option value="false">No</option>
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  saveSinglePaymentField('auto_pay', personalDraftValue === 'true');
+                                  setEditingPersonalKey(null);
+                                }}
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                title="Save"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingPersonalKey(null)}
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                title="Cancel"
+                              >
+                                ✕
                               </button>
                             </div>
-                          </form>
+                          )}
+                        />
+
+                        {/* 2. Payment Day */}
+                        <HorizontalFieldRow
+                          label="Payment Day"
+                          value={paymentDayVal ? `Day ${paymentDayVal}` : '—'}
+                          isEditing={editingPersonalKey === 'pay_payment_day'}
+                          onStartEdit={() => {
+                            setEditingPersonalKey('pay_payment_day');
+                            setPersonalDraftValue(paymentDayVal || '');
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                              <select
+                                value={personalDraftValue || ''}
+                                onChange={e => setPersonalDraftValue(e.target.value === '' ? '' : Number(e.target.value))}
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                                autoFocus
+                                onKeyDown={e => {
+                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                  if (e.key === 'Enter') {
+                                    saveSinglePaymentField('payment_day', personalDraftValue === '' ? null : Number(personalDraftValue));
+                                    setEditingPersonalKey(null);
+                                  }
+                                }}
+                              >
+                                <option value="">Select Day (1–31)...</option>
+                                {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (
+                                  <option key={d} value={d}>Day {d}</option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  saveSinglePaymentField('payment_day', personalDraftValue === '' ? null : Number(personalDraftValue));
+                                  setEditingPersonalKey(null);
+                                }}
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                title="Save"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingPersonalKey(null)}
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                title="Cancel"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )}
+                        />
+
+                        {/* 3. Payment Type */}
+                        <HorizontalFieldRow
+                          label="Payment Type"
+                          value={getSelectedPaymentType()}
+                          isEditing={editingPersonalKey === 'pay_payment_type'}
+                          onStartEdit={() => {
+                            setEditingPersonalKey('pay_payment_type');
+                            setPersonalDraftValue(getSelectedPaymentType());
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                              <select
+                                value={personalDraftValue}
+                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0 cursor-pointer"
+                                autoFocus
+                                onKeyDown={async e => {
+                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                  if (e.key === 'Enter') {
+                                    await handleSavePaymentType(personalDraftValue);
+                                    setEditingPersonalKey(null);
+                                  }
+                                }}
+                              >
+                                <option value="None">None</option>
+                                <option value="Bank Account">Bank Account</option>
+                                <option value="Debit Card">Debit Card</option>
+                                <option value="Credit Card">Credit Card</option>
+                                <option value="Bank Account + Debit Card">Bank Account + Debit Card</option>
+                                <option value="Bank Account + Credit Card">Bank Account + Credit Card</option>
+                              </select>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await handleSavePaymentType(personalDraftValue);
+                                  setEditingPersonalKey(null);
+                                }}
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                title="Save"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingPersonalKey(null)}
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                title="Cancel"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )}
+                        />
+
+                        {/* 4. Bank Fields (if Bank Account is enabled) */}
+                        {hasBankAccount && (
+                          <>
+                            {/* Bank Name */}
+                            <HorizontalFieldRow
+                              label="Bank Name"
+                              value={bankName || '—'}
+                              isEditing={editingPersonalKey === 'pay_bank_name'}
+                              onStartEdit={() => {
+                                setEditingPersonalKey('pay_bank_name');
+                                setPersonalDraftValue(bankName || '');
+                              }}
+                              renderEditor={() => (
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                  <input
+                                    type="text"
+                                    value={personalDraftValue || ''}
+                                    onChange={e => setPersonalDraftValue(e.target.value)}
+                                    placeholder="e.g. Chase Bank"
+                                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                                    autoFocus
+                                    onKeyDown={e => {
+                                      if (e.key === 'Escape') setEditingPersonalKey(null);
+                                      if (e.key === 'Enter') {
+                                        saveSinglePaymentField('bank_name', personalDraftValue);
+                                        setEditingPersonalKey(null);
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      saveSinglePaymentField('bank_name', personalDraftValue);
+                                      setEditingPersonalKey(null);
+                                    }}
+                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                    title="Save"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingPersonalKey(null)}
+                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                    title="Cancel"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              )}
+                            />
+
+                            {/* Routing Number */}
+                            <HorizontalFieldRow
+                              label="Routing Number"
+                              value={bankRoutingNumber ? (bankRoutingNumber.length > 4 ? `••••${bankRoutingNumber.slice(-4)}` : bankRoutingNumber) : '—'}
+                              valueClassName="font-mono"
+                              isEditing={editingPersonalKey === 'pay_routing_number'}
+                              onStartEdit={() => {
+                                setEditingPersonalKey('pay_routing_number');
+                                setPersonalDraftValue(bankRoutingNumber || '');
+                              }}
+                              renderEditor={() => (
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                  <input
+                                    type="text"
+                                    value={personalDraftValue || ''}
+                                    onChange={e => setPersonalDraftValue(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                                    placeholder="9-digit Routing"
+                                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] font-mono text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors w-full flex-1 min-w-0"
+                                    autoFocus
+                                    onKeyDown={e => {
+                                      if (e.key === 'Escape') setEditingPersonalKey(null);
+                                      if (e.key === 'Enter') {
+                                        saveSinglePaymentField('routing_number', personalDraftValue);
+                                        setEditingPersonalKey(null);
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      saveSinglePaymentField('routing_number', personalDraftValue);
+                                      setEditingPersonalKey(null);
+                                    }}
+                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                    title="Save"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingPersonalKey(null)}
+                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                    title="Cancel"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              )}
+                            />
+
+                            {/* Account Number */}
+                            <HorizontalFieldRow
+                              label="Account Number"
+                              value={bankLast4 ? `••••${bankLast4}` : (bankAccountNumber ? `••••${bankAccountNumber.slice(-4)}` : '—')}
+                              valueClassName="font-mono"
+                              isEditing={editingPersonalKey === 'pay_account_number'}
+                              onStartEdit={() => {
+                                setEditingPersonalKey('pay_account_number');
+                                setPersonalDraftValue(bankAccountNumber || '');
+                              }}
+                              renderEditor={() => (
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                  <input
+                                    type="text"
+                                    value={personalDraftValue || ''}
+                                    onChange={e => setPersonalDraftValue(e.target.value.replace(/\D/g, ''))}
+                                    placeholder="Account Number"
+                                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] font-mono text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors w-full flex-1 min-w-0"
+                                    autoFocus
+                                    onKeyDown={e => {
+                                      if (e.key === 'Escape') setEditingPersonalKey(null);
+                                      if (e.key === 'Enter') {
+                                        saveSinglePaymentField('account_number', personalDraftValue);
+                                        setEditingPersonalKey(null);
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      saveSinglePaymentField('account_number', personalDraftValue);
+                                      setEditingPersonalKey(null);
+                                    }}
+                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                    title="Save"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingPersonalKey(null)}
+                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                    title="Cancel"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              )}
+                            />
+                          </>
                         )}
+
+                        {/* 5. Card Fields (if Card is enabled) */}
+                        {hasCardMethod && (
+                          <>
+                            {/* Card Number */}
+                            <HorizontalFieldRow
+                              label="Card Number"
+                              value={cardLast4Val ? `•••• ${cardLast4Val}` : (cardNumberVal ? `•••• ${cardNumberVal.slice(-4)}` : '—')}
+                              valueClassName="font-mono"
+                              isEditing={editingPersonalKey === 'pay_card_number'}
+                              onStartEdit={() => {
+                                setEditingPersonalKey('pay_card_number');
+                                setPersonalDraftValue(cardNumberVal || '');
+                              }}
+                              renderEditor={() => (
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                  <input
+                                    type="text"
+                                    value={personalDraftValue || ''}
+                                    onChange={e => setPersonalDraftValue(e.target.value.replace(/\D/g, '').slice(0, 19))}
+                                    placeholder="16-digit Card Number"
+                                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] font-mono text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors w-full flex-1 min-w-0"
+                                    autoFocus
+                                    onKeyDown={e => {
+                                      if (e.key === 'Escape') setEditingPersonalKey(null);
+                                      if (e.key === 'Enter') {
+                                        saveSinglePaymentField('card_number', personalDraftValue);
+                                        setEditingPersonalKey(null);
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      saveSinglePaymentField('card_number', personalDraftValue);
+                                      setEditingPersonalKey(null);
+                                    }}
+                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                    title="Save"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingPersonalKey(null)}
+                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                    title="Cancel"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              )}
+                            />
+
+                            {/* Expiration Date */}
+                            <HorizontalFieldRow
+                              label="Expiration Date"
+                              value={cardExpMonth && cardExpYear ? `${cardExpMonth.padStart(2, '0')}/${cardExpYear}` : '—'}
+                              valueClassName="font-mono"
+                              isEditing={editingPersonalKey === 'pay_card_exp'}
+                              onStartEdit={() => {
+                                setEditingPersonalKey('pay_card_exp');
+                                setPersonalDraftValue({ month: cardExpMonth || '', year: cardExpYear || '' });
+                              }}
+                              renderEditor={() => (
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                  <input
+                                    type="text"
+                                    value={personalDraftValue?.month || ''}
+                                    onChange={e => setPersonalDraftValue({ ...personalDraftValue, month: e.target.value.replace(/\D/g, '').slice(0, 2) })}
+                                    placeholder="MM"
+                                    maxLength={2}
+                                    className="h-[34px] bg-white border border-slate-300 rounded-md px-2 text-[15px] leading-[20px] text-center font-mono text-[#253247] w-[60px]"
+                                    autoFocus
+                                  />
+                                  <span className="text-slate-400">/</span>
+                                  <input
+                                    type="text"
+                                    value={personalDraftValue?.year || ''}
+                                    onChange={e => setPersonalDraftValue({ ...personalDraftValue, year: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                                    placeholder="YYYY"
+                                    maxLength={4}
+                                    className="h-[34px] bg-white border border-slate-300 rounded-md px-2 text-[15px] leading-[20px] text-center font-mono text-[#253247] w-[80px]"
+                                    onKeyDown={async e => {
+                                      if (e.key === 'Escape') setEditingPersonalKey(null);
+                                      if (e.key === 'Enter') {
+                                        await saveSinglePaymentField('expiration_month', personalDraftValue.month);
+                                        await saveSinglePaymentField('expiration_year', personalDraftValue.year);
+                                        setEditingPersonalKey(null);
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      await saveSinglePaymentField('expiration_month', personalDraftValue.month);
+                                      await saveSinglePaymentField('expiration_year', personalDraftValue.year);
+                                      setEditingPersonalKey(null);
+                                    }}
+                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                    title="Save"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingPersonalKey(null)}
+                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                    title="Cancel"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              )}
+                            />
+
+                            {/* CVV (Transient Only) */}
+                            <HorizontalFieldRow
+                              label="CVV"
+                              value={cardCvvVal ? '•••' : '—'}
+                              valueClassName="font-mono"
+                              isEditing={editingPersonalKey === 'pay_card_cvv'}
+                              onStartEdit={() => {
+                                setEditingPersonalKey('pay_card_cvv');
+                                setPersonalDraftValue(cardCvvVal || '');
+                              }}
+                              renderEditor={() => (
+                                <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                                  <input
+                                    type="password"
+                                    value={personalDraftValue || ''}
+                                    onChange={e => setPersonalDraftValue(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                                    placeholder="CVV"
+                                    maxLength={4}
+                                    className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] font-mono text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors w-[90px]"
+                                    autoFocus
+                                    onKeyDown={e => {
+                                      if (e.key === 'Escape') setEditingPersonalKey(null);
+                                      if (e.key === 'Enter') {
+                                        setCardCvvVal(personalDraftValue);
+                                        setEditingPersonalKey(null);
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCardCvvVal(personalDraftValue);
+                                      setEditingPersonalKey(null);
+                                    }}
+                                    className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                    title="Save"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingPersonalKey(null)}
+                                    className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                    title="Cancel"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              )}
+                            />
+                          </>
+                        )}
+
+                        {/* 6. Associated Address */}
+                        <HorizontalFieldRow
+                          label="Associated Address"
+                          value={paymentAddress || '—'}
+                          isEditing={editingPersonalKey === 'pay_address'}
+                          onStartEdit={() => {
+                            setEditingPersonalKey('pay_address');
+                            setPersonalDraftValue(paymentAddress || '');
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                              <input
+                                type="text"
+                                value={personalDraftValue || ''}
+                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                                autoFocus
+                                onKeyDown={e => {
+                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                  if (e.key === 'Enter') {
+                                    saveSinglePaymentField('associated_address', personalDraftValue);
+                                    setEditingPersonalKey(null);
+                                  }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  saveSinglePaymentField('associated_address', personalDraftValue);
+                                  setEditingPersonalKey(null);
+                                }}
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                title="Save"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingPersonalKey(null)}
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                title="Cancel"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )}
+                        />
+
+                        {/* 7. Holder Name */}
+                        <HorizontalFieldRow
+                          label="Holder Name"
+                          value={paymentHolderName || '—'}
+                          isEditing={editingPersonalKey === 'pay_holder_name'}
+                          onStartEdit={() => {
+                            setEditingPersonalKey('pay_holder_name');
+                            setPersonalDraftValue(paymentHolderName || '');
+                          }}
+                          renderEditor={() => (
+                            <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
+                              <input
+                                type="text"
+                                value={personalDraftValue || ''}
+                                onChange={e => setPersonalDraftValue(e.target.value)}
+                                className="h-[34px] bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans w-full flex-1 min-w-0"
+                                autoFocus
+                                onKeyDown={e => {
+                                  if (e.key === 'Escape') setEditingPersonalKey(null);
+                                  if (e.key === 'Enter') {
+                                    saveSinglePaymentField('account_holder_name', personalDraftValue);
+                                    setEditingPersonalKey(null);
+                                  }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  saveSinglePaymentField('account_holder_name', personalDraftValue);
+                                  setEditingPersonalKey(null);
+                                }}
+                                className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0"
+                                title="Save"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingPersonalKey(null)}
+                                className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
+                                title="Cancel"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )}
+                        />
                       </div>
+                    )}
                   </div>
                 </div>
               )}

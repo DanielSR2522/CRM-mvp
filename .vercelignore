@@ -7,3 +7,6 @@ scratch_*
 .carrier-sessions/
 .carrier-downloads/
 .carrier-profiles/
+.edge-debug-profile/
+scripts/rollback_snapshot*.json
+

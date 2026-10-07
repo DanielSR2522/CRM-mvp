@@ -64,7 +64,7 @@ export default function InlineEditableDate({
 
       {isEditing ? (
         <div className="flex items-center gap-2">
-          <div className="w-full max-w-[220px]">
+          <div className="w-full flex-1 min-w-0">
             <DatePicker
               value={draftValue}
               onChange={(iso) => {

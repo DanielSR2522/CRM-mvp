@@ -239,6 +239,9 @@ export default function ModuleDocumentsManager({
       setDisplayName('');
       setSelectedFile(null);
       if (!policyId && !healthPolicyId) setSelectedPolicyId('');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('client-documents-updated', { detail: { clientId } }));
+      }
       await loadDocuments();
     } catch (err: any) {
       console.error('Error uploading document:', err);
@@ -255,6 +258,9 @@ export default function ModuleDocumentsManager({
       await supabase.storage.from('crm-documents').remove([doc.storage_path]);
       const { error: delErr } = await supabase.from('client_documents').delete().eq('id', doc.id);
       if (delErr) throw delErr;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('client-documents-updated', { detail: { clientId } }));
+      }
       await loadDocuments();
     } catch (err: any) {
       console.error('Error deleting document:', err);

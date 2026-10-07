@@ -16,8 +16,8 @@ export interface ClientLinkItem {
 
 interface HealthLeftRailProps {
   clientId: string;
-  activeSubTab: 'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links';
-  setActiveSubTab: (tab: 'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links') => void;
+  activeSubTab: 'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links' | 'renewals';
+  setActiveSubTab: (tab: 'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links' | 'renewals') => void;
   marketplacePlanData?: any | null;
   marketplaceContextInfo?: {
     context: MarketplaceClientContext;
@@ -112,8 +112,9 @@ export default function HealthLeftRail({
     }
   };
 
-  const navItems: Array<{ id: 'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links'; label: string; icon: string }> = [
+  const navItems: Array<{ id: 'summary' | 'documents' | 'notes' | 'timeline' | 'marketplace' | 'medical' | 'links' | 'renewals'; label: string; icon: string }> = [
     { id: 'summary', label: 'Summary', icon: '📋' },
+    { id: 'renewals', label: '2026 Renewals', icon: '🔄' },
     { id: 'documents', label: 'Documents', icon: '📁' },
     { id: 'notes', label: 'Notes', icon: '📝' },
     { id: 'timeline', label: 'Timeline', icon: '⏱️' },

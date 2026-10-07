@@ -98,14 +98,14 @@ export default function HealthSensitiveField({
   const widthLabelClass = labelWidth === 150 ? 'w-[150px]' : 'w-[185px]';
 
   const isLongText = fieldName === 'security_questions' || fieldName === 'marketplace_security_questions';
-  const editorWidthClass = isLongText ? 'w-full max-w-[320px]' : 'w-full max-w-[260px]';
+  const editorWidthClass = 'w-full flex-1 min-w-0';
 
   return (
     <div className={`grid ${gridClass} items-center min-h-[38px] py-[3px] gap-x-[18px] font-sans w-full`}>
       <span className={`text-[15px] font-normal text-[#52627A] text-right ${widthLabelClass} pr-[18px] leading-snug break-words shrink-0`}>{label}</span>
 
       {isInlineEditing ? (
-        <div className="flex items-center gap-2 flex-nowrap min-w-0">
+        <div className="flex items-center gap-2 flex-nowrap min-w-0 w-full">
           <input
             type="text"
             value={draftValue}
@@ -114,18 +114,24 @@ export default function HealthSensitiveField({
               onChange(e.target.value);
             }}
             placeholder={`Enter ${label}...`}
-            className={`h-[34px] ${editorWidthClass} min-w-0 bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans`}
+            className={`h-[34px] ${editorWidthClass} bg-white border border-slate-300 rounded-md px-3 text-[15px] leading-[20px] text-[#253247] font-normal outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-colors font-sans`}
             autoFocus
             onKeyDown={e => {
-              if (e.key === 'Escape') handleCancel();
-              if (e.key === 'Enter') handleSave();
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                handleCancel();
+              }
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                handleSave();
+              }
             }}
           />
           <button
             type="button"
             disabled={loading}
             onClick={handleSave}
-            className="w-6 h-6 rounded-md bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-xs transition-colors disabled:opacity-50"
+            className="text-emerald-600 hover:text-emerald-800 p-0.5 text-xs font-bold shrink-0 disabled:opacity-50"
             title="Save"
           >
             ✓
@@ -133,12 +139,12 @@ export default function HealthSensitiveField({
           <button
             type="button"
             onClick={handleCancel}
-            className="w-6 h-6 rounded-md bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center text-xs font-bold shrink-0 transition-colors"
+            className="text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold shrink-0"
             title="Cancel"
           >
             ✕
           </button>
-          {error && <span className="text-rose-500 text-[10px] pl-1 shrink-0">{error}</span>}
+          {error && <span className="text-rose-500 text-xs pl-1 shrink-0">{error}</span>}
         </div>
       ) : (
         <div className="flex items-center gap-2">
@@ -151,16 +157,24 @@ export default function HealthSensitiveField({
               Loading...
             </span>
           ) : (
-            <span
+            <div
               onClick={() => setIsInlineEditing(true)}
-              className="text-[15px] font-normal text-[#253247] text-left leading-snug cursor-pointer hover:text-blue-600 hover:underline transition-colors font-sans"
+              className="group inline-flex items-center gap-1.5 cursor-pointer text-[15px] font-normal text-[#253247] leading-snug transition-colors font-sans"
               title={`Click to edit ${label}`}
             >
-              {getDisplayText()}
-            </span>
+              <span>{getDisplayText()}</span>
+              <svg
+                className="w-3.5 h-3.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+            </div>
           )}
 
-          {error && <span className="text-rose-500 text-[10px] pl-1">{error}</span>}
+          {error && <span className="text-rose-500 text-xs pl-1">{error}</span>}
         </div>
       )}
     </div>

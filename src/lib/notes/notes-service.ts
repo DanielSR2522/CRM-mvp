@@ -165,6 +165,38 @@ export async function fetchClientNotes(
 }
 
 /**
+ * Efficiently count all notes accessible to the current user for a client profile across all modules.
+ * Reuses identical permissions/inclusion rules and counts each unique note ID once.
+ */
+export async function fetchClientNotesCount(clientId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('client_notes')
+    .select('id, category')
+    .eq('client_id', clientId);
+
+  if (error) {
+    throw new Error(`Failed to fetch client notes count: ${error.message}`);
+  }
+
+  const rawNotes = (data as any[]) || [];
+  if (rawNotes.length === 0) return 0;
+
+  // Shared agents (non-owner) can strictly only access property_casualty notes
+  const { data: { session } } = await supabase.auth.getSession();
+  const currentUserId = session?.user?.id;
+  const { data: clientInfo } = await supabase.from('clients').select('agent_id').eq('id', clientId).maybeSingle();
+
+  const accessibleNotes = rawNotes.filter(n => {
+    if (!clientInfo?.agent_id || !currentUserId) return true;
+    if (clientInfo.agent_id === currentUserId) return true;
+    return n.category === 'property_casualty';
+  });
+
+  const uniqueNoteIds = new Set(accessibleNotes.map(n => n.id).filter(Boolean));
+  return uniqueNoteIds.size;
+}
+
+/**
  * Fallback loader for historical policy_notes table if client_notes table is not present.
  */
 async function fetchFallbackPolicyNotes(
@@ -352,6 +384,10 @@ export async function createClientNote(payload: CreateNotePayload): Promise<Unif
 
   const activePolicyId = rawNote.health_policy_id || rawNote.policy_id;
 
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('client-notes-updated', { detail: { clientId: payload.clientId } }));
+  }
+
   return {
     ...rawNote,
     profiles: rawNote.created_by ? profileMap[rawNote.created_by] || null : null,
@@ -371,6 +407,10 @@ export async function updateClientNote(noteId: string, content: string): Promise
   if (error) {
     throw new Error(`Failed to update note: ${error.message}`);
   }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('client-notes-updated'));
+  }
 }
 
 /**
@@ -384,6 +424,10 @@ export async function deleteClientNote(noteId: string): Promise<void> {
 
   if (error) {
     throw new Error(`Failed to delete note: ${error.message}`);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('client-notes-updated'));
   }
 }
 

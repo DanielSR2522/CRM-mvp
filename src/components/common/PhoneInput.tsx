@@ -14,6 +14,7 @@ interface PhoneInputProps {
   className?: string;
   name?: string;
   id?: string;
+  autoFocus?: boolean;
   onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void;
 }
 
@@ -28,6 +29,7 @@ export default function PhoneInput({
   className = 'crm-input w-full',
   name = 'phone',
   id,
+  autoFocus = false,
   onBlur,
 }: PhoneInputProps) {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -48,6 +50,7 @@ export default function PhoneInput({
         disabled={disabled}
         readOnly={readOnly}
         required={required}
+        autoFocus={autoFocus}
         placeholder={placeholder}
         maxLength={20}
         className={`${className} ${error ? 'border-[#EF4444] focus:ring-[#EF4444]' : ''}`}
