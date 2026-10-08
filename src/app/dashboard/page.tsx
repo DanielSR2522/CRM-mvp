@@ -275,13 +275,13 @@ export default function DashboardPage() {
         // Medicare Policies (client_medicare_information)
         supabase
           .from('client_medicare_information')
-          .select('id, client_id, company_name, plan_name, policy_number, effective_date, created_at, status')
+          .select('id, client_id, company, plan_name, plan_id, plan_effective_date, created_at, renewal_status')
           .in('client_id', safeQueryClientIds),
 
         // Supplemental Policies (client_supplemental_policies)
         supabase
           .from('client_supplemental_policies')
-          .select('id, client_id, company_name, policy_type, policy_number, effective_date, created_at, status')
+          .select('id, client_id, company, product_type, member_id, effective_date, created_at, status')
           .in('client_id', safeQueryClientIds),
 
         // Life Policies (life_policies & life_policy_products)

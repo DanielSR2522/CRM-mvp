@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { HealthPolicy } from '@/lib/health/types';
 import { fetchHealthPolicy } from '@/lib/health/health-service';
 import HealthPolicyForm from './HealthPolicyForm';
@@ -40,6 +41,9 @@ export default function HealthPolicyTab({
   onDeleteProfile,
   isCompanyClient = false
 }: HealthPolicyTabProps) {
+  const searchParams = useSearchParams();
+  const isActionNew = searchParams ? searchParams.get('action') === 'new' : false;
+
   const [healthPolicy, setHealthPolicy] = useState<HealthPolicy | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -67,12 +71,15 @@ export default function HealthPolicyTab({
       if (!silent) setLoading(true);
       const data = await fetchHealthPolicy(clientId);
       setHealthPolicy(data);
+      if (!data || isActionNew) {
+        setIsEditing(true);
+      }
     } catch (err) {
       console.error('Failed to load health policy:', err);
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [clientId]);
+  }, [clientId, isActionNew]);
 
   useEffect(() => {
     loadPolicy();

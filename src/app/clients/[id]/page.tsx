@@ -365,6 +365,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
   const [lifePolicies, setLifePolicies] = useState<any[]>([]);
   const [healthPoliciesOverview, setHealthPoliciesOverview] = useState<any[]>([]);
   const [supplementalPolicies, setSupplementalPolicies] = useState<any[]>([]);
+  const [medicarePoliciesOverview, setMedicarePoliciesOverview] = useState<any[]>([]);
   const [loadingClient, setLoadingClient] = useState(true);
   const [loadingPolicies, setLoadingPolicies] = useState(true);
   const [currentUserEmail, setCurrentUserEmail] = useState<string>('Agent');
@@ -1326,15 +1327,32 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       }
     });
 
-    // 2. Health policies (only if direct client owner)
-    if (!client || client.agent_id === currentUserId) {
+    // 2. Health policies (when health module is enabled for agent)
+    if (isLineEnabled('health')) {
       (healthPoliciesOverview || []).forEach((h: any) => {
-        if (h.active === true && h.policy_status === 'Active') {
+        // Contradictory check: Cancelled or Pending policies must never be presented as active
+        if (h.policy_status === 'Cancelled' || h.policy_status === 'Pending' || h.policy_status === 'Terminated' || h.policy_status === 'Expired') {
+          return;
+        }
+
+        // Missing policy_status with active=false/null must NOT be included or displayed as Active
+        if (!h.policy_status && (h.active === false || h.active === null || h.active === undefined)) {
+          return;
+        }
+
+        const isExplicitActive = h.policy_status === 'Enrolled' || h.policy_status === 'Sold' || h.policy_status === 'Active';
+        const isLegacyActiveWithoutStatus = !h.policy_status && h.active === true;
+
+        if (isExplicitActive || isLegacyActiveWithoutStatus) {
           const effectiveAddress = resolvePolicyAddress(
             null,
             residenceInfo,
             client
           );
+
+          // User requirement: "missing policy_status must not display Active when active=false/null. Show '—' when status is unknown; do not infer enrollment from the boolean."
+          const displayStatus = h.policy_status ? h.policy_status : '—';
+
           cards.push({
             id: h.id,
             businessLine: 'health',
@@ -1342,7 +1360,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             policy_type: h.plan_name || 'Health Plan',
             company_name: h.company_2026 || 'Marketplace Carrier',
             policy_number: h.plan_id || h.application_number || 'N/A',
-            status: 'Active',
+            status: displayStatus,
             effective_date: h.effective_date || null,
             expiration_date: null,
             premium: Number(h.plan_cost || 0),
@@ -1354,15 +1372,16 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       });
     }
 
-    // 3. Life policies (only if direct client owner)
-    if (!client || client.agent_id === currentUserId) {
+    // 3. Life policies (when life module is enabled for agent)
+    if (isLineEnabled('life')) {
       (lifePolicies || []).forEach((l: any) => {
+        if (l.status === 'Cancelled' || l.status === 'Pending') return;
         const prods = l.life_policy_products || [];
         const qualifyingProd = prods.find(
           (prod: any) => prod.company && typeof prod.company === 'string' && prod.company.trim().length > 0
         );
 
-        if (qualifyingProd) {
+        if (qualifyingProd && qualifyingProd.status !== 'Cancelled' && qualifyingProd.status !== 'Pending') {
           const effectiveAddress = resolvePolicyAddress(
             null,
             residenceInfo,
@@ -1375,10 +1394,31 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             policy_type: qualifyingProd.product_type || 'Life Policy',
             company_name: qualifyingProd.company.trim(),
             policy_number: qualifyingProd.policy_number || 'N/A',
-            status: 'Active',
+            status: qualifyingProd.status || l.status || 'Active',
             effective_date: qualifyingProd.policy_date || null,
             expiration_date: null,
             premium: Number(qualifyingProd.monthly_premium || 0),
+            effectiveAddress,
+            targetTab: 'life',
+            updated_at: l.updated_at || l.created_at || new Date().toISOString(),
+          });
+        } else if (l.status === 'Active' || l.status === 'Enrolled') {
+          const effectiveAddress = resolvePolicyAddress(
+            null,
+            residenceInfo,
+            client
+          );
+          cards.push({
+            id: l.id,
+            businessLine: 'life',
+            businessLineLabel: 'Life Insurance',
+            policy_type: 'Life Insurance',
+            company_name: 'Life Carrier',
+            policy_number: 'N/A',
+            status: l.status || 'Active',
+            effective_date: null,
+            expiration_date: null,
+            premium: 0,
             effectiveAddress,
             targetTab: 'life',
             updated_at: l.updated_at || l.created_at || new Date().toISOString(),
@@ -1390,6 +1430,7 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     // 4. Linked Company Commercial P&C policies (surfaced automatically on Personal Client Overview)
     if (!isCompanyClient && linkedCompanyPolicies && linkedCompanyPolicies.length > 0) {
       linkedCompanyPolicies.forEach((p: any) => {
+        if (p.status === 'Cancelled' || p.status === 'Pending') return;
         const effectiveAddress = resolvePolicyAddress(
           { address: p.address, city: p.city, state: p.state, zip_code: p.zip_code },
           residenceInfo,
@@ -1416,10 +1457,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
         });
       });
     }
-    // 4. Supplemental policies (only if direct client owner)
-    if (!client || client.agent_id === currentUserId) {
+
+    // 5. Supplemental policies (when supplemental module is enabled for agent)
+    if (isLineEnabled('supplemental')) {
       (supplementalPolicies || []).forEach((supp: any) => {
-        if (supp.status === 'Active') {
+        if (supp.status === 'Cancelled' || supp.status === 'Pending' || supp.status === 'Terminated' || supp.status === 'Expired') return;
+        if (supp.status === 'Active' || supp.status === 'Enrolled' || (!supp.status && supp.company)) {
           const effectiveAddress = resolvePolicyAddress(
             null,
             residenceInfo,
@@ -1432,13 +1475,42 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
             policy_type: supp.product_type || 'Supplemental Policy',
             company_name: supp.company || 'Carrier Unspecified',
             policy_number: supp.member_id || 'N/A',
-            status: 'Active',
+            status: supp.status || '—',
             effective_date: supp.effective_date || null,
             expiration_date: null,
             premium: Number(supp.monthly_premium || 0),
             effectiveAddress,
             targetTab: 'supplemental' as any,
             updated_at: supp.updated_at || supp.created_at || new Date().toISOString(),
+          });
+        }
+      });
+    }
+
+    // 6. Medicare policies (when medicare module is enabled for agent)
+    if (isLineEnabled('medicare')) {
+      (medicarePoliciesOverview || []).forEach((med: any) => {
+        if (med.renewal_status === 'Cancelled' || med.renewal_status === 'Terminated') return;
+        if (med.company || med.plan_name || med.mbi) {
+          const effectiveAddress = resolvePolicyAddress(
+            null,
+            residenceInfo,
+            client
+          );
+          cards.push({
+            id: med.id || `med_${clientId}`,
+            businessLine: 'health', // compatible tag for policy badge styling
+            businessLineLabel: 'Medicare',
+            policy_type: med.plan_name || med.part_c_subtype || 'Medicare Plan',
+            company_name: med.company || 'Medicare Carrier',
+            policy_number: med.plan_id || med.mbi || 'N/A',
+            status: med.renewal_status || '—',
+            effective_date: med.plan_effective_date || med.part_b_effective_date || med.part_a_effective_date || null,
+            expiration_date: null,
+            premium: 0,
+            effectiveAddress,
+            targetTab: 'medicare' as any,
+            updated_at: med.updated_at || med.created_at || new Date().toISOString(),
           });
         }
       });
@@ -1665,16 +1737,15 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
     }
   }, [clientId]);
 
-  // Fetch Health and Life policies for Overview tab
+  // Fetch Health, Life, Supplemental, and Medicare policies for Overview tab
   const fetchOverviewPolicies = useCallback(async () => {
     if (!isValidUuid(clientId)) return;
     try {
-      const [healthRes, lifeRes, suppRes] = await Promise.all([
+      const [healthRes, lifeRes, suppRes, medRes] = await Promise.all([
         supabase
           .from('health_policies')
           .select('*')
           .eq('client_id', clientId)
-          .eq('active', true)
           .order('created_at', { ascending: false }),
         supabase
           .from('life_policies')
@@ -1686,6 +1757,10 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
           .select('*')
           .eq('client_id', clientId)
           .order('created_at', { ascending: false }),
+        supabase
+          .from('client_medicare_information')
+          .select('*')
+          .eq('client_id', clientId),
       ]);
 
       if (healthRes.data) {
@@ -1696,6 +1771,9 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       }
       if (suppRes.data) {
         setSupplementalPolicies(suppRes.data);
+      }
+      if (medRes.data) {
+        setMedicarePoliciesOverview(medRes.data);
       }
     } catch (err) {
       console.error('Error fetching overview policies:', err);
@@ -2673,8 +2751,10 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
       fetchTimelineEvents();
     } else if (activeTab === 'personal-info') {
       fetchIncomeInformation();
+    } else if (activeTab === 'overview') {
+      fetchOverviewPolicies();
     }
-  }, [activeTab, clientId, fetchTimelineEvents, fetchIncomeInformation]);
+  }, [activeTab, clientId, fetchTimelineEvents, fetchIncomeInformation, fetchOverviewPolicies]);
 
   const cleanCoApplicantPayload = (form: CoApplicantInformation) => {
     const cleaned = { ...form } as any;
@@ -3801,10 +3881,12 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                     </span>
                                     <span
                                       className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                                        card.status === 'Active'
+                                        card.status === 'Active' || card.status === 'Enrolled' || card.status === 'Sold'
                                           ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
                                           : card.status === 'Cancelled'
                                           ? 'bg-rose-50 text-rose-700 border border-rose-100'
+                                          : card.status === '—'
+                                          ? 'bg-slate-50 text-slate-600 border border-slate-200'
                                           : 'bg-amber-50 text-amber-700 border border-amber-100'
                                       }`}
                                     >
@@ -5327,10 +5409,10 @@ function ClientProfileContent({ params }: { params: Promise<{ id: string }> }) {
                                       className="bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 text-xs outline-none focus:border-blue-500"
                                     >
                                       {availableHealthPolicies.map(p => {
-                                        const isPolActive = p.active === true && p.policy_status === 'Active';
+                                        const isPolActive = p.active === true || p.policy_status === 'Active' || p.policy_status === 'Enrolled' || p.policy_status === 'Sold';
                                         return (
                                           <option key={p.id} value={p.id}>
-                                            {p.year_renovation ? `Year ${p.year_renovation}` : 'Coverage'} — {p.company_2026 || p.plan_name || 'Health Policy'} ({isPolActive ? 'Active' : p.policy_status || 'Inactive'})
+                                            {p.year_renovation ? `Year ${p.year_renovation}` : 'Coverage'} — {p.company_2026 || p.plan_name || 'Health Policy'} ({p.policy_status || (p.active ? 'Active' : 'Inactive')})
                                           </option>
                                         );
                                       })}

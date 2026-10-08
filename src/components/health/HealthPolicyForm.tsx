@@ -39,6 +39,7 @@ import { MarketplacePlanPreview, MarketplaceClientContext } from '@/lib/marketpl
 import { transformHouseholdToMarketplacePeople } from '@/lib/marketplace/people-helper';
 import { saveMarketplacePlanSnapshot, fetchLatestMarketplaceSnapshot } from '@/lib/marketplace/snapshot-service';
 import { fetchAgentNpns, AgentNpn, formatAgentNpnLabel } from '@/lib/agent/agent-npn-service';
+import { getInMemoryHouseholdDraft, clearInMemoryHouseholdDraft } from '@/lib/health/household-draft-store';
 
 // Helper to calculate age dynamically from DOB string without timezone offset
 const calculateAgeFromDob = (dobStr: string | null | undefined): string => {
@@ -497,7 +498,31 @@ export default function HealthPolicyForm({
         // Default reset or restore transferred household draft from Personal Info
         let initialDraftCount = 1;
         const initialDraftMembers: { [key: number]: HealthTaxHouseholdMember } = {};
-        if (typeof window !== 'undefined' && clientId) {
+        const memoryDraft = clientId ? getInMemoryHouseholdDraft(clientId) : null;
+        if (memoryDraft && typeof memoryDraft.taxMemberCount === 'number') {
+          initialDraftCount = Math.max(1, memoryDraft.taxMemberCount);
+          if (Array.isArray(memoryDraft.members)) {
+            memoryDraft.members.forEach((m: any) => {
+              if (m && m.member_number) {
+                initialDraftMembers[m.member_number] = {
+                  health_policy_id: '',
+                  member_number: m.member_number,
+                  coverage: m.coverage !== false,
+                  full_name: m.full_name || '',
+                  date_of_birth: m.date_of_birth || null,
+                  relationship_to_applicant: m.relationship_to_applicant || 'Son',
+                  gender: m.gender || '',
+                  us_citizen: m.us_citizen !== false,
+                  uses_tobacco: !!m.uses_tobacco,
+                  annual_income: m.annual_income || 0,
+                  immigration_status: m.immigration_status || '',
+                  ssn_encrypted: m.ssn_encrypted || m.ssn || null,
+                  has_ssn: !!(m.ssn_encrypted || m.ssn)
+                };
+              }
+            });
+          }
+        } else if (typeof window !== 'undefined' && clientId) {
           try {
             const rawDraft = sessionStorage.getItem(`health_household_draft_${clientId}`);
             if (rawDraft) {
@@ -1072,6 +1097,9 @@ export default function HealthPolicyForm({
       });
 
       onSaved(savedPolicy);
+      if (clientId) {
+        clearInMemoryHouseholdDraft(clientId);
+      }
       if (typeof window !== 'undefined') {
         try {
           sessionStorage.removeItem(`health_household_draft_${clientId}`);

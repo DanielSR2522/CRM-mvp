@@ -117,7 +117,7 @@ export default function HealthSummary({
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-sans">Health Policy Summary</span>
           <div className="flex items-center gap-3 mt-1">
             <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-              policy.policy_status === 'Active'
+              policy.policy_status === 'Active' || policy.policy_status === 'Enrolled' || policy.policy_status === 'Sold'
                 ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
                 : policy.policy_status === 'Cancelled'
                 ? 'bg-rose-50 text-rose-700 border-rose-100'
@@ -141,7 +141,7 @@ export default function HealthSummary({
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-4 text-xs font-sans">
         <div>
-          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">ENROLLED</span>
+          <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">ACTIVE</span>
           <span className="font-semibold text-slate-800 mt-1 block">{policy.active ? 'Yes' : 'No'}</span>
         </div>
 
@@ -177,7 +177,7 @@ export default function HealthSummary({
               title="Click to change Policy Status"
             >
               <span className={`font-bold ${
-                policy.policy_status === 'Active'
+                policy.policy_status === 'Active' || policy.policy_status === 'Enrolled' || policy.policy_status === 'Sold'
                   ? 'text-emerald-600'
                   : policy.policy_status === 'Cancelled'
                   ? 'text-rose-600'

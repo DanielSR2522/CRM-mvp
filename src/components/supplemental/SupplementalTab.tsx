@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import HealthClientHeader, { ClientProfileNavTabs } from '@/components/health/HealthClientHeader';
 import SupplementalLeftRail from './SupplementalLeftRail';
 import SupplementalPolicyList from './SupplementalPolicyList';
@@ -41,6 +42,9 @@ export default function SupplementalTab({
   currentUserId = null,
   onPolicyDeleted,
 }: Props) {
+  const searchParams = useSearchParams();
+  const isActionNew = searchParams ? searchParams.get('action') === 'new' : false;
+
   // Navigation State: SUMMARY | DOCUMENTS | NOTES | TIMELINE | LINKS
   const [activeSubtab, setActiveSubtab] = useState<'summary' | 'documents' | 'notes' | 'timeline' | 'links'>(
     (initialSubtab as any) || 'summary'
@@ -55,6 +59,14 @@ export default function SupplementalTab({
   // Policy Modal Control State
   const [isPolicyModalOpen, setIsPolicyModalOpen] = useState(false);
   const [policyToEdit, setPolicyToEdit] = useState<SupplementalPolicy | null>(null);
+
+  // Auto-open modal if action=new
+  useEffect(() => {
+    if (isActionNew) {
+      setPolicyToEdit(null);
+      setIsPolicyModalOpen(true);
+    }
+  }, [isActionNew]);
 
   // Delete Confirm Modal State
   const [policyToDelete, setPolicyToDelete] = useState<SupplementalPolicy | null>(null);

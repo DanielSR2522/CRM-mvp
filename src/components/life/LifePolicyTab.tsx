@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import HealthClientHeader, { ClientProfileNavTabs } from '@/components/health/HealthClientHeader';
 import LifeLeftRail from './LifeLeftRail';
 import LifePolicyCard, { LifePolicy } from './LifePolicyCard';
@@ -35,6 +36,10 @@ export default function LifePolicyTab({
   currentUserId = null,
   onPoliciesChanged,
 }: LifePolicyTabProps) {
+  const searchParams = useSearchParams();
+  const isActionNew = searchParams ? searchParams.get('action') === 'new' : false;
+  const autoCreatedRef = useRef(false);
+
   // Navigation State: SUMMARY | DOCUMENTS | NOTES | TIMELINE | LINKS
   const [activeSubtab, setActiveSubtab] = useState<'summary' | 'documents' | 'notes' | 'timeline' | 'links'>(
     (initialSubtab as any) || 'summary'
@@ -55,13 +60,43 @@ export default function LifePolicyTab({
         .order('created_at', { ascending: true });
 
       if (error) throw error;
-      setPolicies(data || []);
+      const loaded = data || [];
+      setPolicies(loaded);
+
+      // Auto-create initial policy if action=new and none exist
+      if (isActionNew && loaded.length === 0 && !autoCreatedRef.current) {
+        autoCreatedRef.current = true;
+        const { data: newPol, error: newErr } = await supabase
+          .from('life_policies')
+          .insert({
+            client_id: clientId,
+            status: 'Active',
+          })
+          .select('*')
+          .single();
+
+        if (!newErr && newPol) {
+          await supabase.from('life_policy_timeline_events').insert({
+            life_policy_id: newPol.id,
+            title: 'Life Policy Created',
+            description: 'New Life Policy record initialized',
+            event_type: 'policy_created',
+          });
+          const { data: refreshed } = await supabase
+            .from('life_policies')
+            .select('*')
+            .eq('client_id', clientId)
+            .order('created_at', { ascending: true });
+          setPolicies(refreshed || []);
+          if (onPoliciesChanged) onPoliciesChanged();
+        }
+      }
     } catch (err) {
       console.error('Failed to load life policies:', err);
     } finally {
       setLoading(false);
     }
-  }, [clientId]);
+  }, [clientId, isActionNew, onPoliciesChanged]);
 
   useEffect(() => {
     loadPolicies();
