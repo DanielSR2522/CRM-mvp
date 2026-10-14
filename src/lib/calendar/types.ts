@@ -36,9 +36,22 @@ export interface PolicyExpirationItem {
   };
 }
 
+export interface CalendlyInviteeSummary {
+  name: string;
+  email: string;
+  status?: string;
+}
+
+export interface AmbiguousClientMatchInfo {
+  id: string;
+  full_name: string;
+  email: string | null;
+}
+
 export interface ExtendedCalendarEventProps {
   eventType: 'appointment' | 'policy_expiration';
   appointmentId?: string;
+  title?: string;
   description?: string | null;
   location?: string | null;
   startsAt?: string;
@@ -51,4 +64,14 @@ export interface ExtendedCalendarEventProps {
   expirationDate?: string;
   clientId?: string | null;
   clientName?: string | null;
+  // Calendly & invitee identification fields
+  isCalendly?: boolean;
+  source?: 'Calendly' | 'CRM';
+  bookedBy?: string | null;
+  inviteeEmail?: string | null;
+  appointmentTypeName?: string | null;
+  invitees?: CalendlyInviteeSummary[];
+  clientMatchStatus?: 'matched' | 'unmatched' | 'ambiguous';
+  ambiguousClients?: AmbiguousClientMatchInfo[];
 }
+
